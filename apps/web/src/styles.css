@@ -1771,15 +1771,15 @@ h1 .badge {
   margin-top: 4px;
 }
 
-/* Complicaciones que propone la IA bajo una tirada: solo las ve el máster. */
-.complications {
+/* Ideas que propone la IA al máster, bajo una tirada o bajo lo que enseña: solo las ve él. */
+.ai-ideas {
   display: grid;
   gap: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--line);
 }
 
-.complications .link-button {
+.ai-ideas .link-button {
   justify-self: start;
 }
 

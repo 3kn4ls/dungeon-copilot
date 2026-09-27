@@ -651,6 +651,68 @@ export function complicationMessages(prompt: ComplicationPrompt): AiMessage[] {
   ];
 }
 
+const IDEA_HINT_CHARS = 300;
+/** PNJ de la campaña que se le dan a la IA para que pueda sacarlos. */
+export const IDEA_NPCS = 12;
+const NPC_CONCEPT_CHARS = 120;
+
+/** Un PNJ de la campaña, contado en una línea. */
+export interface PromptNpcLine {
+  name: string;
+  concept: string;
+}
+
+export interface IdeasPrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  /** Resúmenes de las partidas anteriores, de la más antigua a la más reciente. */
+  recaps: PromptRecap[];
+  npcs: PromptNpcLine[];
+  /** Lo último que ha enseñado el máster, de lo más antiguo a lo más reciente. */
+  scenes: PromptScene[];
+  /** Lo que busca el máster, si lo dice. */
+  hint: string;
+}
+
+/** Mensajes para que el modelo proponga qué puede pasar ahora, cuando la mesa se atasca. */
+export function ideaMessages(prompt: IdeasPrompt): AiMessage[] {
+  const system = [
+    'Ayudas a un máster de rol a improvisar cuando la partida se atasca. Propones tres cosas que pueden pasar ahora en la escena, en español.',
+    [
+      '- Que sean distintas: por ejemplo, un encuentro (alguien o algo aparece), un rumor o una pista (algo que los personajes oyen, ven o descubren) y un giro (la situación cambia).',
+      '- Si el máster dice lo que busca, las tres van por ahí.',
+      '- Cada una, en una o dos frases, contada como algo que pasa y lista para que el máster la narre. Sin etiquetas delante.',
+      '- Que encajen con la escena, la ambientación y lo que ha pasado en la campaña. Pueden salir PNJ de la campaña.',
+      '- Que den a los jugadores algo que hacer o decidir, sin resolverlo por ellos. No decidas lo que hacen, dicen o sienten los personajes de los jugadores.',
+      '- Responde solo con un JSON así: {"ideas": ["…", "…", "…"]}',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const party = partyLines(prompt.characters);
+  const npcs = prompt.npcs
+    .slice(0, IDEA_NPCS)
+    .map((npc) =>
+      npc.concept.trim()
+        ? `- ${npc.name}: ${fit(npc.concept, NPC_CONCEPT_CHARS)}`
+        : `- ${npc.name}`,
+    );
+  const hint = fit(prompt.hint, IDEA_HINT_CHARS);
+  const user = [
+    campaignBlock(prompt.campaign),
+    memoryBlock(prompt.recaps, 'Lo que ha pasado en la campaña hasta ahora:'),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    npcs.length > 0 ? `PNJ de la campaña:\n${npcs.join('\n')}` : '',
+    scenesBlock(prompt.scenes),
+    hint ? `Lo que busca el máster: ${hint}` : '',
+    'Propón tres cosas que pueden pasar ahora.',
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
 /**
  * Las ideas ya terminadas de un JSON {"ideas": ["…", "…"]} a medio escribir, en orden: cada
  * una aparece cuando se cierran sus comillas.
@@ -676,13 +738,22 @@ export function partialIdeas(text: string): string[] {
   }
 }
 
-/** Una idea en una línea, sin numeración, viñetas ni negritas. */
-const cleanIdea = (idea: string) =>
-  idea
+/** La etiqueta que a veces pone el modelo delante de una idea: «Encuentro:», «Giro:», «Idea 2:». */
+const IDEA_LABEL =
+  /^(?:encuentro|rumor|pista|giro|precio|peligro|complicaci[oó]n|idea|opci[oó]n)(?:\s+\d+)?\s*:\s*/i;
+
+/** Una idea en una línea, sin numeración, viñetas, etiquetas ni negritas. */
+function cleanIdea(idea: string): string {
+  const text = idea
     .replace(/\*\*|__/g, '')
     .replace(/\s+/g, ' ')
+    .trim()
     .replace(/^(?:\d+[.)]|[-*•])\s*/, '')
+    .replace(IDEA_LABEL, '')
     .trim();
+  // Sin la etiqueta, puede quedar en minúscula: «Giro: se apagan las velas».
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 /** Una línea de lista («1. …», «- …»), por si el modelo no ha respondido en JSON. */
 const LIST_ITEM = /^\s*(?:\d+[.)]|[-*•])\s+\S/;

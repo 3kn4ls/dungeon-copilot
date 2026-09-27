@@ -10,6 +10,7 @@ import {
   complicationMessages,
   fit,
   hasLog,
+  ideaMessages,
   npcGenerationMessages,
   parseNpcDraft,
   partialIdeas,
@@ -547,5 +548,70 @@ describe('complicaciones de una tirada', () => {
     );
     expect(cleanIdeas('{"ideas": []}')).toBe('');
     expect(cleanIdeas('No sé qué decir.')).toBe('');
+  });
+});
+
+describe('ideas para cuando la mesa se atasca', () => {
+  it('pide tres cosas que pueden pasar, con la memoria de la campaña, sus PNJ y la escena', () => {
+    const [system, user] = ideaMessages({
+      campaign,
+      characters: [{ name: 'Kael', background: 'Acróbata' }],
+      recaps: [{ number: 2, title: 'La cripta', recap: 'Kael robó el cáliz del rey muerto.' }],
+      npcs: [
+        { name: 'Brunilda', concept: 'Posadera del Ciervo Blanco' },
+        { name: 'El Tuerto', concept: ' ' },
+      ],
+      scenes: [{ title: 'El Ciervo Blanco', body: 'Humo, estofado y un bardo que desafina.' }],
+      hint: ' algo que les meta prisa ',
+    });
+    expect(system?.content).toContain('un encuentro');
+    expect(system?.content).toContain('un rumor o una pista');
+    expect(system?.content).toContain('un giro');
+    expect(system?.content).toContain('{"ideas": ["…", "…", "…"]}');
+    expect(user?.content).toBe(
+      [
+        `La campaña se llama «La Marca del Este». De qué va:\n${campaign.description}`,
+        'Lo que ha pasado en la campaña hasta ahora:',
+        'Partida 2, «La cripta»:\nKael robó el cáliz del rey muerto.',
+        'Personajes de los jugadores:\n- Kael: Acróbata',
+        'PNJ de la campaña:\n- Brunilda: Posadera del Ciervo Blanco\n- El Tuerto',
+        'Lo último que el máster ha enseñado a la mesa, de lo más antiguo a lo más reciente:\nEl Ciervo Blanco\nHumo, estofado y un bardo que desafina.',
+        'Lo que busca el máster: algo que les meta prisa',
+        'Propón tres cosas que pueden pasar ahora.',
+      ].join('\n\n'),
+    );
+  });
+
+  it('sin nada más que la campaña, pide igual', () => {
+    const [, user] = ideaMessages({
+      campaign,
+      characters: [],
+      recaps: [],
+      npcs: [],
+      scenes: [],
+      hint: '',
+    });
+    expect(user?.content).toBe(
+      [
+        `La campaña se llama «La Marca del Este». De qué va:\n${campaign.description}`,
+        'Propón tres cosas que pueden pasar ahora.',
+      ].join('\n\n'),
+    );
+  });
+
+  it('quita las etiquetas que pone el modelo, pero no una frase que empieza igual', () => {
+    const json = JSON.stringify({
+      ideas: [
+        'Encuentro: un mensajero pregunta por Kael.',
+        '**Giro:** se apagan las velas.',
+        'Idea 3: llueve.',
+        'Un rumor corre por la sala: el conde ha muerto.',
+      ],
+    });
+    expect(cleanIdeas(json)).toBe('Un mensajero pregunta por Kael.\nSe apagan las velas.\nLlueve.');
+    expect(cleanIdeas('{"ideas": ["Pista 2: huellas de barro.", "Rumor corre: nada."]}')).toBe(
+      'Huellas de barro.\nRumor corre: nada.',
+    );
+    expect(visibleIdeas('{"ideas": ["Precio: pierdes la bolsa."')).toBe('Pierdes la bolsa.\n');
   });
 });

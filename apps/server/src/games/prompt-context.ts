@@ -1,7 +1,13 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import type { PromptCampaign, PromptCharacter, PromptScene } from '../ai/prompts';
+import {
+  IDEA_NPCS,
+  type PromptCampaign,
+  type PromptCharacter,
+  type PromptNpcLine,
+  type PromptScene,
+} from '../ai/prompts';
 import type { Executor } from '../db';
-import { campaigns, characters, gameEvents } from '../db/schema';
+import { campaigns, characters, gameEvents, npcs } from '../db/schema';
 
 /** Lo que la IA sabe de una campaña: de qué va y quién juega. Undefined si ya no existe. */
 export async function findCampaignContext(
@@ -19,6 +25,20 @@ export async function findCampaignContext(
     .where(eq(characters.campaignId, campaignId))
     .orderBy(asc(characters.createdAt));
   return { campaign, characters: party };
+}
+
+/** Los PNJ de una campaña en una línea, primero los que el máster ha tocado hace menos. */
+export async function findNpcLines(
+  db: Executor,
+  campaignId: string,
+  limit = IDEA_NPCS,
+): Promise<PromptNpcLine[]> {
+  return db
+    .select({ name: npcs.name, concept: npcs.concept })
+    .from(npcs)
+    .where(eq(npcs.campaignId, campaignId))
+    .orderBy(desc(npcs.updatedAt))
+    .limit(limit);
 }
 
 /**

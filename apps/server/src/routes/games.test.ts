@@ -152,7 +152,7 @@ describe('resumen sin IA', () => {
 });
 
 describe('ayuda para narrar sin IA', () => {
-  it('describir una escena o proponer complicaciones avisa de que no está configurada', async () => {
+  it('describir, proponer complicaciones o pedir ideas avisa de que no está configurada', async () => {
     const { master, campaign, kael } = await table();
     const { url } = await openGame(master, campaign.id);
     loadDice(1, 4);
@@ -165,6 +165,7 @@ describe('ayuda para narrar sin IA', () => {
     for (const response of [
       await master.post(`${url}/reveals/draft`, { notes: 'Una posada' }),
       await master.post(`${url}/rolls/${roll.json().event.id}/complications`, {}),
+      await master.post(`${url}/ideas`, {}),
     ]) {
       expect(response.statusCode).toBe(503);
       expect(response.json().error).toBe(

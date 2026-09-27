@@ -93,6 +93,7 @@ export function ConfirmButton(props: {
   confirmLabel: string;
   onConfirm: () => void;
   disabled?: boolean;
+  small?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
 
@@ -105,7 +106,7 @@ export function ConfirmButton(props: {
   return (
     <button
       type="button"
-      className={armed ? 'button danger' : 'button'}
+      className={['button', props.small && 'small', armed && 'danger'].filter(Boolean).join(' ')}
       disabled={props.disabled}
       onClick={() => {
         if (armed) {

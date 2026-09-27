@@ -102,6 +102,14 @@ export const complicationsSchema = z.object({
 
 export type ComplicationsRequest = z.input<typeof complicationsSchema>;
 
+/** Para que la IA proponga qué puede pasar ahora en la escena, cuando la mesa se atasca. */
+export const ideasSchema = z.object({
+  /** Lo que busca el máster, si lo sabe: "algo que les meta prisa". */
+  hint: z.string().trim().max(300, 'No puede pasar de 300 caracteres').default(''),
+});
+
+export type IdeasRequest = z.input<typeof ideasSchema>;
+
 export const noteSchema = z.object({
   text: z
     .string()

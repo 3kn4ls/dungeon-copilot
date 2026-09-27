@@ -303,7 +303,7 @@ describe('la IA propone complicaciones', () => {
     expect(ollama.requests).toHaveLength(0);
   });
 
-  it('solo las pide el máster, con la partida en juego', async () => {
+  it('solo las pide el máster, con la partida en juego (complicaciones)', async () => {
     const { master, ana, campaign, kael: sheet } = await table();
     const url = await openGame(master, campaign.id);
     const roll = await rollKael(master, url, sheet.id, [1, 4]);
@@ -319,6 +319,103 @@ describe('la IA propone complicaciones', () => {
     ]);
     await master.post(`${url}/close`, {});
     const closed = await master.post(complications, {});
+    expect(closed.statusCode).toBe(409);
+    expect(closed.json().error).toBe('La partida ya ha terminado');
+    expect(ollama.requests).toHaveLength(0);
+  });
+});
+
+describe('la IA propone qué puede pasar ahora', () => {
+  it('da tres ideas con la campaña, sus PNJ, lo último que pasó y lo que busca el máster', async () => {
+    const { master, campaign } = await table();
+    const first = await openGame(master, campaign.id);
+    await master.post(`${first}/close`, {});
+    await master.put(`${first}/recap`, { recap: 'Kael salvó a la hija del molinero.' });
+    for (const npc of [
+      { name: 'Brunilda', concept: 'Posadera del Ciervo Blanco, lo sabe todo del pueblo' },
+      { name: 'El Tuerto' },
+    ]) {
+      await master.post(`/api/campaigns/${campaign.id}/npcs`, npc);
+    }
+    const url = await openGame(master, campaign.id);
+    await master.post(`${url}/reveals`, { title: 'El camino', body: 'Llueve sin parar.' });
+    await master.post(`${url}/reveals`, {
+      title: 'El Ciervo Blanco',
+      body: 'Humo, estofado y un bardo que desafina.',
+    });
+    await master.post(`${url}/notes`, { text: 'El bardo es un espía del conde' });
+    const before = await eventsOf(master, url);
+
+    ollama.queue({
+      kind: 'chunks',
+      chunks: [
+        '{"ideas": ["Encuentro: un mensajero',
+        ' empapado pregunta por Kael.", "**Rumor:** el molino ',
+        'arde.", "Un rumor corre por la sala',
+        ': el conde ha muerto."]}',
+      ],
+    });
+    const response = await master.post(`${url}/ideas`, { hint: 'algo que les meta prisa' });
+    expect(response.statusCode).toBe(200);
+    // Sin las etiquetas que a veces pone el modelo, pero sin tocar una frase que empieza igual.
+    expect(chunksOf(response.body)).toEqual([
+      { type: 'delta', text: 'Un mensajero empapado pregunta por Kael.\n' },
+      { type: 'delta', text: 'El molino arde.\n' },
+      { type: 'delta', text: 'Un rumor corre por la sala: el conde ha muerto.\n' },
+      {
+        type: 'done',
+        text: 'Un mensajero empapado pregunta por Kael.\nEl molino arde.\nUn rumor corre por la sala: el conde ha muerto.',
+      },
+    ]);
+
+    expect(ollama.requests[0]?.body).toMatchObject({
+      stream: true,
+      format: IDEAS_FORMAT,
+      options: { temperature: 0.9, num_predict: 450 },
+    });
+    const { system, user } = lastPrompt();
+    expect(system).toContain('improvisar cuando la partida se atasca');
+    expect(user).toContain('Fantasía de frontera');
+    expect(user).toContain('Partida 1:\nKael salvó a la hija del molinero.');
+    expect(user).toContain('- Kael: Mercenario de la Compañía Libre');
+    expect(user).toContain(
+      'PNJ de la campaña:\n- El Tuerto\n- Brunilda: Posadera del Ciervo Blanco, lo sabe todo del pueblo',
+    );
+    expect(user).toContain(
+      'El camino\nLlueve sin parar.\n\nEl Ciervo Blanco\nHumo, estofado y un bardo que desafina.',
+    );
+    expect(user).not.toContain('espía');
+    expect(user).toContain('Lo que busca el máster: algo que les meta prisa');
+    expect(await eventsOf(master, url)).toEqual(before);
+  });
+
+  it('en una partida recién empezada, sin nada que contar, también', async () => {
+    const { master, campaign } = await table();
+    const url = await openGame(master, campaign.id);
+    ollama.queue({ kind: 'chunks', chunks: ['{"ideas": ["Llaman a la puerta."]}'] });
+    const response = await master.post(`${url}/ideas`, {});
+    expect(chunksOf(response.body).at(-1)).toEqual({ type: 'done', text: 'Llaman a la puerta.' });
+    const { user } = lastPrompt();
+    expect(user).not.toContain('PNJ de la campaña');
+    expect(user).not.toContain('Lo que ha pasado en la campaña');
+    expect(user).not.toContain('Lo que busca el máster');
+  });
+
+  it('solo las pide el máster, con la partida en juego (ideas)', async () => {
+    const { master, ana, campaign } = await table();
+    const url = await openGame(master, campaign.id);
+    const stranger = await t.register('intrusa');
+
+    expect((await ana.post(`${url}/ideas`, {})).statusCode).toBe(403);
+    expect((await stranger.post(`${url}/ideas`, {})).statusCode).toBe(404);
+    expect((await t.anonymous().post(`${url}/ideas`, {})).statusCode).toBe(401);
+    const long = await master.post(`${url}/ideas`, { hint: 'a'.repeat(301) });
+    expect(long.statusCode).toBe(400);
+    expect(long.json().issues).toEqual([
+      { path: 'hint', message: 'No puede pasar de 300 caracteres' },
+    ]);
+    await master.post(`${url}/close`, {});
+    const closed = await master.post(`${url}/ideas`, {});
     expect(closed.statusCode).toBe(409);
     expect(closed.json().error).toBe('La partida ya ha terminado');
     expect(ollama.requests).toHaveLength(0);

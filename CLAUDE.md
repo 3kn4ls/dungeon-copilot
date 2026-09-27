@@ -24,7 +24,7 @@ Los textos que la IA escribe en directo salen en NDJSON con `sendAiText` (`apps/
 
 Los PNJ son solo del máster: a un jugador de la campaña se le responde 403. La charla con un PNJ no escribe nada en la partida; solo la frase que el máster enseña a la mesa queda como evento.
 
-La ayuda para narrar (describir una escena a partir de unas notas y proponer complicaciones para una tirada) es del máster, solo con la partida abierta, y tampoco escribe nada: lo que enseñe va como un `reveal` más. Las complicaciones son para los resultados de `needsComplication` (éxito con coste, fallo y pifia). Estos prompts y el del PNJ reciben las últimas escenas enseñadas (`findScenes`).
+La ayuda para narrar (describir una escena a partir de unas notas, proponer complicaciones para una tirada e ideas para cuando la mesa se atasca) es del máster, solo con la partida abierta, y tampoco escribe nada: lo que enseñe va como un `reveal` más. Las complicaciones son para los resultados de `needsComplication` (éxito con coste, fallo y pifia). Estos prompts y el del PNJ reciben las últimas escenas enseñadas (`findScenes`); el de las ideas, además, los PNJ de la campaña sin lo que ocultan (`findNpcLines`).
 
 El resumen de una partida terminada no es un evento: vive en `games.recap`, lo guarda el máster y es público. Los resúmenes son la memoria de la campaña: los prompts de los PNJ reciben los últimos (`findRecaps`). Al resumen solo llegan las notas del máster si él quiere, y nunca las tiradas secretas.
 

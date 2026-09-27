@@ -33,12 +33,13 @@ import {
   type RollSideRequest,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
 import { Complications } from '../components/Complications';
 import { EventCard } from '../components/GameEvents';
+import { AiIdeas } from '../components/Ideas';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
 import { RecapPanel } from '../components/Recap';
@@ -192,6 +193,8 @@ type Action = 'roll' | 'reveal' | 'talk' | 'note';
 function Actions({ state }: { state: GameState }) {
   const [action, setAction] = useState<Action>('reveal');
   if (state.game.role !== 'master') return <RollForm game={state.game} />;
+  // Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo que se
+  // estaba escribiendo ni las ideas de la IA.
   return (
     <section className="panel" aria-label="Acciones del máster">
       <Segmented
@@ -205,15 +208,21 @@ function Actions({ state }: { state: GameState }) {
         ]}
         onChange={setAction}
       />
-      {action === 'reveal' && (
+      <div hidden={action !== 'reveal'}>
         <RevealForm
           game={state.game}
           starting={!state.events.some((event) => event.kind === 'reveal')}
         />
-      )}
-      {action === 'talk' && <TalkPanel game={state.game} />}
-      {action === 'roll' && <RollForm game={state.game} embedded />}
-      {action === 'note' && <NoteForm gameId={state.game.id} />}
+      </div>
+      <div hidden={action !== 'talk'}>
+        <TalkPanel game={state.game} />
+      </div>
+      <div hidden={action !== 'roll'}>
+        <RollForm game={state.game} embedded />
+      </div>
+      <div hidden={action !== 'note'}>
+        <NoteForm gameId={state.game.id} />
+      </div>
     </section>
   );
 }
@@ -235,12 +244,13 @@ function recallTitle(previous: GameSummary, game: GameDetail): string {
 
 /**
  * Lo que el máster enseña a la mesa. Con IA, puede escribir solo unas notas y pedir que las
- * convierta en una descripción. Con `starting`, aún no se ha enseñado nada: se ofrece
- * recordar la partida anterior.
+ * convierta en una descripción, o pedir ideas de lo que puede pasar si la mesa se atasca.
+ * Con `starting`, aún no se ha enseñado nada: se ofrece recordar la partida anterior.
  */
 function RevealForm({ game, starting }: { game: GameDetail; starting: boolean }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const bodyField = useRef<HTMLTextAreaElement>(null);
   /** Las notas que la IA ha convertido en descripción; null si no ha descrito nada. */
   const [notes, setNotes] = useState<string | null>(null);
   /** La última descripción de la IA, para saber si el máster la ha retocado. */
@@ -277,116 +287,142 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
   }
 
   return (
-    <form
-      className="stack tight"
-      onSubmit={(event) => {
-        event.preventDefault();
-        reveal.mutate();
-      }}
-    >
-      <p className="muted">Lo que escribas aparece al momento en la sala y en la pantalla.</p>
-      {recall && (
-        <div className="recall">
-          <p>¿Empezáis? Recuerda a la mesa lo que pasó en {gameName(recall)}.</p>
-          <button
-            type="button"
-            className="button small"
-            onClick={() => {
-              setTitle(recallTitle(recall, game));
-              setBody(recall.recap);
-            }}
-          >
-            Recordar la partida anterior
-          </button>
-        </div>
-      )}
-      <label className="field">
-        <span className="field-label">Título (opcional)</span>
-        <input
-          value={title}
-          maxLength={120}
-          placeholder="La posada del Ciervo Blanco"
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
-      <label className="field">
-        <span className="field-label">Qué ven, oyen o encuentran</span>
-        <textarea
-          required
-          rows={5}
-          maxLength={5000}
-          value={writer.writing ? writer.pending || 'Escribiendo…' : body}
-          readOnly={writer.writing}
-          aria-busy={writer.writing}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        {aiEnabled && notes === null && (
-          <span className="hint">
-            Puedes escribir solo unas notas y pedir a la IA que las describa. Entre corchetes, lo
-            que debe saber pero no contar.
-          </span>
-        )}
-      </label>
-      {aiEnabled && (
-        <div className="actions">
-          {/* Botones distintos (key): el de Parar no debe heredar el clic que empieza. */}
-          {writer.writing ? (
-            <button key="stop" type="button" className="button" onClick={writer.stop}>
-              Parar
-            </button>
-          ) : notes === null ? (
-            <button
-              key="describe"
-              type="button"
-              className="button"
-              disabled={!body.trim() && !title.trim()}
-              onClick={() => void describe(body)}
-            >
-              Describir con IA
-            </button>
-          ) : (
-            <>
-              {body === described ? (
-                <button
-                  key="again"
-                  type="button"
-                  className="button"
-                  onClick={() => void describe(notes)}
-                >
-                  Otra versión
-                </button>
-              ) : (
-                <ConfirmButton
-                  key="again-confirm"
-                  confirmLabel="¿Cambiar lo retocado por otra versión?"
-                  onConfirm={() => void describe(notes)}
-                >
-                  Otra versión
-                </ConfirmButton>
-              )}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => {
-                  setBody(notes);
-                  setNotes(null);
-                }}
-              >
-                Volver a mis notas
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      <ErrorNote error={reveal.error ?? writer.error} />
-      <button
-        type="submit"
-        className="button primary"
-        disabled={reveal.isPending || writer.writing}
+    <div className="stack tight">
+      <form
+        className="stack tight"
+        onSubmit={(event) => {
+          event.preventDefault();
+          reveal.mutate();
+        }}
       >
-        Enseñar a la mesa
-      </button>
-    </form>
+        <p className="muted">Lo que escribas aparece al momento en la sala y en la pantalla.</p>
+        {recall && (
+          <div className="recall">
+            <p>¿Empezáis? Recuerda a la mesa lo que pasó en {gameName(recall)}.</p>
+            <button
+              type="button"
+              className="button small"
+              onClick={() => {
+                setTitle(recallTitle(recall, game));
+                setBody(recall.recap);
+              }}
+            >
+              Recordar la partida anterior
+            </button>
+          </div>
+        )}
+        <label className="field">
+          <span className="field-label">Título (opcional)</span>
+          <input
+            value={title}
+            maxLength={120}
+            placeholder="La posada del Ciervo Blanco"
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">Qué ven, oyen o encuentran</span>
+          <textarea
+            ref={bodyField}
+            required
+            rows={5}
+            maxLength={5000}
+            value={writer.writing ? writer.pending || 'Escribiendo…' : body}
+            readOnly={writer.writing}
+            aria-busy={writer.writing}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          {aiEnabled && notes === null && (
+            <span className="hint">
+              Puedes escribir solo unas notas y pedir a la IA que las describa. Entre corchetes, lo
+              que debe saber pero no contar.
+            </span>
+          )}
+        </label>
+        {aiEnabled && (
+          <div className="actions">
+            {/* Botones distintos (key): el de Parar no debe heredar el clic que empieza. */}
+            {writer.writing ? (
+              <button key="stop" type="button" className="button" onClick={writer.stop}>
+                Parar
+              </button>
+            ) : notes === null ? (
+              <button
+                key="describe"
+                type="button"
+                className="button"
+                disabled={!body.trim() && !title.trim()}
+                onClick={() => void describe(body)}
+              >
+                Describir con IA
+              </button>
+            ) : (
+              <>
+                {body === described ? (
+                  <button
+                    key="again"
+                    type="button"
+                    className="button"
+                    onClick={() => void describe(notes)}
+                  >
+                    Otra versión
+                  </button>
+                ) : (
+                  <ConfirmButton
+                    key="again-confirm"
+                    confirmLabel="¿Cambiar lo retocado por otra versión?"
+                    onConfirm={() => void describe(notes)}
+                  >
+                    Otra versión
+                  </ConfirmButton>
+                )}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => {
+                    setBody(notes);
+                    setNotes(null);
+                  }}
+                >
+                  Volver a mis notas
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        <ErrorNote error={reveal.error ?? writer.error} />
+        <button
+          type="submit"
+          className="button primary"
+          disabled={reveal.isPending || writer.writing}
+        >
+          Enseñar a la mesa
+        </button>
+      </form>
+      {aiEnabled && (
+        <AiIdeas
+          game={game}
+          openLabel="¿Qué puede pasar ahora? Pide ideas a la IA"
+          label="Ideas para seguir"
+          ideaLabel="Idea"
+          hint={{
+            label: 'Qué buscas, para afinar (opcional)',
+            placeholder: 'Algo que les meta prisa',
+          }}
+          ask={(hint, options) => api.ideas(game.id, { hint }, options)}
+          action={{
+            label: 'Describir',
+            // La descripción va al cuadro de arriba: si ya hay algo escrito, se pregunta.
+            confirm: body.trim() ? '¿Cambiar lo que hay en el cuadro?' : undefined,
+            disabled: writer.writing,
+            onClick: (idea) => {
+              bodyField.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              void describe(idea);
+            },
+          }}
+        />
+      )}
+    </div>
   );
 }
 

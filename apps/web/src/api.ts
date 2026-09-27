@@ -21,6 +21,7 @@ import type {
   GameState,
   GameSummary,
   GenerateNpcRequest,
+  IdeasRequest,
   JoinCampaignRequest,
   LoginRequest,
   MeResponse,
@@ -205,6 +206,9 @@ export const api = {
     body: ComplicationsRequest,
     options: AiTextOptions,
   ) => aiText(`/api/games/${id}/rolls/${eventId}/complications`, body, options),
+  /** La IA propone qué puede pasar ahora en la escena, una idea por línea, sin enseñarlas. */
+  ideas: (id: string, body: IdeasRequest, options: AiTextOptions) =>
+    aiText(`/api/games/${id}/ideas`, body, options),
   note: (id: string, body: NoteRequest) =>
     post<EventResponse>(`/api/games/${id}/notes`, body).then((r) => r.event),
   gameRoll: (id: string, body: GameRollRequest) =>
