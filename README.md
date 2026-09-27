@@ -10,6 +10,7 @@ Ahora mismo tiene:
 - Sala de partida: el máster abre una partida en la campaña y la mesa ve en vivo lo que enseña y las tiradas. Las tiradas de los personajes salen de su ficha (con la desventaja por heridas ya aplicada); el máster tira también por los PNJ, en abierto o en secreto, y guarda notas que solo ve él. Al abrir la partida todos recuperan la Suerte y al cerrarla ganan los PX de fin de sesión.
 - Pantalla de la mesa: un enlace secreto por campaña para una tele o una tablet, sin iniciar sesión. Enseña lo último revelado y las últimas tiradas, y pasa sola a la partida siguiente.
 - PNJ con IA: el máster guarda los PNJ de cada campaña con su aspecto, carácter, forma de hablar, lo que quieren y lo que ocultan. Ollama puede inventarlos o completar lo que falte, también en plena partida. En la sala, el máster cuenta lo que dicen o hacen los personajes, la IA responde como el PNJ y él decide qué frase enseña a la mesa, tal cual o retocada; también puede escribirla él.
+- Resumen de cada partida: al terminarla, la IA propone uno con el registro y con lo que el máster le cuente de lo que se jugó de palabra. El máster lo retoca (o lo escribe él) y lo lee toda la mesa, en la partida y en la campaña. Al empezar la siguiente, un botón lo enseña a la mesa y a la pantalla, y los PNJ recuerdan los resúmenes de las últimas partidas.
 - Un tirador de dados que resuelve las tiradas en el servidor. Desde la ficha se abre con el bonificador ya puesto.
 
 ## Requisitos
@@ -49,17 +50,17 @@ El servidor se configura con variables de entorno:
 
 ## IA
 
-La IA es opcional: sin `OLLAMA_URL` todo funciona igual, pero el máster escribe él mismo lo que dicen los PNJ. Con ella, el servidor habla con Ollama para dos cosas: inventar o completar la ficha de un PNJ, y responder como el PNJ en la sala, con la respuesta escrita poco a poco.
+La IA es opcional: sin `OLLAMA_URL` todo funciona igual, pero el máster escribe él mismo lo que dicen los PNJ y los resúmenes. Con ella, el servidor habla con Ollama para tres cosas: inventar o completar la ficha de un PNJ, responder como el PNJ en la sala y proponer el resumen de una partida terminada, estas dos con el texto escrito poco a poco.
 
-Vale cualquier Ollama al que llegue el servidor: el del cluster, otro servidor con GPU o los modelos en la nube de Ollama (`OLLAMA_URL=https://ollama.com` y la clave en `OLLAMA_API_KEY`). El modelo tiene que estar descargado (`ollama pull qwen2.5:7b`); si no, la web lo dice con el comando para descargarlo. Un modelo pequeño en una máquina lenta puede tardar: cada petición espera como mucho 3 minutos.
+Vale cualquier Ollama al que llegue el servidor: el del cluster, otro servidor con GPU o los modelos en la nube de Ollama (`OLLAMA_URL=https://ollama.com` y la clave en `OLLAMA_API_KEY`). El modelo tiene que estar descargado (`ollama pull qwen2.5:7b`); si no, la web lo dice con el comando para descargarlo. Un modelo pequeño en una máquina lenta puede tardar: cada petición espera como mucho 3 minutos, y 5 el resumen de una partida, que tiene que leerla entera.
 
-A Ollama le llega la ficha del PNJ, con lo que oculta, la descripción de la campaña, el nombre y trasfondo de los personajes y lo último que el máster ha enseñado a la mesa. Las notas del máster no salen nunca del servidor. La charla con el PNJ no se guarda en la base de datos: vive en el navegador del máster hasta que la borra o cierra la pestaña, y a la partida solo pasa la frase que enseña a la mesa.
+A Ollama le llega la ficha del PNJ, con lo que oculta, la descripción de la campaña, el nombre y trasfondo de los personajes, lo último que el máster ha enseñado a la mesa y los resúmenes de las tres últimas partidas. Para el resumen le llega además el registro de la partida, sin las tiradas secretas. Las notas del máster solo salen del servidor para escribir el resumen, y el máster puede dejarlas fuera. La charla con el PNJ no se guarda en la base de datos: vive en el navegador del máster hasta que la borra o cierra la pestaña, y a la partida solo pasa la frase que enseña a la mesa. Tampoco se guarda el resumen que propone la IA hasta que el máster lo acepta.
 
 ## Desplegar
 
 Cada cambio que entra en `main` publica la imagen `ghcr.io/3kn4ls/dungeon-copilot`, para amd64 y arm64, con el servidor y la web. Lleva dos etiquetas: `latest`, que es lo último de `main`, y `sha-…`, una por commit.
 
-La primera vez que se publica, GitHub crea el paquete como privado. Para que k3s pueda descargar la imagen sin credenciales, hazlo público desde la página del paquete (en el repositorio, a la derecha, en **Packages**): **Package settings** y después **Change visibility**.
+El paquete es público: k3s descarga la imagen sin credenciales. Si en un fork sale privado, hazlo público desde la página del paquete (en el repositorio, a la derecha, en **Packages**): **Package settings** y después **Change visibility**.
 
 ### Con Docker
 
@@ -145,6 +146,8 @@ Todo bajo `/api`, en JSON. Los errores responden `{ error, issues? }` con mensaj
 | `POST /games/:id/rolls`                   | Tirar en la partida con un personaje, o por un PNJ (el máster)                       |
 | `POST /games/:id/speeches`                | Enseñar a la mesa lo que dice un PNJ (el máster)                                     |
 | `POST /games/:id/close`                   | Terminar la partida (el máster)                                                      |
+| `PUT /games/:id/recap`                    | Guardar el resumen de una partida terminada, que ve toda la mesa (el máster)         |
+| `POST /games/:id/recap/draft`             | La IA propone el resumen, en NDJSON según lo escribe. No guarda nada (el máster)     |
 | `GET /screens/:token`, `/stream`          | Pantalla de la mesa: lo público de la última partida, sin sesión                     |
 | `POST /rolls`                             | Tirar dados. No necesita sesión                                                      |
 | `GET /ai`                                 | Si la IA está configurada y con qué modelo                                           |

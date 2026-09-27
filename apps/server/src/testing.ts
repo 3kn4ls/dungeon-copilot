@@ -11,7 +11,7 @@ import { openDatabase, type Database, type DatabaseHandle } from './db';
 export const TEST_PASSWORD_PARAMS = { N: 1024, r: 8, p: 1 };
 export const TEST_PASSWORD = 'contraseña-de-prueba';
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface TestClient {
   /** Cookie de sesión tal cual se envía en la cabecera, si hay sesión. */
@@ -19,6 +19,7 @@ export interface TestClient {
   request(method: Method, url: string, payload?: object): Promise<LightMyRequestResponse>;
   get(url: string): Promise<LightMyRequestResponse>;
   post(url: string, payload?: object): Promise<LightMyRequestResponse>;
+  put(url: string, payload: object): Promise<LightMyRequestResponse>;
   patch(url: string, payload: object): Promise<LightMyRequestResponse>;
   delete(url: string): Promise<LightMyRequestResponse>;
 }
@@ -34,6 +35,7 @@ export function createClient(app: FastifyInstance, cookie?: string): TestClient 
     },
     get: (url) => client.request('GET', url),
     post: (url, payload) => client.request('POST', url, payload),
+    put: (url, payload) => client.request('PUT', url, payload),
     patch: (url, payload) => client.request('PATCH', url, payload),
     delete: (url) => client.request('DELETE', url),
   };

@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream';
 import {
   generateNpcSchema,
   npcSchema,
@@ -6,11 +5,9 @@ import {
   updateNpcSchema,
   type NpcView,
   type PublicUser,
-  type TalkChunk,
 } from '@dungeon-copilot/shared';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { Ai } from '../ai/ollama';
+import type { FastifyInstance } from 'fastify';
 import {
   NPC_DRAFT_FORMAT,
   cleanReply,
@@ -20,9 +17,11 @@ import {
   talkMessages,
   type PromptScene,
 } from '../ai/prompts';
+import { abortWhenGone, requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
 import type { Executor } from '../db';
 import { campaignMembers, campaigns, characters, gameEvents, games, npcs } from '../db/schema';
+import { findRecaps } from '../games/recaps';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster } from './access';
 import { requireUser } from './auth';
@@ -34,8 +33,6 @@ interface IdParams {
 type NpcRow = typeof npcs.$inferSelect;
 
 const NPC_NOT_FOUND = 'Ese PNJ no existe o no es de tus campañas';
-const AI_DISABLED =
-  'La IA no está configurada: el servidor necesita OLLAMA_URL y OLLAMA_MODEL para usar Ollama';
 
 function toView(row: NpcRow): NpcView {
   return {
@@ -97,26 +94,7 @@ async function findScene(db: Executor, gameId: string): Promise<PromptScene | un
     : undefined;
 }
 
-/**
- * Señal que se corta cuando la web deja de esperar la respuesta (el máster pulsa «Parar» o
- * se va): así Ollama deja de escribir algo que nadie va a leer.
- */
-function abortWhenGone(request: FastifyRequest, reply: FastifyReply): AbortController {
-  const controller = new AbortController();
-  reply.raw.on('close', () => controller.abort());
-  // Si se fue mientras se consultaba la base de datos, "close" ya pasó y no volverá a avisar.
-  if (request.raw.socket.destroyed) controller.abort();
-  return controller;
-}
-
-const ndjson = (chunk: TalkChunk) => `${JSON.stringify(chunk)}\n`;
-
 export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext): void {
-  const requireAi = (): Ai => {
-    if (!ai) throw new HttpError(503, AI_DISABLED);
-    return ai;
-  };
-
   app.get<{ Params: IdParams }>('/api/campaigns/:id/npcs', async (request) => {
     const user = requireUser(request);
     const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
@@ -177,13 +155,14 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
     const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
     const body = parseBody(generateNpcSchema, request.body, 'Revisa la idea del PNJ');
     await requireMaster(db, campaignId, user);
-    const model = requireAi();
+    const model = requireAi(ai);
     const campaign = await findCampaign(db, campaignId);
     const existing = await db
       .select({ name: npcs.name })
       .from(npcs)
       .where(eq(npcs.campaignId, campaignId))
       .orderBy(desc(npcs.createdAt));
+    const recaps = await findRecaps(db, campaignId);
 
     const controller = abortWhenGone(request, reply);
     let content: string;
@@ -194,6 +173,7 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
           idea: body.idea,
           existing: existing.map((npc) => npc.name),
           draft: body.draft,
+          recaps,
         }),
         format: NPC_DRAFT_FORMAT,
         temperature: 0.9,
@@ -214,14 +194,14 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
 
   /**
    * El PNJ responde a lo que le dice la mesa. La respuesta llega en directo, una línea JSON
-   * por trozo (ver TalkChunk), para que el máster la lea según la escribe la IA.
+   * por trozo (ver AiTextChunk), para que el máster la lea según la escribe la IA.
    */
   app.post<{ Params: IdParams }>('/api/npcs/:id/talk', async (request, reply) => {
     const user = requireUser(request);
     const id = parseId(request.params.id, NPC_NOT_FOUND);
     const body = parseBody(talkSchema, request.body, 'Revisa la conversación');
     const npc = await findNpc(db, user, id);
-    const model = requireAi();
+    const model = requireAi(ai);
     const campaign = await findCampaign(db, npc.campaignId);
 
     let scene: PromptScene | undefined;
@@ -238,60 +218,26 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
       .from(characters)
       .where(eq(characters.campaignId, npc.campaignId))
       .orderBy(asc(characters.createdAt));
+    const recaps = await findRecaps(db, npc.campaignId);
 
-    const controller = abortWhenGone(request, reply);
-    let chunks: AsyncIterable<string>;
-    try {
-      chunks = await model.stream({
+    return sendAiText(request, reply, {
+      ai: model,
+      request: {
         messages: talkMessages({
           campaign,
           npc,
           characters: party,
+          recaps,
           scene,
           history: body.history,
           input: body.input,
         }),
         temperature: 0.8,
         maxTokens: 400,
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (controller.signal.aborted) return reply.hijack();
-      throw error;
-    }
-
-    async function* lines(): AsyncGenerator<string> {
-      let full = '';
-      let shown = '';
-      try {
-        for await (const chunk of chunks) {
-          full += chunk;
-          const visible = spokenReply(full, npc.name);
-          if (visible.length > shown.length) {
-            yield ndjson({ type: 'delta', text: visible.slice(shown.length) });
-            shown = visible;
-          }
-        }
-        const text = cleanReply(full, npc.name);
-        yield ndjson(
-          text
-            ? { type: 'done', text }
-            : { type: 'error', error: 'La IA no ha dicho nada. Prueba otra vez.' },
-        );
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        const cause = error instanceof HttpError ? (error.cause ?? error) : error;
-        request.log.warn({ err: cause }, 'Se cortó la respuesta del PNJ');
-        const message =
-          error instanceof HttpError ? error.message : 'Se cortó la respuesta de la IA';
-        yield ndjson({ type: 'error', error: message });
-      }
-    }
-
-    return reply
-      .header('content-type', 'application/x-ndjson; charset=utf-8')
-      .header('cache-control', 'no-cache')
-      .header('x-accel-buffering', 'no')
-      .send(Readable.from(lines()));
+      },
+      visible: (text) => spokenReply(text, npc.name),
+      finish: (text) => cleanReply(text, npc.name),
+      cutMessage: 'Se cortó la respuesta del PNJ',
+    });
   });
 }

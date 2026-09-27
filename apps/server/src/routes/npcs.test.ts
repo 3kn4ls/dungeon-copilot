@@ -1,6 +1,6 @@
 import { Agent, request } from 'node:http';
 import { kael } from '@dungeon-copilot/rules/testing';
-import type { GameEvent, NpcRequest, NpcView, TalkChunk } from '@dungeon-copilot/shared';
+import type { AiTextChunk, GameEvent, NpcRequest, NpcView } from '@dungeon-copilot/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startFakeOllama, type FakeOllama } from '../ai/fake-ollama';
 import { createOllama, type Ai } from '../ai/ollama';
@@ -62,11 +62,11 @@ async function openGame(master: TestClient, campaignId: string): Promise<string>
 }
 
 /** La respuesta en directo de un PNJ: una línea JSON por trozo. */
-const chunksOf = (body: string): TalkChunk[] =>
+const chunksOf = (body: string): AiTextChunk[] =>
   body
     .trim()
     .split('\n')
-    .map((line) => JSON.parse(line) as TalkChunk);
+    .map((line) => JSON.parse(line) as AiTextChunk);
 
 describe('PNJ de la campaña', () => {
   it('el máster los crea, los cambia y los borra; la lista va por orden alfabético', async () => {

@@ -134,6 +134,23 @@ describe('abrir y cerrar partidas', () => {
   });
 });
 
+describe('resumen sin IA', () => {
+  it('el máster lo escribe a mano; pedírselo a la IA avisa de que no está configurada', async () => {
+    const { master, campaign } = await table();
+    const { url } = await openGame(master, campaign.id);
+    await master.post(`${url}/reveals`, { body: 'Una puerta' });
+    await master.post(`${url}/close`, {});
+
+    const draft = await master.post(`${url}/recap/draft`, {});
+    expect(draft.statusCode).toBe(503);
+    expect(draft.json().error).toBe(
+      'La IA no está configurada: el servidor necesita OLLAMA_URL y OLLAMA_MODEL para usar Ollama',
+    );
+    const saved = await master.put(`${url}/recap`, { recap: 'Abrieron la puerta.' });
+    expect(saved.json().game.recap).toBe('Abrieron la puerta.');
+  });
+});
+
 describe('revelar y anotar', () => {
   it('lo que revela el máster lo ve toda la mesa; sus notas, solo él', async () => {
     const { master, ana, campaign } = await table();

@@ -27,6 +27,7 @@ import {
   type GameDetail,
   type GameRollRequest,
   type GameState,
+  type GameSummary,
   type NpcView,
   type RollSideRequest,
 } from '@dungeon-copilot/shared';
@@ -37,6 +38,7 @@ import { ApiError, api } from '../api';
 import { EventCard } from '../components/GameEvents';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
+import { RecapPanel } from '../components/Recap';
 import { ScreenLink } from '../components/ScreenLink';
 import {
   ConfirmButton,
@@ -52,6 +54,7 @@ import {
   useAiStatus,
   useCharacters,
   useGame,
+  useGames,
   useMe,
   useNpcs,
   useStoreGameEvent,
@@ -113,17 +116,20 @@ export function GamePage() {
           {isOpen ? (
             <Actions state={state.data} />
           ) : (
-            <section className="panel">
-              <h2>Partida terminada</h2>
-              <p className="muted">
-                Terminó el{' '}
-                {new Date(game.closedAt ?? game.openedAt).toLocaleString('es-ES', {
-                  dateStyle: 'long',
-                  timeStyle: 'short',
-                })}
-                . Aquí queda el registro de lo que pasó.
-              </p>
-            </section>
+            <>
+              <section className="panel">
+                <h2>Partida terminada</h2>
+                <p className="muted">
+                  Terminó el{' '}
+                  {new Date(game.closedAt ?? game.openedAt).toLocaleString('es-ES', {
+                    dateStyle: 'long',
+                    timeStyle: 'short',
+                  })}
+                  . Aquí queda el registro de lo que pasó.
+                </p>
+              </section>
+              <RecapPanel game={game} />
+            </>
           )}
         </div>
 
@@ -179,7 +185,12 @@ function Actions({ state }: { state: GameState }) {
         ]}
         onChange={setAction}
       />
-      {action === 'reveal' && <RevealForm gameId={state.game.id} />}
+      {action === 'reveal' && (
+        <RevealForm
+          game={state.game}
+          starting={!state.events.some((event) => event.kind === 'reveal')}
+        />
+      )}
       {action === 'talk' && <TalkPanel game={state.game} />}
       {action === 'roll' && <RollForm game={state.game} embedded />}
       {action === 'note' && <NoteForm gameId={state.game.id} />}
@@ -187,18 +198,36 @@ function Actions({ state }: { state: GameState }) {
   );
 }
 
-function RevealForm({ gameId }: { gameId: string }) {
+/** La última partida anterior que tiene resumen. */
+function usePreviousRecap(game: GameDetail): GameSummary | undefined {
+  const games = useGames(game.campaignId);
+  // La lista viene de la más reciente a la más antigua.
+  return games.data?.find((other) => other.number < game.number && other.recap);
+}
+
+/** Título para enseñar a la mesa el resumen de una partida anterior. */
+function recallTitle(previous: GameSummary, game: GameDetail): string {
+  if (previous.number === game.number - 1) return 'En la partida anterior';
+  return previous.title
+    ? `Lo que pasó en «${previous.title}»`
+    : `Lo que pasó en la partida ${previous.number}`;
+}
+
+/** Con `starting`, aún no se ha enseñado nada: se ofrece recordar la partida anterior. */
+function RevealForm({ game, starting }: { game: GameDetail; starting: boolean }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const storeEvent = useStoreGameEvent(gameId);
+  const previous = usePreviousRecap(game);
+  const storeEvent = useStoreGameEvent(game.id);
   const reveal = useMutation({
-    mutationFn: () => api.reveal(gameId, { title, body }),
+    mutationFn: () => api.reveal(game.id, { title, body }),
     onSuccess: (event) => {
       storeEvent(event);
       setTitle('');
       setBody('');
     },
   });
+  const recall = starting && !title && !body ? previous : undefined;
 
   return (
     <form
@@ -209,6 +238,21 @@ function RevealForm({ gameId }: { gameId: string }) {
       }}
     >
       <p className="muted">Lo que escribas aparece al momento en la sala y en la pantalla.</p>
+      {recall && (
+        <div className="recall">
+          <p>¿Empezáis? Recuerda a la mesa lo que pasó en {gameName(recall)}.</p>
+          <button
+            type="button"
+            className="button small"
+            onClick={() => {
+              setTitle(recallTitle(recall, game));
+              setBody(recall.recap);
+            }}
+          >
+            Recordar la partida anterior
+          </button>
+        </div>
+      )}
       <label className="field">
         <span className="field-label">Título (opcional)</span>
         <input

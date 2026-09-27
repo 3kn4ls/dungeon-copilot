@@ -1,11 +1,18 @@
+import { resolveOpposed, resolveTest } from '@dungeon-copilot/rules';
+import { fixedDice } from '@dungeon-copilot/rules/testing';
+import type { GameEventPayload } from '@dungeon-copilot/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  cleanRecap,
   cleanReply,
   fit,
+  hasLog,
   npcGenerationMessages,
   parseNpcDraft,
+  recapMessages,
   spokenReply,
   talkMessages,
+  visibleRecap,
   visibleReply,
 } from './prompts';
 
@@ -231,5 +238,169 @@ describe('inventar un PNJ', () => {
     expect(parseNpcDraft('{"name": ')).toBeNull();
     expect(parseNpcDraft(JSON.stringify({ name: '  ', concept: 'Herrero' }))).toBeNull();
     expect(parseNpcDraft('[1, 2]')).toBeNull();
+  });
+});
+
+describe('memoria de la campaña', () => {
+  const recaps = [1, 2, 3, 4].map((number) => ({
+    number,
+    title: number === 4 ? 'La cripta' : '',
+    recap: number === 3 ? 'c'.repeat(2000) : `Lo que pasó en la partida ${number}.`,
+  }));
+
+  it('el PNJ recuerda las tres últimas partidas, recortadas, y sabe que no lo vio todo', () => {
+    const [system] = talkMessages({
+      campaign,
+      npc: brunilda,
+      characters: [],
+      recaps,
+      history: [],
+      input: '',
+    });
+    const prompt = system?.content ?? '';
+    expect(prompt).toContain(
+      'Lo que ha pasado en la campaña hasta ahora. Brunilda solo sabe lo que haya vivido o le hayan contado.',
+    );
+    expect(prompt).not.toContain('partida 1.');
+    expect(prompt).toContain('Partida 2:\nLo que pasó en la partida 2.');
+    expect(prompt).toContain(`Partida 3:\n${'c'.repeat(1199)}…`);
+    expect(prompt).toContain('Partida 4, «La cripta»:\nLo que pasó en la partida 4.');
+  });
+
+  it('sin partidas resumidas no hay memoria; al inventar un PNJ también cuenta', () => {
+    const [system] = talkMessages({
+      campaign,
+      npc: brunilda,
+      characters: [],
+      history: [],
+      input: '',
+    });
+    expect(system?.content).not.toContain('Lo que ha pasado');
+    const [, user] = npcGenerationMessages({ campaign, idea: '', existing: [], recaps });
+    expect(user?.content).toContain(
+      'Lo que ha pasado en la campaña hasta ahora:\n\nPartida 2:\nLo que pasó en la partida 2.',
+    );
+  });
+});
+
+describe('resumen de una partida', () => {
+  const opposed: GameEventPayload = {
+    kind: 'roll',
+    roll: {
+      actor: { label: 'Kael', characterId: 'kael', check: 'Esgrima' },
+      target: { kind: 'opposed', label: 'Guardia veterano' },
+      situation: 'melee',
+      notes: [],
+      result: {
+        kind: 'opposed',
+        ...resolveOpposed(
+          { bonus: 5, edge: 'none' },
+          { bonus: 4, edge: 'none' },
+          fixedDice(6, 5, 1, 2),
+        ),
+      },
+    },
+  };
+  const test = (label: string, difficulty: number, faces: number[]): GameEventPayload => ({
+    kind: 'roll',
+    roll: {
+      actor: { label },
+      target: { kind: 'difficulty', label: `Difícil (${difficulty})` },
+      situation: 'test',
+      notes: [],
+      result: {
+        kind: 'test',
+        ...resolveTest({ bonus: 2, edge: 'none' }, difficulty, fixedDice(...faces)),
+      },
+    },
+  });
+
+  it('cuenta el registro en líneas, sin números de dados, con lo que añade el máster', () => {
+    const events: GameEventPayload[] = [
+      { kind: 'opened', number: 2, title: 'La cripta', luckRefilled: true },
+      { kind: 'reveal', title: 'El Ciervo Blanco', body: 'Humo y estofado.' },
+      { kind: 'speech', npcId: 'b', name: 'Brunilda', text: '¿Qué os pongo?' },
+      opposed,
+      test('Mira', 12, [1, 1]),
+      { kind: 'note', text: 'El bardo es un espía' },
+      { kind: 'reveal', title: '', body: 'La puerta cede.' },
+      { kind: 'closed', xpAwarded: 2 },
+    ];
+    const [system, user] = recapMessages({
+      campaign,
+      characters: [{ name: 'Kael', background: 'Acróbata' }],
+      game: { number: 2, title: 'La cripta' },
+      previous: { number: 1, title: '', recap: 'Encontraron el mapa.' },
+      events,
+      hint: 'Kael se quedó con la llave',
+    });
+    expect(system?.content).toContain('no los cuentes');
+    expect(user?.content).toBe(
+      [
+        `La campaña se llama «La Marca del Este». De qué va:\n${campaign.description}`,
+        'Personajes de los jugadores:\n- Kael: Acróbata',
+        'Resumen de la partida anterior (Partida 1):\nEncontraron el mapa.',
+        [
+          'Registro de la partida que hay que resumir (Partida 2, «La cripta»), de lo más antiguo a lo más reciente:',
+          '- El máster cuenta («El Ciervo Blanco»): Humo y estofado.',
+          '- Brunilda (PNJ) dice: «¿Qué os pongo?»',
+          '- Tirada: Kael (Esgrima) contra Guardia veterano, cuerpo a cuerpo: éxito pleno para Kael.',
+          '- Tirada: Mira, prueba difícil (12): pifia.',
+          '- Nota del máster, que los jugadores no ven: El bardo es un espía',
+          '- El máster cuenta: La puerta cede.',
+        ].join('\n'),
+        'Lo que añade el máster, que no está en el registro:\nKael se quedó con la llave',
+        'Escribe el resumen.',
+      ].join('\n\n'),
+    );
+    expect(hasLog(events)).toBe(true);
+    expect(hasLog([events[0]!, events.at(-1)!])).toBe(false);
+  });
+
+  it('si el registro no cabe, quita antes las tiradas y luego lo más antiguo', () => {
+    const reveals = Array.from({ length: 16 }, (_, index) => ({
+      kind: 'reveal' as const,
+      title: `Escena ${index + 1}`,
+      body: 'x'.repeat(1000),
+    }));
+    const rolls = Array.from({ length: 30 }, () => test('Mira', 10, [3, 4]));
+    const [, user] = recapMessages({
+      campaign,
+      characters: [],
+      game: { number: 1, title: '' },
+      events: reveals.flatMap((reveal, index) => [reveal, rolls[index]!, rolls[index + 14]!]),
+      hint: '',
+    });
+    const prompt = user?.content ?? '';
+    expect(prompt).not.toContain('Tirada');
+    // Las 32 tiradas y las cuatro primeras escenas. Cada escena va recortada.
+    expect(prompt).toContain('- (Faltan 36 líneas del registro, las menos importantes.)');
+    expect(prompt).not.toContain('(«Escena 4»)');
+    expect(prompt).toContain(`- El máster cuenta («Escena 5»): ${'x'.repeat(699)}…`);
+    expect(prompt).toContain('(«Escena 16»)');
+  });
+
+  it('mientras escribe, espera a ver si empieza con un título y lo quita', () => {
+    expect(visibleRecap('')).toBe('');
+    expect(visibleRecap('Res')).toBe('');
+    expect(visibleRecap('**Resumen de la partida')).toBe('');
+    expect(visibleRecap('## La cripta\n')).toBe('');
+    expect(visibleRecap('## La cripta\n\nKael bajó')).toBe('Kael bajó');
+    expect(visibleRecap('Resumen: \nKael bajó')).toBe('Kael bajó');
+    expect(visibleRecap('<think>…</think>**La cripta**\nKael')).toBe('Kael');
+    expect(visibleRecap('Resumiendo, Kael')).toBe('Resumiendo, Kael');
+    expect(visibleRecap('Kael bajó a la cripta')).toBe('Kael bajó a la cripta');
+    expect(visibleRecap('**Kael** bajó\n')).toBe('**Kael** bajó\n');
+  });
+
+  it('al terminar, deja el texto limpio aunque no acabe en salto de línea', () => {
+    expect(cleanRecap('Resumen de la partida 3:\n\nKael bajó.\n\nY volvió.  ')).toBe(
+      'Kael bajó.\n\nY volvió.',
+    );
+    expect(
+      cleanRecap('Resumen de lo que pasó en la cripta, que fue mucho y muy variado para todos'),
+    ).toBe('Resumen de lo que pasó en la cripta, que fue mucho y muy variado para todos');
+    expect(cleanRecap('**La cripta**')).toBe('');
+    expect(cleanRecap('a'.repeat(5000))).toHaveLength(4000);
   });
 });

@@ -30,6 +30,30 @@ export const closeGameSchema = z.object({
 
 export type CloseGameRequest = z.input<typeof closeGameSchema>;
 
+/** Tope del resumen de una partida. */
+export const RECAP_MAX = 4000;
+
+/** El resumen de una partida terminada, tal como lo deja el máster. Lo ve toda la mesa. */
+export const recapSchema = z.object({
+  /** Vacío: la partida se queda sin resumen. */
+  recap: z.string().trim().max(RECAP_MAX, `El resumen no puede pasar de ${RECAP_MAX} caracteres`),
+});
+
+export type RecapRequest = z.input<typeof recapSchema>;
+
+/** Lo que el máster le da a la IA, además del registro, para que le proponga un resumen. */
+export const recapDraftSchema = z.object({
+  /**
+   * Lo que se jugó de palabra y no está en el registro, o lo que quiere destacar: "Kael
+   * traicionó al gremio y huyeron por las cloacas".
+   */
+  hint: z.string().trim().max(1000, 'El texto no puede pasar de 1000 caracteres').default(''),
+  /** Las notas del máster ayudan a la IA a entender lo que pasó, pero guardan secretos. */
+  useNotes: z.boolean().default(true),
+});
+
+export type RecapDraftRequest = z.input<typeof recapDraftSchema>;
+
 export const revealSchema = z.object({
   title: z.string().trim().max(120, 'El título no puede pasar de 120 caracteres').default(''),
   body: z
@@ -147,6 +171,11 @@ export interface GameSummary {
   status: GameStatus;
   openedAt: string;
   closedAt: string | null;
+  /**
+   * Lo que pasó, contado por el máster al terminar (con ayuda de la IA o sin ella). Lo ve toda
+   * la mesa, y la IA lo recuerda en las partidas siguientes. Vacío si no hay.
+   */
+  recap: string;
 }
 
 export interface GameDetail extends GameSummary {

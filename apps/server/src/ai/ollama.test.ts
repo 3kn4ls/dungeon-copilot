@@ -116,6 +116,12 @@ describe('cliente de Ollama', () => {
     ollama.queue({ kind: 'chunks', chunks: ['Eh…'], hang: true });
     const chunks = await slow.stream({ messages });
     expect(await failure(collect(chunks))).toMatchObject({ statusCode: 504 });
+
+    // Una petición puede esperar más, o menos, que el resto.
+    const patient = createOllama({ url: ollama.url, model: 'x', timeoutMs: 60_000 });
+    ollama.queue({ kind: 'silence' });
+    const hurried = patient.stream({ messages, timeoutMs: 100 });
+    expect(await failure(hurried)).toMatchObject({ statusCode: 504 });
   });
 
   it('pasa el error si Ollama falla a mitad de respuesta', async () => {

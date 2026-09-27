@@ -1,5 +1,18 @@
-import { NPC_PROFILES, NPC_PROFILE_IDS } from '@dungeon-copilot/rules';
-import { NPC_LIMITS, type NpcDraft, type TalkLine } from '@dungeon-copilot/shared';
+import {
+  NPC_PROFILES,
+  NPC_PROFILE_IDS,
+  OUTCOME_LABELS,
+  SITUATION_LABELS,
+} from '@dungeon-copilot/rules';
+import {
+  NPC_LIMITS,
+  RECAP_MAX,
+  type GameEventPayload,
+  type GameRoll,
+  type GameRollSide,
+  type NpcDraft,
+  type TalkLine,
+} from '@dungeon-copilot/shared';
 import type { AiMessage } from './ollama';
 
 export interface PromptCampaign {
@@ -18,6 +31,13 @@ export interface PromptScene {
   body: string;
 }
 
+/** Una partida anterior con su resumen: lo que la IA recuerda de la campaña. */
+export interface PromptRecap {
+  number: number;
+  title: string;
+  recap: string;
+}
+
 type PromptNpc = Pick<
   NpcDraft,
   'name' | 'concept' | 'appearance' | 'personality' | 'speech' | 'goals' | 'secrets'
@@ -29,6 +49,9 @@ const SCENE_CHARS = 800;
 const LINE_CHARS = 1000;
 const MAX_CHARACTERS = 8;
 const MAX_EXISTING_NPCS = 30;
+const RECAP_CHARS = 1200;
+/** Resúmenes de partidas anteriores que se le recuerdan a la IA. */
+export const MEMORY_RECAPS = 3;
 
 /** Recorta un texto largo, marcando con puntos suspensivos que sigue. */
 export function fit(text: string, max: number): string {
@@ -43,6 +66,25 @@ function campaignBlock(campaign: PromptCampaign): string {
     : `La campaña se llama «${campaign.name}»; el máster no ha descrito su ambientación.`;
 }
 
+/** "Partida 3, «La cripta del rey»", o solo "Partida 3" si no tiene título. */
+function gameLabel(game: { number: number; title: string }): string {
+  const title = game.title.trim();
+  return title ? `Partida ${game.number}, «${title}»` : `Partida ${game.number}`;
+}
+
+/** Lo que ha pasado en las últimas partidas, de la más antigua a la más reciente. */
+function memoryBlock(recaps: PromptRecap[], intro: string): string {
+  const games = recaps
+    .slice(-MEMORY_RECAPS)
+    .map((game) => `${gameLabel(game)}:\n${fit(game.recap, RECAP_CHARS)}`);
+  return games.length > 0 ? [intro, ...games].join('\n\n') : '';
+}
+
+const partyLines = (characters: PromptCharacter[]) =>
+  characters
+    .slice(0, MAX_CHARACTERS)
+    .map((c) => (c.background.trim() ? `- ${c.name}: ${c.background.trim()}` : `- ${c.name}`));
+
 /** Solo las líneas con contenido: un PNJ recién creado puede tener casi todo vacío. */
 const describe = (lines: [label: string, value: string][]) =>
   lines.filter(([, value]) => value.trim() !== '').map(([label, value]) => `${label}: ${value}`);
@@ -51,6 +93,8 @@ export interface TalkPrompt {
   campaign: PromptCampaign;
   npc: PromptNpc;
   characters: PromptCharacter[];
+  /** Resúmenes de las partidas anteriores, de la más antigua a la más reciente. */
+  recaps?: PromptRecap[];
   scene?: PromptScene | undefined;
   history: TalkLine[];
   /** Lo que dicen o hacen los personajes. Vacío: el PNJ toma la palabra. */
@@ -59,7 +103,7 @@ export interface TalkPrompt {
 
 /** Mensajes para que el modelo responda como el PNJ a lo que le dice la mesa. */
 export function talkMessages(prompt: TalkPrompt): AiMessage[] {
-  const { campaign, npc, characters, scene, history, input } = prompt;
+  const { campaign, npc, characters, recaps = [], scene, history, input } = prompt;
   const name = npc.name;
   const sections = [
     `Eres ${name}, un personaje no jugador (PNJ) de una partida de rol, y el máster habla por tu boca.`,
@@ -79,10 +123,12 @@ export function talkMessages(prompt: TalkPrompt): AiMessage[] {
       ['Qué oculta', npc.secrets],
     ]).join('\n'),
     campaignBlock(campaign),
+    memoryBlock(
+      recaps,
+      `Lo que ha pasado en la campaña hasta ahora. ${name} solo sabe lo que haya vivido o le hayan contado.`,
+    ),
   ];
-  const party = characters
-    .slice(0, MAX_CHARACTERS)
-    .map((c) => (c.background.trim() ? `- ${c.name}: ${c.background.trim()}` : `- ${c.name}`));
+  const party = partyLines(characters);
   if (party.length > 0) sections.push(`Personajes de los jugadores:\n${party.join('\n')}`);
   if (scene) {
     const text = [scene.title.trim(), fit(scene.body, SCENE_CHARS)].filter(Boolean).join('\n');
@@ -209,6 +255,8 @@ export interface NpcGenerationPrompt {
   /** Nombres de los PNJ que ya tiene la campaña, para no repetir. */
   existing: string[];
   draft?: PartialNpc;
+  /** Resúmenes de las partidas anteriores, de la más antigua a la más reciente. */
+  recaps?: PromptRecap[];
 }
 
 /** Mensajes para que el modelo invente un PNJ que encaje en la campaña. */
@@ -241,6 +289,7 @@ export function npcGenerationMessages(prompt: NpcGenerationPrompt): AiMessage[] 
   if (profile !== undefined) decided.push(`- profile: ${profile ?? 'none'}`);
   const user = [
     campaignBlock(prompt.campaign),
+    memoryBlock(prompt.recaps ?? [], 'Lo que ha pasado en la campaña hasta ahora:'),
     existing.length > 0
       ? `PNJ que ya tiene la campaña (inventa uno distinto): ${existing.join(', ')}.`
       : '',
@@ -300,4 +349,151 @@ export function parseNpcDraft(content: string, draft: PartialNpc = {}): NpcDraft
         ? draft.profile
         : (NPC_PROFILE_IDS.find((id) => id === record.profile) ?? null),
   };
+}
+
+// Topes del registro que se resume: con el resto del mensaje, tiene que caber en el contexto
+// del modelo sin hacerle leer tanto que tarde minutos en una máquina sin GPU.
+const LOG_CHARS = 9000;
+const LOG_LINE_CHARS = 700;
+const HINT_CHARS = 1000;
+
+export interface RecapPrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  game: { number: number; title: string };
+  /** La partida anterior con su resumen, para seguir el hilo. */
+  previous?: PromptRecap | undefined;
+  /** Registro de la partida, del más antiguo al más reciente, solo con lo que puede ver la IA. */
+  events: GameEventPayload[];
+  /** Lo que añade el máster: lo que se jugó de palabra o lo que quiere destacar. */
+  hint: string;
+}
+
+/** "Kael (Esgrima)", o solo el nombre si no tira con nada concreto. */
+const sideText = (side: GameRollSide) =>
+  side.check ? `${side.label} (${side.check})` : side.label;
+
+/** Una tirada contada en una línea, sin los números: quién, contra qué y cómo salió. */
+function rollText(roll: GameRoll): string {
+  const outcome = OUTCOME_LABELS[roll.result.outcome].toLowerCase();
+  const situation =
+    roll.situation === 'test' ? '' : `, ${SITUATION_LABELS[roll.situation].toLowerCase()}`;
+  if (roll.target.kind === 'difficulty') {
+    return `${sideText(roll.actor)}, prueba ${roll.target.label.toLowerCase()}${situation}: ${outcome}.`;
+  }
+  return `${sideText(roll.actor)} contra ${sideText(roll.target)}${situation}: ${outcome} para ${roll.actor.label}.`;
+}
+
+/** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
+function logLine(event: GameEventPayload): { text: string; weight: number } | null {
+  switch (event.kind) {
+    case 'opened':
+    case 'closed':
+      return null;
+    case 'reveal': {
+      const title = event.title.trim();
+      const body = fit(event.body, LOG_LINE_CHARS);
+      return { text: `- El máster cuenta${title ? ` («${title}»)` : ''}: ${body}`, weight: 2 };
+    }
+    case 'note':
+      return {
+        text: `- Nota del máster, que los jugadores no ven: ${fit(event.text, LOG_LINE_CHARS)}`,
+        weight: 2,
+      };
+    case 'speech':
+      return {
+        text: `- ${event.name} (PNJ) dice: «${fit(event.text, LOG_LINE_CHARS)}»`,
+        weight: 1,
+      };
+    case 'roll':
+      return { text: `- Tirada: ${rollText(event.roll)}`, weight: 0 };
+  }
+}
+
+/** Si el registro tiene algo que contar, más allá de cuándo empezó y terminó la partida. */
+export const hasLog = (events: GameEventPayload[]) =>
+  events.some((event) => logLine(event) !== null);
+
+/** Lo que cabe del registro. Si sobra, se quitan antes las tiradas y, luego, lo más antiguo. */
+function fitLog(events: GameEventPayload[]): string[] {
+  const lines = events.flatMap((event, index) => {
+    const line = logLine(event);
+    return line ? [{ ...line, index }] : [];
+  });
+  let size = lines.reduce((sum, line) => sum + line.text.length + 1, 0);
+  const dropped = new Set<number>();
+  const expendable = [...lines].sort((a, b) => a.weight - b.weight || a.index - b.index);
+  for (const line of expendable) {
+    if (size <= LOG_CHARS) break;
+    dropped.add(line.index);
+    size -= line.text.length + 1;
+  }
+  const kept = lines.filter((line) => !dropped.has(line.index)).map((line) => line.text);
+  if (dropped.size > 0) {
+    kept.unshift(`- (Faltan ${dropped.size} líneas del registro, las menos importantes.)`);
+  }
+  return kept;
+}
+
+/** Mensajes para que el modelo resuma una partida a partir de su registro. */
+export function recapMessages(prompt: RecapPrompt): AiMessage[] {
+  const system = [
+    'Ayudas a un máster de rol a llevar la crónica de su campaña. Con el registro de una partida escribes, en español, el resumen que leerán los jugadores para recordar lo que pasó.',
+    [
+      '- Cuéntalo en pasado y en tercera persona, como una crónica: qué hicieron los personajes, a quién conocieron, qué descubrieron y cómo quedó todo al final.',
+      '- De uno a tres párrafos cortos, sin títulos ni listas: 250 palabras como mucho.',
+      '- Cuenta solo lo que dicen el registro y el máster. No inventes hechos, nombres ni lugares.',
+      '- No hables de dados, tiradas ni reglas: cuenta lo que supusieron, como quién ganó una pelea o qué salió mal.',
+      '- Las notas del máster te ayudan a entender lo que pasó, pero pueden guardar secretos que los personajes no conocen: no los cuentes.',
+      '- Si queda algo pendiente, termina con ello.',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const { game, previous } = prompt;
+  const party = partyLines(prompt.characters);
+  const log = fitLog(prompt.events);
+  const hint = fit(prompt.hint, HINT_CHARS);
+  const user = [
+    campaignBlock(prompt.campaign),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    previous
+      ? `Resumen de la partida anterior (${gameLabel(previous)}):\n${fit(previous.recap, RECAP_CHARS)}`
+      : '',
+    log.length > 0
+      ? `Registro de la partida que hay que resumir (${gameLabel(game)}), de lo más antiguo a lo más reciente:\n${log.join('\n')}`
+      : `La partida que hay que resumir (${gameLabel(game)}) no tiene nada en el registro.`,
+    hint ? `Lo que añade el máster, que no está en el registro:\n${hint}` : '',
+    'Escribe el resumen.',
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
+/** Un título en su propia línea al principio: «## Resumen», «**La traición**» o «Resumen:». */
+const RECAP_HEADING = /^(?:#{1,6}[^\n]*|\*\*[^*\n]+\*\*:?|resumen\b[^.\n]{0,60}:?)[ \t]*\n+/i;
+
+/** Si lo escrito hasta ahora aún puede acabar siendo un título. */
+function mayBeHeading(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /^[#*]/.test(text) || lower.startsWith('resumen') || 'resumen'.startsWith(lower);
+}
+
+/**
+ * Lo que se puede enseñar del resumen mientras se escribe: sin razonamiento ni título. Si el
+ * principio aún puede ser un título, espera a que termine la línea.
+ */
+export function visibleRecap(text: string): string {
+  const visible = visibleReply(text);
+  const heading = RECAP_HEADING.exec(visible);
+  if (heading) return visible.slice(heading[0].length);
+  return !visible.includes('\n') && mayBeHeading(visible) ? '' : visible;
+}
+
+/** El resumen terminado, listo para que lo retoque el máster. */
+export function cleanRecap(text: string): string {
+  // Terminado, la primera línea ya no puede seguir: si no es un título, es el resumen.
+  return fit(visibleRecap(`${text.trimEnd()}\n`), RECAP_MAX);
 }
