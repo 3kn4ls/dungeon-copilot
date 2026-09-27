@@ -63,7 +63,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (closing) app.server.closeIdleConnections();
   });
 
-  app.get('/api/health', async () => ({ status: 'ok' }));
+  // Sin apuntar cada petición en el registro: k3s la hace cada pocos segundos para saber si
+  // el servidor sigue vivo, y taparía todo lo demás.
+  app.get('/api/health', { logLevel: 'warn' }, async () => ({ status: 'ok' }));
   registerAuthRoutes(app, ctx);
   registerCampaignRoutes(app, ctx);
   registerCharacterRoutes(app, ctx);

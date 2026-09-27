@@ -26,6 +26,10 @@ Los PNJ son solo del máster: a un jugador de la campaña se le responde 403. La
 
 El reglamento vive en `docs/reglas.md` y el código en `packages/rules`. Si cambias una regla, cambia los dos y regenera las tablas de probabilidades con `pnpm --filter @dungeon-copilot/rules tabla`.
 
+## Despliegue
+
+La imagen sale del `Dockerfile` de la raíz, la CI la prueba con `deploy/smoke-test.sh` y, al entrar en `main`, la publica en `ghcr.io/3kn4ls/dungeon-copilot` para amd64 y arm64. Los manifiestos de k3s (el servidor y su PostgreSQL) están en `deploy/k3s`, con lo que cambia de un cluster a otro en `kustomization.yaml`. Si cambias cómo arranca el servidor (variables, puerto, carpetas), revisa los tres. La imagen de arm64 se hace sin emular porque el servidor no tiene dependencias nativas: si añades una, el `Dockerfile` tiene que cambiar.
+
 ## Antes de subir cambios
 
 ```sh

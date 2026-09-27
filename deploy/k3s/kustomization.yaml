@@ -1,0 +1,37 @@
+# Dungeon Copilot en k3s: la aplicación y su PostgreSQL. Cómo desplegarlo, en el README.
+# Lo que depende de tu cluster está en este archivo: la dirección de la web, tu Ollama y la
+# versión de la imagen.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dungeon-copilot
+
+resources:
+  - postgres.yaml
+  - dungeon-copilot.yaml
+
+# Configuración del servidor (la tabla de variables del README). Cuando cambia, el servidor se
+# reinicia solo al aplicar.
+configMapGenerator:
+  - name: dungeon-copilot
+    literals:
+      # Tu Ollama: el del cluster (servicio.namespace.svc.cluster.local:puerto), otro servidor
+      # o https://ollama.com. Sin estas dos líneas no hay IA y todo lo demás funciona igual.
+      - OLLAMA_URL=http://ollama.ollama.svc.cluster.local:11434
+      - OLLAMA_MODEL=qwen2.5:7b
+      # Con false nadie puede crear cuentas nuevas.
+      - ALLOW_REGISTRATION=true
+
+patches:
+  # La dirección de la web.
+  - target:
+      kind: Ingress
+      name: dungeon-copilot
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: rol.example.com
+
+# latest es lo último de main. Para quedarte en una versión, pon su etiqueta sha-… de GitHub.
+images:
+  - name: ghcr.io/3kn4ls/dungeon-copilot
+    newTag: latest

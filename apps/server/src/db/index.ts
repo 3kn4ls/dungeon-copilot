@@ -27,6 +27,11 @@ export interface DatabaseOptions {
   url?: string;
   /** Carpeta de datos de PGlite, o "memory://" para una base en memoria. */
   dataDir?: string;
+  /**
+   * PostgreSQL ha cortado una conexión que estaba libre: se ha reiniciado o se ha ido la red.
+   * No se pierde nada, porque la siguiente consulta abre otra; es para dejarlo en el registro.
+   */
+  onIdleError?: (error: Error) => void;
 }
 
 /**
@@ -48,6 +53,8 @@ export async function openDatabase(options: DatabaseOptions): Promise<DatabaseHa
 
   if (options.url) {
     const pool = new pg.Pool({ connectionString: options.url });
+    // Sin nadie que lo escuche, ese aviso tumbaría el servidor entero.
+    pool.on('error', (error) => options.onIdleError?.(error));
     const db = drizzleNodePg(pool, { schema });
     return {
       db,

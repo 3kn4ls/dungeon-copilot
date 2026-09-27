@@ -1,0 +1,137 @@
+# La aplicación: el servidor con la web, detrás del Traefik de k3s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dungeon-copilot
+  labels:
+    app.kubernetes.io/name: dungeon-copilot
+spec:
+  # Una sola réplica: el directo de las partidas vive en la memoria del proceso. Al actualizar
+  # conviven un momento la vieja y la nueva; quien estaba en la vieja reconecta y recupera lo
+  # que se perdió.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dungeon-copilot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dungeon-copilot
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        # El usuario node de la imagen.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Al arrancar el servidor aplica las migraciones: primero tiene que estar la base de datos.
+        - name: wait-for-postgres
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -U dungeon -d dungeon -t 2; do sleep 2; done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: dungeon-copilot
+          image: ghcr.io/3kn4ls/dungeon-copilot
+          envFrom:
+            - configMapRef:
+                name: dungeon-copilot
+            # Opcional, para lo que no debe ir en el ConfigMap: OLLAMA_API_KEY (ver el README).
+            - secretRef:
+                name: dungeon-copilot
+                optional: true
+          env:
+            - name: DATABASE_URL
+              value: postgres://dungeon@postgres:5432/dungeon
+            # La contraseña va aparte, así vale cualquiera: el cliente de PostgreSQL la toma de aquí.
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: password
+          ports:
+            - name: http
+              containerPort: 3000
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+          lifecycle:
+            # Un respiro antes de apagar, para que Traefik deje de mandarle peticiones.
+            preStop:
+              exec:
+                command: [sleep, '3']
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dungeon-copilot
+  labels:
+    app.kubernetes.io/name: dungeon-copilot
+spec:
+  selector:
+    app.kubernetes.io/name: dungeon-copilot
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# El host se cambia en kustomization.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dungeon-copilot
+  labels:
+    app.kubernetes.io/name: dungeon-copilot
+spec:
+  rules:
+    - host: rol.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dungeon-copilot
+                port:
+                  name: http
