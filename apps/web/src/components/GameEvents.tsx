@@ -1,5 +1,6 @@
 import { OUTCOME_GUIDES, OUTCOME_LABELS, doublesShift } from '@dungeon-copilot/rules';
 import type { GameEvent, GameRoll } from '@dungeon-copilot/shared';
+import type { ReactNode } from 'react';
 import { signed } from '../rules-text';
 import { Dice } from './Dice';
 
@@ -76,8 +77,11 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
   );
 }
 
-/** Un evento del registro de la partida, tal como se ve en la sala. */
-export function EventCard({ event }: { event: GameEvent }) {
+/**
+ * Un evento del registro de la partida, tal como se ve en la sala. `children` va debajo de
+ * una tirada, como las complicaciones que propone la IA al máster.
+ */
+export function EventCard({ event, children }: { event: GameEvent; children?: ReactNode }) {
   const meta = (
     <p className="feed-meta">
       {eventTime(event)}
@@ -128,6 +132,7 @@ export function EventCard({ event }: { event: GameEvent }) {
         <article className="feed-item">
           {meta}
           <RollView roll={event.roll} />
+          {children}
         </article>
       );
     case 'speech':

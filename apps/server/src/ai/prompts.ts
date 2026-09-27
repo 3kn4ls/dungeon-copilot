@@ -1,12 +1,16 @@
 import {
   NPC_PROFILES,
   NPC_PROFILE_IDS,
+  OUTCOME_GUIDES,
   OUTCOME_LABELS,
   SITUATION_LABELS,
+  needsComplication,
+  type ComplicationOutcome,
 } from '@dungeon-copilot/rules';
 import {
   NPC_LIMITS,
   RECAP_MAX,
+  REVEAL_MAX,
   type GameEventPayload,
   type GameRoll,
   type GameRollSide,
@@ -472,28 +476,236 @@ export function recapMessages(prompt: RecapPrompt): AiMessage[] {
   ];
 }
 
-/** Un título en su propia línea al principio: «## Resumen», «**La traición**» o «Resumen:». */
-const RECAP_HEADING = /^(?:#{1,6}[^\n]*|\*\*[^*\n]+\*\*:?|resumen\b[^.\n]{0,60}:?)[ \t]*\n+/i;
-
-/** Si lo escrito hasta ahora aún puede acabar siendo un título. */
-function mayBeHeading(text: string): boolean {
-  const lower = text.toLowerCase();
-  return /^[#*]/.test(text) || lower.startsWith('resumen') || 'resumen'.startsWith(lower);
+/**
+ * Quita el título que a veces se inventa el modelo en su propia línea al principio («## La
+ * cripta», «**La traición**» o «Resumen:», con las palabras que se le den). Sirve para el
+ * texto a medio escribir: mientras la primera línea aún puede ser un título, espera a que acabe.
+ */
+function headingStripper(words: readonly string[]): (text: string) => string {
+  const heading = new RegExp(
+    `^(?:#{1,6}[^\\n]*|\\*\\*[^*\\n]+\\*\\*:?|(?:${words.join('|')})\\b[^.\\n]{0,60}:?)[ \\t]*\\n+`,
+    'i',
+  );
+  return (text) => {
+    const found = heading.exec(text);
+    if (found) return text.slice(found[0].length);
+    if (text.includes('\n')) return text;
+    const lower = text.toLowerCase();
+    const mayBeHeading =
+      /^[#*]/.test(text) || words.some((word) => lower.startsWith(word) || word.startsWith(lower));
+    return mayBeHeading ? '' : text;
+  };
 }
+
+const withoutRecapHeading = headingStripper(['resumen']);
 
 /**
  * Lo que se puede enseñar del resumen mientras se escribe: sin razonamiento ni título. Si el
  * principio aún puede ser un título, espera a que termine la línea.
  */
 export function visibleRecap(text: string): string {
-  const visible = visibleReply(text);
-  const heading = RECAP_HEADING.exec(visible);
-  if (heading) return visible.slice(heading[0].length);
-  return !visible.includes('\n') && mayBeHeading(visible) ? '' : visible;
+  return withoutRecapHeading(visibleReply(text));
 }
 
 /** El resumen terminado, listo para que lo retoque el máster. */
 export function cleanRecap(text: string): string {
   // Terminado, la primera línea ya no puede seguir: si no es un título, es el resumen.
   return fit(visibleRecap(`${text.trimEnd()}\n`), RECAP_MAX);
+}
+
+const NOTES_CHARS = 2000;
+const INTENT_CHARS = 300;
+/** Lo último que ha enseñado el máster que se le da a la IA para que sepa dónde están. */
+export const RECENT_SCENES = 2;
+
+/** Las últimas escenas que ha enseñado el máster, de la más antigua a la más reciente. */
+function scenesBlock(scenes: PromptScene[]): string {
+  const texts = scenes.map((scene) =>
+    [scene.title.trim(), fit(scene.body, SCENE_CHARS)].filter(Boolean).join('\n'),
+  );
+  return texts.length > 0
+    ? `Lo último que el máster ha enseñado a la mesa, de lo más antiguo a lo más reciente:\n${texts.join('\n\n')}`
+    : '';
+}
+
+export interface ScenePrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  /** Lo último que ha enseñado el máster, de lo más antiguo a lo más reciente. */
+  scenes: PromptScene[];
+  /** El título que el máster le ha puesto a la escena, si tiene. */
+  title: string;
+  /** Lo que quiere describir, en notas rápidas. */
+  notes: string;
+}
+
+/** Mensajes para que el modelo convierta las notas del máster en la descripción de una escena. */
+export function sceneMessages(prompt: ScenePrompt): AiMessage[] {
+  const system = [
+    'Ayudas a un máster de rol a describir lo que tienen delante los jugadores. Con sus notas escribes, en español, la descripción que el máster enseñará a la mesa.',
+    [
+      '- En presente y hablando a los personajes, en segunda persona del plural: «Ante vosotros se alza…».',
+      '- De dos a cinco frases, 120 palabras como mucho, sin títulos ni listas.',
+      '- Usa lo que dicen las notas y dale vida con detalles de los sentidos (lo que se ve, se oye, se huele) que encajen con la ambientación.',
+      '- No añadas personajes, peligros ni pistas que no estén en las notas. No decidas lo que hacen, dicen o sienten los personajes de los jugadores.',
+      '- Lo que va entre corchetes son indicaciones del máster para ti: tenlas en cuenta, pero no las cuentes.',
+      '- No termines preguntando qué hacen: eso ya lo pregunta el máster.',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const party = partyLines(prompt.characters);
+  const title = prompt.title.trim();
+  const notes = fit(prompt.notes, NOTES_CHARS);
+  const user = [
+    campaignBlock(prompt.campaign),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    scenesBlock(prompt.scenes),
+    title ? `Título de la escena: ${title}` : '',
+    notes ? `Notas del máster para la descripción:\n${notes}` : '',
+    'Escribe la descripción.',
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
+const withoutSceneHeading = headingStripper(['descripción', 'descripcion']);
+
+/** Lo que se puede enseñar de la descripción mientras se escribe: sin razonamiento ni título. */
+export function visibleScene(text: string): string {
+  return withoutSceneHeading(visibleReply(text));
+}
+
+/** Comillas que envuelven la descripción entera, como un texto para leer en voz alta. */
+const QUOTED = /^(?:«([^«»]*)»|"([^"]*)"|“([^“”]*)”)$/;
+
+/** La descripción terminada, lista para que la retoque el máster. */
+export function cleanScene(text: string): string {
+  const scene = visibleScene(`${text.trimEnd()}\n`).trim();
+  const quoted = QUOTED.exec(scene);
+  return fit(quoted ? (quoted[1] ?? quoted[2] ?? quoted[3] ?? '') : scene, REVEAL_MAX);
+}
+
+export interface ComplicationPrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  /** Lo último que ha enseñado el máster, de lo más antiguo a lo más reciente. */
+  scenes: PromptScene[];
+  /** Una tirada con un resultado que pide complicación (ver needsComplication). */
+  roll: GameRoll;
+  /** Lo que intentaba quien tiraba, si el máster lo cuenta. */
+  intent: string;
+}
+
+/** Qué pide cada resultado, dicho para la IA. */
+const COMPLICATION_KINDS: Record<ComplicationOutcome, string> = {
+  partial:
+    'Es un éxito con coste: lo consigue, pero pagando un precio. La complicación no deshace el éxito.',
+  failure: 'Es un fallo: no lo consigue y además la situación empeora.',
+  fumble: 'Es una pifia: falla estrepitosamente y aparece un problema serio.',
+};
+
+/** Cuántas ideas se piden y se enseñan. */
+const IDEAS = 3;
+
+/** Formato de la respuesta con ideas (JSON Schema, lo impone Ollama). */
+export const IDEAS_FORMAT = {
+  type: 'object',
+  properties: { ideas: { type: 'array', items: { type: 'string' } } },
+  required: ['ideas'],
+} as const;
+
+/** Mensajes para que el modelo proponga complicaciones a una tirada que ha salido a medias o mal. */
+export function complicationMessages(prompt: ComplicationPrompt): AiMessage[] {
+  const { roll } = prompt;
+  const outcome = needsComplication(roll.result.outcome) ? roll.result.outcome : 'partial';
+  const system = [
+    'Ayudas a un máster de rol a improvisar. Una tirada acaba de salir a medias o mal y el máster necesita ideas para lo que pasa ahora. Propones tres complicaciones, en español.',
+    [
+      `- ${COMPLICATION_KINDS[outcome]}`,
+      `- Lo que dice el reglamento de este resultado: ${OUTCOME_GUIDES[roll.situation][outcome]}`,
+      '- Cada complicación, en una o dos frases, contada como algo que pasa en la escena y lista para que el máster la narre.',
+      '- Que sean distintas entre sí: por ejemplo, un precio que pagar, un peligro nuevo y una posición peor.',
+      '- Que encajen con la escena, la ambientación y lo que se intentaba. No decidas lo que hacen, dicen o sienten los personajes de los jugadores.',
+      '- El resultado es de quien tira: si tira un PNJ, la complicación es suya.',
+      '- Responde solo con un JSON así: {"ideas": ["…", "…", "…"]}',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const party = partyLines(prompt.characters);
+  const intent = fit(prompt.intent, INTENT_CHARS);
+  const user = [
+    campaignBlock(prompt.campaign),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    scenesBlock(prompt.scenes),
+    `La tirada: ${rollText(roll)}`,
+    intent ? `Lo que intentaba ${roll.actor.label}: ${intent}` : '',
+    'Propón tres complicaciones.',
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
+/**
+ * Las ideas ya terminadas de un JSON {"ideas": ["…", "…"]} a medio escribir, en orden: cada
+ * una aparece cuando se cierran sus comillas.
+ */
+export function partialIdeas(text: string): string[] {
+  const start = text.indexOf('[');
+  if (start === -1) return [];
+  const ideas: string[] = [];
+  let at = start + 1;
+  for (;;) {
+    while (at < text.length && /[\s,]/.test(text.charAt(at))) at++;
+    if (text.charAt(at) !== '"') return ideas;
+    let end = at + 1;
+    while (end < text.length && text.charAt(end) !== '"') end += text.charAt(end) === '\\' ? 2 : 1;
+    if (end >= text.length) return ideas;
+    try {
+      const idea: unknown = JSON.parse(text.slice(at, end + 1));
+      if (typeof idea === 'string') ideas.push(idea);
+    } catch {
+      return ideas;
+    }
+    at = end + 1;
+  }
+}
+
+/** Una idea en una línea, sin numeración, viñetas ni negritas. */
+const cleanIdea = (idea: string) =>
+  idea
+    .replace(/\*\*|__/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^(?:\d+[.)]|[-*•])\s*/, '')
+    .trim();
+
+/** Una línea de lista («1. …», «- …»), por si el modelo no ha respondido en JSON. */
+const LIST_ITEM = /^\s*(?:\d+[.)]|[-*•])\s+\S/;
+
+/**
+ * Lo que se puede enseñar de las ideas mientras se escriben: las terminadas, una por línea.
+ * Una idea no aparece hasta que está entera, así que lo enseñado solo crece.
+ */
+export function visibleIdeas(text: string): string {
+  return partialIdeas(visibleReply(text))
+    .map(cleanIdea)
+    .filter(Boolean)
+    .slice(0, IDEAS)
+    .map((idea) => `${idea}\n`)
+    .join('');
+}
+
+/** Las ideas terminadas, una por línea. Vacío si no ha dicho nada que se entienda. */
+export function cleanIdeas(text: string): string {
+  const visible = visibleReply(text);
+  // Las mismas que se veían mientras escribía, también si se cortó a medias; si el modelo no
+  // ha respondido en JSON, las de una lista normal.
+  let ideas = partialIdeas(visible);
+  if (ideas.length === 0) ideas = visible.split('\n').filter((line) => LIST_ITEM.test(line));
+  return ideas.map(cleanIdea).filter(Boolean).slice(0, IDEAS).join('\n');
 }

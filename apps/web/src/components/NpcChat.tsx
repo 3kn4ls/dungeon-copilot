@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStoreGameEvent } from '../queries';
-import { ConfirmButton, ErrorNote, useSessionState } from './ui';
+import { ConfirmButton, ErrorNote, LineEditor, useSessionState } from './ui';
 
 interface ChatLine extends TalkLine {
   id: string;
@@ -304,42 +304,5 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
         </div>
       </form>
     </div>
-  );
-}
-
-/** Para retocar lo que dice el PNJ, o escribirlo desde cero. */
-function LineEditor(props: {
-  label: string;
-  value: string;
-  autoFocus?: boolean;
-  onChange: (value: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <form
-      className="stack tight"
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onSave();
-      }}
-    >
-      <textarea
-        aria-label={props.label}
-        rows={3}
-        maxLength={2000}
-        autoFocus={props.autoFocus}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-      />
-      <div className="actions">
-        <button type="submit" className="button small primary">
-          Guardar
-        </button>
-        <button type="button" className="button small" onClick={props.onCancel}>
-          Cancelar
-        </button>
-      </div>
-    </form>
   );
 }

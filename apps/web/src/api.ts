@@ -10,6 +10,7 @@ import type {
   CampaignSummary,
   CharacterView,
   CloseGameRequest,
+  ComplicationsRequest,
   CreateCampaignRequest,
   CreateCharacterRequest,
   DamageRequest,
@@ -32,6 +33,7 @@ import type {
   RecapRequest,
   RecoverRequest,
   RegisterRequest,
+  RevealDraftRequest,
   RevealRequest,
   RollRequest,
   RollResponse,
@@ -193,6 +195,16 @@ export const api = {
     post<{ game: GameDetail; event: GameEvent }>(`/api/games/${id}/close`, body),
   reveal: (id: string, body: RevealRequest) =>
     post<EventResponse>(`/api/games/${id}/reveals`, body).then((r) => r.event),
+  /** La IA convierte las notas del máster en la descripción de una escena, sin enseñarla. */
+  draftReveal: (id: string, body: RevealDraftRequest, options: AiTextOptions) =>
+    aiText(`/api/games/${id}/reveals/draft`, body, options),
+  /** La IA propone complicaciones para una tirada, una por línea, sin enseñarlas. */
+  complications: (
+    id: string,
+    eventId: number,
+    body: ComplicationsRequest,
+    options: AiTextOptions,
+  ) => aiText(`/api/games/${id}/rolls/${eventId}/complications`, body, options),
   note: (id: string, body: NoteRequest) =>
     post<EventResponse>(`/api/games/${id}/notes`, body).then((r) => r.event),
   gameRoll: (id: string, body: GameRollRequest) =>

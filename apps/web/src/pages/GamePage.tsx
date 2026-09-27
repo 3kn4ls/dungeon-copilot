@@ -12,6 +12,7 @@ import {
   combineEdges,
   conditionEdges,
   defaultSkillCatalog,
+  needsComplication,
   opposedOdds,
   successChance,
   testOdds,
@@ -34,7 +35,9 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
+import { Complications } from '../components/Complications';
 import { EventCard } from '../components/GameEvents';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
@@ -63,6 +66,8 @@ import {
 import { signed } from '../rules-text';
 
 const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
+/** Tiradas del final del registro a las que se pueden pedir complicaciones. */
+const RECENT_ROLLS = 3;
 const SITUATIONS: Situation[] = ['test', 'melee', 'ranged'];
 
 export function GamePage() {
@@ -70,6 +75,7 @@ export function GamePage() {
   const state = useGame(gameId);
   const storeEvent = useStoreGameEvent(gameId);
   const queryClient = useQueryClient();
+  const ai = useAiStatus();
   const game = state.data?.game;
 
   const live = useLiveEvents({
@@ -91,6 +97,16 @@ export function GamePage() {
   if (!state.data || !game || lost) return <QueryState error={state.error} />;
   const isMaster = game.role === 'master';
   const isOpen = game.status === 'open';
+  // Las complicaciones se piden al momento: solo en las últimas tiradas, y solo el máster.
+  const complicated = new Set(
+    isMaster && isOpen && ai.data?.enabled
+      ? state.data.events
+          .filter((event) => event.kind === 'roll')
+          .slice(-RECENT_ROLLS)
+          .filter((event) => needsComplication(event.roll.result.outcome))
+          .map((event) => event.id)
+      : [],
+  );
 
   return (
     <>
@@ -138,7 +154,11 @@ export function GamePage() {
           <ol className="feed" aria-live="polite">
             {[...state.data.events].reverse().map((event) => (
               <li key={event.id}>
-                <EventCard event={event} />
+                <EventCard event={event}>
+                  {event.kind === 'roll' && complicated.has(event.id) && (
+                    <Complications game={game} event={event} />
+                  )}
+                </EventCard>
               </li>
             ))}
           </ol>
@@ -213,10 +233,20 @@ function recallTitle(previous: GameSummary, game: GameDetail): string {
     : `Lo que pasó en la partida ${previous.number}`;
 }
 
-/** Con `starting`, aún no se ha enseñado nada: se ofrece recordar la partida anterior. */
+/**
+ * Lo que el máster enseña a la mesa. Con IA, puede escribir solo unas notas y pedir que las
+ * convierta en una descripción. Con `starting`, aún no se ha enseñado nada: se ofrece
+ * recordar la partida anterior.
+ */
 function RevealForm({ game, starting }: { game: GameDetail; starting: boolean }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  /** Las notas que la IA ha convertido en descripción; null si no ha descrito nada. */
+  const [notes, setNotes] = useState<string | null>(null);
+  /** La última descripción de la IA, para saber si el máster la ha retocado. */
+  const [described, setDescribed] = useState('');
+  const ai = useAiStatus();
+  const writer = useAiText();
   const previous = usePreviousRecap(game);
   const storeEvent = useStoreGameEvent(game.id);
   const reveal = useMutation({
@@ -225,9 +255,26 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
       storeEvent(event);
       setTitle('');
       setBody('');
+      setNotes(null);
     },
   });
   const recall = starting && !title && !body ? previous : undefined;
+  const aiEnabled = ai.data?.enabled === true;
+
+  async function describe(from: string) {
+    const before = notes;
+    setNotes(from);
+    const text = await writer.write((options) =>
+      api.draftReveal(game.id, { title, notes: from }, options),
+    );
+    // Si falla o se para antes de escribir nada, todo queda como estaba.
+    if (!text) {
+      setNotes(before);
+      return;
+    }
+    setBody(text);
+    setDescribed(text);
+  }
 
   return (
     <form
@@ -268,12 +315,75 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
           required
           rows={5}
           maxLength={5000}
-          value={body}
+          value={writer.writing ? writer.pending || 'Escribiendo…' : body}
+          readOnly={writer.writing}
+          aria-busy={writer.writing}
           onChange={(e) => setBody(e.target.value)}
         />
+        {aiEnabled && notes === null && (
+          <span className="hint">
+            Puedes escribir solo unas notas y pedir a la IA que las describa. Entre corchetes, lo
+            que debe saber pero no contar.
+          </span>
+        )}
       </label>
-      <ErrorNote error={reveal.error} />
-      <button type="submit" className="button primary" disabled={reveal.isPending}>
+      {aiEnabled && (
+        <div className="actions">
+          {/* Botones distintos (key): el de Parar no debe heredar el clic que empieza. */}
+          {writer.writing ? (
+            <button key="stop" type="button" className="button" onClick={writer.stop}>
+              Parar
+            </button>
+          ) : notes === null ? (
+            <button
+              key="describe"
+              type="button"
+              className="button"
+              disabled={!body.trim() && !title.trim()}
+              onClick={() => void describe(body)}
+            >
+              Describir con IA
+            </button>
+          ) : (
+            <>
+              {body === described ? (
+                <button
+                  key="again"
+                  type="button"
+                  className="button"
+                  onClick={() => void describe(notes)}
+                >
+                  Otra versión
+                </button>
+              ) : (
+                <ConfirmButton
+                  key="again-confirm"
+                  confirmLabel="¿Cambiar lo retocado por otra versión?"
+                  onConfirm={() => void describe(notes)}
+                >
+                  Otra versión
+                </ConfirmButton>
+              )}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  setBody(notes);
+                  setNotes(null);
+                }}
+              >
+                Volver a mis notas
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <ErrorNote error={reveal.error ?? writer.error} />
+      <button
+        type="submit"
+        className="button primary"
+        disabled={reveal.isPending || writer.writing}
+      >
         Enseñar a la mesa
       </button>
     </form>

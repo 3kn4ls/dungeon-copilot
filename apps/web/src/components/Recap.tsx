@@ -1,6 +1,7 @@
 import { RECAP_MAX, type GameDetail, type GameState } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
+import { useAiText } from '../ai';
 import { api } from '../api';
 import { keys, useAiStatus } from '../queries';
 import { ConfirmButton, ErrorNote, QueryState, useSessionState } from './ui';
@@ -55,14 +56,8 @@ function RecapEditor(props: {
   const queryClient = useQueryClient();
   const [hint, setHint] = useState('');
   const [useNotes, setUseNotes] = useState(true);
-  /** Lo que lleva escrito la IA mientras escribe; null si no está escribiendo. */
-  const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const request = useRef<AbortController | null>(null);
+  const writer = useAiText();
   const notesHint = useId();
-
-  // Al salir de la partida, se para el resumen que estuviera a medias.
-  useEffect(() => () => request.current?.abort(), []);
 
   const save = useMutation({
     mutationFn: () => api.saveRecap(game.id, { recap: text }),
@@ -76,43 +71,15 @@ function RecapEditor(props: {
   });
 
   async function write() {
-    request.current?.abort();
-    const current = new AbortController();
-    request.current = current;
-    setError(null);
-    setPending('');
-    let partial = '';
-    try {
-      const written = await api.draftRecap(
-        game.id,
-        { hint, useNotes },
-        {
-          signal: current.signal,
-          onText: (next) => {
-            partial = next;
-            setPending(next);
-          },
-        },
-      );
-      onChange(written);
-    } catch (caught) {
-      if (current.signal.aborted) {
-        // Parado a medias: lo que llegó a escribir se queda, por si sirve.
-        const kept = partial.trim();
-        if (kept) onChange(kept);
-      } else {
-        setError(caught);
-      }
-    } finally {
-      if (request.current === current) {
-        request.current = null;
-        setPending(null);
-      }
-    }
+    const written = await writer.write((options) =>
+      api.draftRecap(game.id, { hint, useNotes }, options),
+    );
+    // Parado a medias, lo que llegó a escribir se queda, por si sirve.
+    if (written) onChange(written);
   }
 
   if (!ai.data) return <QueryState error={ai.error} />;
-  const writing = pending !== null;
+  const { writing, pending } = writer;
 
   return (
     <div className="stack tight">
@@ -156,12 +123,7 @@ function RecapEditor(props: {
             {/* Botones distintos (key), como en la charla con un PNJ: el de Parar no debe
                 heredar el clic que empieza a escribir. */}
             {writing ? (
-              <button
-                key="stop"
-                type="button"
-                className="button"
-                onClick={() => request.current?.abort()}
-              >
+              <button key="stop" type="button" className="button" onClick={writer.stop}>
                 Parar
               </button>
             ) : text.trim() ? (
@@ -209,7 +171,7 @@ function RecapEditor(props: {
             onChange={(e) => onChange(e.target.value)}
           />
         </label>
-        <ErrorNote error={error ?? save.error} />
+        <ErrorNote error={writer.error ?? save.error} />
         <div className="actions">
           <button
             type="submit"
