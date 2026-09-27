@@ -11,6 +11,7 @@ import {
   NPC_LIMITS,
   RECAP_MAX,
   REVEAL_MAX,
+  rerollerLabel,
   type GameEventPayload,
   type GameRoll,
   type GameRollSide,
@@ -388,6 +389,12 @@ function rollText(roll: GameRoll): string {
   return `${sideText(roll.actor)} contra ${sideText(roll.target)}${situation}: ${outcome} para ${roll.actor.label}.`;
 }
 
+/** "La tirada" o, si alguien la ha repetido con Suerte, "La tirada, repetida con Suerte por Kael". */
+function rollName(roll: GameRoll): string {
+  const who = rerollerLabel(roll);
+  return who ? `La tirada, repetida con Suerte por ${who}` : 'La tirada';
+}
+
 /** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
 function logLine(event: GameEventPayload): { text: string; weight: number } | null {
   switch (event.kind) {
@@ -409,8 +416,11 @@ function logLine(event: GameEventPayload): { text: string; weight: number } | nu
         text: `- ${event.name} (PNJ) dice: «${fit(event.text, LOG_LINE_CHARS)}»`,
         weight: 1,
       };
-    case 'roll':
-      return { text: `- Tirada: ${rollText(event.roll)}`, weight: 0 };
+    case 'roll': {
+      const who = rerollerLabel(event.roll);
+      const name = who ? `Tirada repetida con Suerte por ${who}` : 'Tirada';
+      return { text: `- ${name}: ${rollText(event.roll)}`, weight: 0 };
+    }
   }
 }
 
@@ -640,7 +650,7 @@ export function complicationMessages(prompt: ComplicationPrompt): AiMessage[] {
     campaignBlock(prompt.campaign),
     party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
     scenesBlock(prompt.scenes),
-    `La tirada: ${rollText(roll)}`,
+    `${rollName(roll)}: ${rollText(roll)}`,
     intent ? `Lo que intentaba ${roll.actor.label}: ${intent}` : '',
     'Propón tres complicaciones.',
   ].filter(Boolean);

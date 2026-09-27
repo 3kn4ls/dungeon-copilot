@@ -4,6 +4,8 @@ import {
   evaluateOpposed,
   evaluateTest,
   outcomeFromMargin,
+  rerollOpposed,
+  rerollTest,
   resolveOpposed,
   resolveTest,
   shiftOutcome,
@@ -95,5 +97,57 @@ describe('resolveOpposed', () => {
     expect(result.margin).toBe(-4);
     expect(result.outcome).toBe('failure');
     expect(result.success).toBe(false);
+  });
+});
+
+describe('rerollTest', () => {
+  it('tira dados nuevos con el mismo bonificador, la misma ventaja y la misma dificultad', () => {
+    const first = resolveTest(
+      { bonus: 3, edge: 'advantage' },
+      DIFFICULTIES.hard,
+      fixedDice(1, 2, 2),
+    );
+    expect(first.outcome).toBe('failure'); // 2+2+3 = 7 contra 12
+
+    const second = rerollTest(first, fixedDice(6, 4, 5));
+    expect(second.roller.dice).toEqual({ rolled: [6, 4, 5], kept: [5, 6], edge: 'advantage' });
+    expect(second.roller.bonus).toBe(3);
+    expect(second.roller.total).toBe(14);
+    expect(second.difficulty).toBe(DIFFICULTIES.hard);
+    expect(second.margin).toBe(2);
+    expect(second.outcome).toBe('partial');
+    expect(second.success).toBe(true);
+  });
+});
+
+describe('rerollOpposed', () => {
+  // 2+3+5 = 10 contra 5+5+4 = 14: fallo.
+  const first = resolveOpposed({ bonus: 5 }, { bonus: 4 }, fixedDice(2, 3, 5, 5));
+
+  it('repite los dados de quien actúa y deja los del rival', () => {
+    const again = rerollOpposed(first, 'actor', fixedDice(6, 5));
+    expect(again.actor.total).toBe(16);
+    expect(again.opponent).toEqual(first.opponent);
+    expect(again.margin).toBe(2);
+    expect(again.outcome).toBe('partial');
+  });
+
+  it('repite los dados del rival y deja los de quien actúa', () => {
+    const again = rerollOpposed(first, 'opponent', fixedDice(1, 1));
+    expect(again.actor).toEqual(first.actor);
+    expect(again.opponent.total).toBe(6);
+    // 10 contra 6: pleno, y el doble 1 del rival lo sube a crítico.
+    expect(again.outcome).toBe('critical');
+  });
+
+  it('mantiene la desventaja de quien repite', () => {
+    const hurt = resolveOpposed(
+      { bonus: 2, edge: 'disadvantage' },
+      { bonus: 2 },
+      fixedDice(1, 2, 6, 3, 3),
+    );
+    const again = rerollOpposed(hurt, 'actor', fixedDice(6, 6, 2));
+    expect(again.actor.dice).toEqual({ rolled: [6, 6, 2], kept: [2, 6], edge: 'disadvantage' });
+    expect(again.actor.total).toBe(10);
   });
 });

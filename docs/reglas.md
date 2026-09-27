@@ -50,7 +50,7 @@ No se acumulan: dos ventajas siguen siendo una ventaja, y una ventaja y una desv
 
 ### Suerte
 
-Cada personaje empieza la sesión con **3 puntos de Suerte**. Un punto permite repetir una tirada propia; cuenta el segundo resultado.
+Cada personaje empieza la sesión con **3 puntos de Suerte**. Un punto permite repetir una tirada propia; cuenta el segundo resultado. En una tirada enfrentada repites solo tus dados: los del rival se quedan como estaban. Cada personaje repite una misma tirada una sola vez.
 
 ## El personaje
 

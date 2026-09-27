@@ -1464,6 +1464,43 @@ h1 .badge {
   color: var(--partial);
 }
 
+/* Una tirada repetida con Suerte: la nueva lo dice y la vieja queda apagada, porque no cuenta. */
+.roll-luck {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.feed-superseded .roll-view {
+  opacity: 0.55;
+}
+
+.roll-superseded {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.luck-reroll {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.luck-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.luck-row p {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
 .side-editor {
   display: grid;
   gap: 12px;

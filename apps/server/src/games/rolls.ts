@@ -6,15 +6,18 @@ import {
   combineEdges,
   conditionEdges,
   defaultSkillCatalog,
+  rerollOpposed,
+  rerollTest,
   resolveOpposed,
   resolveTest,
   type Check,
   type CharacterBuild,
   type DifficultyLevel,
+  type OpposedSide,
   type Random,
   type WoundState,
 } from '@dungeon-copilot/rules';
-import type { GameRoll, GameRollSide, gameRollSchema } from '@dungeon-copilot/shared';
+import type { GameRoll, GameRollSide, RollResponse, gameRollSchema } from '@dungeon-copilot/shared';
 import type { z } from 'zod';
 import { HttpError } from '../http/errors';
 
@@ -132,4 +135,21 @@ export function resolveGameRoll(
     notes: [...actor.notes, ...opponent.notes],
     result: { kind: 'opposed', ...resolveOpposed(actor.check, opponent.check, random) },
   };
+}
+
+/**
+ * Repite con Suerte los dados de un bando de la tirada del evento `of`: mismo bonificador, misma
+ * ventaja o desventaja y el mismo objetivo. Los dados del otro bando se quedan; cuenta la nueva.
+ */
+export function rerollGameRoll(
+  roll: GameRoll,
+  of: number,
+  side: OpposedSide,
+  random: Random,
+): GameRoll {
+  const result: RollResponse =
+    roll.result.kind === 'test'
+      ? { kind: 'test', ...rerollTest(roll.result, random) }
+      : { kind: 'opposed', ...rerollOpposed(roll.result, side, random) };
+  return { ...roll, result, reroll: { of, side, sides: [...(roll.reroll?.sides ?? []), side] } };
 }

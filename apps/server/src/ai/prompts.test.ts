@@ -411,6 +411,32 @@ describe('resumen de una partida', () => {
     expect(cleanRecap('**La cripta**')).toBe('');
     expect(cleanRecap('a'.repeat(5000))).toHaveLength(4000);
   });
+
+  it('dice quién ha repetido una tirada con Suerte', () => {
+    const first = test('Mira', 12, [1, 2]);
+    if (first.kind !== 'roll') throw new Error('Se esperaba una tirada');
+    const again: GameEventPayload = {
+      kind: 'roll',
+      roll: {
+        ...first.roll,
+        result: { kind: 'test', ...resolveTest({ bonus: 2, edge: 'none' }, 12, fixedDice(6, 5)) },
+        reroll: { of: 7, side: 'actor', sides: ['actor'] },
+      },
+    };
+    const [, user] = recapMessages({
+      campaign,
+      characters: [],
+      game: { number: 1, title: '' },
+      events: [first, again],
+      hint: '',
+    });
+    expect(user?.content).toContain(
+      [
+        '- Tirada: Mira, prueba difícil (12): fallo.',
+        '- Tirada repetida con Suerte por Mira: Mira, prueba difícil (12): éxito con coste.',
+      ].join('\n'),
+    );
+  });
 });
 
 describe('describir una escena', () => {
@@ -507,6 +533,23 @@ describe('complicaciones de una tirada', () => {
         'Lo que intentaba Kael: forzar la puerta',
         'Propón tres complicaciones.',
       ].join('\n\n'),
+    );
+  });
+
+  it('dice si la tirada se ha repetido con Suerte', () => {
+    const again: GameRoll = {
+      ...roll('failure', [1, 2]),
+      reroll: { of: 3, side: 'actor', sides: ['actor'] },
+    };
+    const [, user] = complicationMessages({
+      campaign,
+      characters: [],
+      scenes: [],
+      intent: '',
+      roll: again,
+    });
+    expect(user?.content).toContain(
+      'La tirada, repetida con Suerte por Kael: Kael (Ganzúas), prueba normal (10): fallo.',
     );
   });
 

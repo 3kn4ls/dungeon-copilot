@@ -34,6 +34,7 @@ import type {
   RecapRequest,
   RecoverRequest,
   RegisterRequest,
+  RerollRequest,
   RevealDraftRequest,
   RevealRequest,
   RollRequest,
@@ -213,6 +214,9 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/notes`, body).then((r) => r.event),
   gameRoll: (id: string, body: GameRollRequest) =>
     post<EventResponse>(`/api/games/${id}/rolls`, body).then((r) => r.event),
+  /** Gasta un punto de Suerte del personaje para repetir sus dados; cuenta la tirada nueva. */
+  reroll: (id: string, eventId: number, body: RerollRequest) =>
+    post<EventResponse>(`/api/games/${id}/rolls/${eventId}/reroll`, body).then((r) => r.event),
   speech: (id: string, body: SpeechRequest) =>
     post<EventResponse>(`/api/games/${id}/speeches`, body).then((r) => r.event),
   saveRecap: (id: string, body: RecapRequest) =>
