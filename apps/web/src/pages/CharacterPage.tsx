@@ -8,6 +8,7 @@ import {
   SKILL_RANK_LABELS,
   SKILL_RANK_MAX,
   XP_AWARDS,
+  conditionEdges,
   defaultSkillCatalog,
   hasPhysicalDisadvantage,
   planAdvance,
@@ -24,21 +25,30 @@ import { ConfirmButton, ErrorNote, QueryState, Stepper, useDocumentTitle } from 
 import { keys, useCampaign, useCharacter, useStoreCharacter } from '../queries';
 import { requirementText, signed } from '../rules-text';
 
-const PHYSICAL: readonly Attribute[] = ['strength', 'dexterity', 'endurance'];
-
 function toBuild(character: CharacterView): CharacterBuild {
   const { name, background, attributes, skills, advancedSkills } = character;
   return { name, background, attributes, skills, advancedSkills };
 }
 
+/** Desventajas que impone el estado del personaje, como una herida grave en tiradas físicas. */
+function woundEdges(character: CharacterView, attribute: Attribute, skill?: string) {
+  return conditionEdges(toBuild(character), { attribute, skill }, { wounds: character.wounds });
+}
+
 /** Enlace al tirador con el bonificador ya puesto. */
-function rollLink(character: CharacterView, attribute: Attribute, rank: number, label: string) {
+function rollLink(
+  character: CharacterView,
+  attribute: Attribute,
+  rank: number,
+  label: string,
+  skill?: string,
+) {
   const params = new URLSearchParams({
     atributo: String(character.attributes[attribute]),
     habilidad: String(rank),
     etiqueta: `${character.name}: ${label}`,
   });
-  if (PHYSICAL.includes(attribute) && hasPhysicalDisadvantage(character.wounds)) {
+  if (woundEdges(character, attribute, skill).includes('disadvantage')) {
     params.set('desventaja', '1');
   }
   return `/tirador?${params}`;
@@ -225,7 +235,7 @@ function Skills({ sheet }: { sheet: CharacterView }) {
                   </span>
                 </span>
                 <Link
-                  to={rollLink(sheet, skill.attribute, rank, skill.name)}
+                  to={rollLink(sheet, skill.attribute, rank, skill.name, skill.id)}
                   className="button small"
                   aria-label={`Tirar ${skill.name} con ${signed(bonus)}`}
                 >
@@ -286,9 +296,12 @@ function Wounds({ sheet, actions }: { sheet: CharacterView; actions: SheetAction
           </li>
         ))}
       </ol>
-      {hasPhysicalDisadvantage(sheet.wounds) && (
-        <p className="hint unmet">Desventaja en tiradas de Fuerza, Destreza y Aguante.</p>
-      )}
+      {hasPhysicalDisadvantage(sheet.wounds) &&
+        (woundEdges(sheet, 'strength').length > 0 ? (
+          <p className="hint unmet">Desventaja en tiradas de Fuerza, Destreza y Aguante.</p>
+        ) : (
+          <p className="hint">Imparable: la herida no le da desventaja.</p>
+        ))}
 
       {actions.lethal && (
         <div className="alert" role="alert">
