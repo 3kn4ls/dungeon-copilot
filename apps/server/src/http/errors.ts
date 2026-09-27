@@ -52,6 +52,8 @@ const CLIENT_ERROR_MESSAGES: Record<string, string> = {
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler<FastifyError | HttpError>((error, request, reply) => {
     if (error instanceof HttpError) {
+      // Los fallos de otros servicios (Ollama) se apuntan con su causa para poder investigarlos.
+      if (error.statusCode >= 500) request.log.warn({ err: error.cause ?? error }, error.message);
       const body: ApiErrorBody = { error: error.message };
       if (error.issues) body.issues = error.issues;
       return reply.status(error.statusCode).send(body);

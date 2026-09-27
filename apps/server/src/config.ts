@@ -16,6 +16,16 @@ export interface Config {
   allowRegistration: boolean;
   /** Carpeta con la web compilada. Si no existe, el servidor solo sirve la API. */
   webDist?: string;
+  /** IA de los PNJ. Sin ella, todo funciona igual salvo lo que escribe la IA. */
+  ollama?: OllamaConfig;
+}
+
+export interface OllamaConfig {
+  /** Dirección de Ollama: el del cluster, otro servidor o https://ollama.com. */
+  url: string;
+  model: string;
+  /** Para los modelos en la nube de Ollama. */
+  apiKey?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -37,10 +47,30 @@ function parsePort(value: string | undefined): number {
   return port;
 }
 
+function parseOllama(env: Env): OllamaConfig | undefined {
+  const url = env.OLLAMA_URL?.trim();
+  const model = env.OLLAMA_MODEL?.trim();
+  const apiKey = env.OLLAMA_API_KEY?.trim();
+  if (!url && !model) return undefined;
+  if (!url) throw new Error('Falta OLLAMA_URL: la dirección de Ollama, como http://ollama:11434');
+  if (!model) throw new Error('Falta OLLAMA_MODEL: el modelo de Ollama que usará la IA');
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`OLLAMA_URL debe ser una dirección como http://ollama:11434, llegó "${url}"`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`OLLAMA_URL debe empezar por http:// o https://, llegó "${url}"`);
+  }
+  return { url, model, ...(apiKey ? { apiKey } : {}) };
+}
+
 /** Lee la configuración de las variables de entorno. Las rutas relativas parten de cwd. */
 export function loadConfig(env: Env = process.env, cwd: string = process.cwd()): Config {
   const webDist = resolve(cwd, env.WEB_DIST ?? '../web/dist');
   const databaseUrl = env.DATABASE_URL?.trim();
+  const ollama = parseOllama(env);
   return {
     port: parsePort(env.PORT),
     host: env.HOST?.trim() || '0.0.0.0',
@@ -52,5 +82,6 @@ export function loadConfig(env: Env = process.env, cwd: string = process.cwd()):
         : parseBoolean('COOKIE_SECURE', env.COOKIE_SECURE, 'auto'),
     allowRegistration: parseBoolean('ALLOW_REGISTRATION', env.ALLOW_REGISTRATION, true),
     ...(existsSync(resolve(webDist, 'index.html')) ? { webDist } : {}),
+    ...(ollama ? { ollama } : {}),
   };
 }

@@ -1,15 +1,18 @@
 import fastifyCookie from '@fastify/cookie';
 import type { Random } from '@dungeon-copilot/rules';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { Ai } from './ai/ollama';
 import { DEFAULT_SCRYPT_PARAMS, type ScryptParams } from './auth/password';
 import type { AppContext } from './context';
 import type { Database } from './db';
 import { GameHub } from './games/hub';
 import { registerErrorHandler } from './http/errors';
+import { registerAiRoutes } from './routes/ai';
 import { registerAuthRoutes } from './routes/auth';
 import { registerCampaignRoutes } from './routes/campaigns';
 import { registerCharacterRoutes } from './routes/characters';
 import { registerGameRoutes } from './routes/games';
+import { registerNpcRoutes } from './routes/npcs';
 import { registerRollRoutes } from './routes/rolls';
 import { registerWeb } from './web';
 
@@ -18,6 +21,8 @@ export interface AppOptions {
   logger?: boolean;
   /** Fuente de aleatoriedad de las tiradas; los tests la fijan para que sean deterministas. */
   random?: Random;
+  /** IA de los PNJ (Ollama). Sin ella, la web no ofrece lo que escribe la IA. */
+  ai?: Ai | null;
   /** Cookies solo por HTTPS. Por defecto, "auto": según llegue la petición. */
   cookieSecure?: boolean | 'auto';
   allowRegistration?: boolean;
@@ -32,6 +37,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const ctx: AppContext = {
     db: options.db,
     hub: new GameHub(),
+    ai: options.ai ?? null,
     random: options.random ?? Math.random,
     cookieSecure: options.cookieSecure ?? 'auto',
     allowRegistration: options.allowRegistration ?? true,
@@ -42,14 +48,20 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.removeContentTypeParser('text/plain');
   registerErrorHandler(app);
   await app.register(fastifyCookie);
-  // Los directos no terminan solos: al apagar se cortan para que el cierre no se quede esperando.
-  app.addHook('preClose', async () => ctx.hub.disconnectAll());
+  // Los directos y las respuestas de la IA no terminan solos: al apagar se cortan para que el
+  // cierre no se quede esperando.
+  app.addHook('preClose', async () => {
+    ctx.hub.disconnectAll();
+    ctx.ai?.close();
+  });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
   registerAuthRoutes(app, ctx);
   registerCampaignRoutes(app, ctx);
   registerCharacterRoutes(app, ctx);
   registerGameRoutes(app, ctx);
+  registerNpcRoutes(app, ctx);
+  registerAiRoutes(app, ctx);
   registerRollRoutes(app, ctx.random);
   await registerWeb(app, options.webDist);
 

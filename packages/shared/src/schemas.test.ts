@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { registerRequestSchema, usernameSchema } from './auth';
 import { joinCampaignSchema, updateCampaignSchema } from './campaigns';
 import { advanceSchema, awardXpSchema, updateCharacterSchema } from './characters';
-import { gameRollSchema, openGameSchema, revealSchema } from './games';
+import { gameRollSchema, openGameSchema, revealSchema, speechSchema } from './games';
+import { TALK_MEMORY, generateNpcSchema, npcSchema, talkSchema, updateNpcSchema } from './npcs';
 
 describe('cuentas', () => {
   it('guarda el usuario en minúsculas y sin espacios alrededor', () => {
@@ -79,5 +80,57 @@ describe('partidas', () => {
     const nameless = { kind: 'free', label: ' ', bonus: 4 };
     const opposed = { actor, target: { kind: 'opposed', opponent: nameless } };
     expect(gameRollSchema.safeParse(opposed).success).toBe(false);
+  });
+});
+
+describe('PNJ', () => {
+  it('solo el nombre es obligatorio y sin perfil no pelea', () => {
+    expect(npcSchema.parse({ name: ' Brunilda ' })).toEqual({
+      name: 'Brunilda',
+      concept: '',
+      appearance: '',
+      personality: '',
+      speech: '',
+      goals: '',
+      secrets: '',
+      profile: null,
+    });
+    expect(npcSchema.safeParse({ name: '  ' }).success).toBe(false);
+    expect(npcSchema.safeParse({ name: 'Brunilda', profile: 'dragon' }).success).toBe(false);
+  });
+
+  it('un cambio solo toca lo que trae, y quitar el perfil también cuenta', () => {
+    expect(updateNpcSchema.parse({ secrets: 'Esconde a un desertor' })).toEqual({
+      secrets: 'Esconde a un desertor',
+    });
+    expect(updateNpcSchema.parse({ profile: null })).toEqual({ profile: null });
+    expect(updateNpcSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('para inventar un PNJ basta con nada, o con lo que ya se haya rellenado', () => {
+    expect(generateNpcSchema.parse({})).toEqual({ idea: '', draft: {} });
+    expect(generateNpcSchema.parse({ draft: { name: '', concept: ' Herrero ' } })).toEqual({
+      idea: '',
+      draft: { name: '', concept: 'Herrero' },
+    });
+  });
+
+  it('la conversación recuerda un número acotado de frases', () => {
+    expect(talkSchema.parse({})).toEqual({ history: [], input: '' });
+    const line = { role: 'table', text: 'Hola' };
+    const long = { history: Array.from({ length: TALK_MEMORY + 1 }, () => line) };
+    expect(talkSchema.safeParse(long).success).toBe(false);
+    expect(talkSchema.safeParse({ history: [{ role: 'master', text: 'Hola' }] }).success).toBe(
+      false,
+    );
+  });
+
+  it('lo que dice un PNJ en la partida no puede estar vacío', () => {
+    const npcId = '5f0c3b7e-9a2d-4c1e-8b6f-0a3d2c1b4e5f';
+    expect(speechSchema.safeParse({ npcId, text: '   ' }).success).toBe(false);
+    expect(speechSchema.parse({ npcId, text: ' ¿Qué queréis? ' })).toEqual({
+      npcId,
+      text: '¿Qué queréis?',
+    });
   });
 });

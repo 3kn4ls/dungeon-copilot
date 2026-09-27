@@ -130,5 +130,13 @@ export function EventCard({ event }: { event: GameEvent }) {
           <RollView roll={event.roll} />
         </article>
       );
+    case 'speech':
+      return (
+        <article className="feed-item feed-speech">
+          {meta}
+          <h3>{event.name}</h3>
+          <p className="prewrap">{event.text}</p>
+        </article>
+      );
   }
 }

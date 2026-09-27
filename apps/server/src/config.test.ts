@@ -52,6 +52,33 @@ describe('loadConfig', () => {
     expect(loadConfig({}, cwd).webDist).toBe(dist);
   });
 
+  it('la IA se activa con la dirección y el modelo de Ollama', () => {
+    expect(loadConfig({}, cwd).ollama).toBeUndefined();
+    expect(
+      loadConfig({ OLLAMA_URL: ' http://ollama:11434 ', OLLAMA_MODEL: 'qwen2.5:7b' }, cwd).ollama,
+    ).toEqual({ url: 'http://ollama:11434', model: 'qwen2.5:7b' });
+    const cloud = loadConfig(
+      { OLLAMA_URL: 'https://ollama.com', OLLAMA_MODEL: 'gpt-oss:120b', OLLAMA_API_KEY: 'clave' },
+      cwd,
+    );
+    expect(cloud.ollama).toEqual({
+      url: 'https://ollama.com',
+      model: 'gpt-oss:120b',
+      apiKey: 'clave',
+    });
+  });
+
+  it('avisa si a la IA le falta la dirección o el modelo', () => {
+    expect(() => loadConfig({ OLLAMA_URL: 'http://ollama:11434' }, cwd)).toThrow('OLLAMA_MODEL');
+    expect(() => loadConfig({ OLLAMA_MODEL: 'llama3.1' }, cwd)).toThrow('OLLAMA_URL');
+    expect(() => loadConfig({ OLLAMA_URL: 'ollama:11434', OLLAMA_MODEL: 'x' }, cwd)).toThrow(
+      'http://',
+    );
+    expect(() => loadConfig({ OLLAMA_URL: 'no es una url', OLLAMA_MODEL: 'x' }, cwd)).toThrow(
+      'OLLAMA_URL',
+    );
+  });
+
   it('rechaza valores que no entiende', () => {
     expect(() => loadConfig({ PORT: 'ochenta' }, cwd)).toThrow('PORT');
     expect(() => loadConfig({ COOKIE_SECURE: 'quizá' }, cwd)).toThrow('COOKIE_SECURE');

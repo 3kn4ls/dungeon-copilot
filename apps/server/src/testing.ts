@@ -81,11 +81,14 @@ async function openTestDatabase(): Promise<{ handle: DatabaseHandle; dispose(): 
   };
 }
 
+type TestAppOptions = Omit<AppOptions, 'db'>;
+
 /**
  * Una base de datos para todo el archivo de tests, vaciada antes de cada test.
- * Arrancarla cuesta unos segundos, así que no se crea una por test.
+ * Arrancarla cuesta unos segundos, así que no se crea una por test. Las opciones pueden
+ * llegar como función cuando dependen de algo que se prepara antes, como un Ollama de mentira.
  */
-export function useTestApp(options: Omit<AppOptions, 'db'> = {}) {
+export function useTestApp(options: TestAppOptions | (() => TestAppOptions) = {}) {
   let database: Awaited<ReturnType<typeof openTestDatabase>> | undefined;
   let handle: DatabaseHandle | undefined;
   let app: FastifyInstance | undefined;
@@ -94,7 +97,8 @@ export function useTestApp(options: Omit<AppOptions, 'db'> = {}) {
     database = await openTestDatabase();
     handle = database.handle;
     await handle.migrate();
-    app = await buildApp({ db: handle.db, passwordParams: TEST_PASSWORD_PARAMS, ...options });
+    const extra = typeof options === 'function' ? options() : options;
+    app = await buildApp({ db: handle.db, passwordParams: TEST_PASSWORD_PARAMS, ...extra });
   }, 30_000);
 
   beforeEach(async () => {

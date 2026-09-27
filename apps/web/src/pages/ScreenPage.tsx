@@ -61,6 +61,9 @@ export function ScreenPage() {
 
   const { campaignName, game, events } = screen.data;
   const reveal = events.findLast((event) => event.kind === 'reveal');
+  // Lo que dice un PNJ se ve bajo la escena en la que lo dijo, hasta que el máster enseñe otra.
+  const lastSpeech = events.findLast((event) => event.kind === 'speech');
+  const speech = lastSpeech && (!reveal || lastSpeech.id > reveal.id) ? lastSpeech : undefined;
   const rolls = events
     .filter((event) => event.kind === 'roll')
     .slice(-3)
@@ -84,12 +87,19 @@ export function ScreenPage() {
       ) : (
         <main className="screen-main">
           <section className="screen-reveal" aria-live="polite">
-            {reveal?.kind === 'reveal' ? (
+            {reveal?.kind === 'reveal' && (
               <>
                 {reveal.title && <h1>{reveal.title}</h1>}
                 <p className="prewrap">{reveal.body}</p>
               </>
-            ) : (
+            )}
+            {speech?.kind === 'speech' && (
+              <figure className="screen-speech">
+                <figcaption>{speech.name}</figcaption>
+                <blockquote className="prewrap">{speech.text}</blockquote>
+              </figure>
+            )}
+            {!reveal && !speech && (
               <p className="screen-waiting">Aquí aparecerá lo que enseñe el máster.</p>
             )}
             {game.status === 'closed' && <p className="screen-banner">La partida ha terminado</p>}

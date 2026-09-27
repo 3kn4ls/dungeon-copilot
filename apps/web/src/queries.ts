@@ -1,4 +1,10 @@
-import type { CharacterView, GameEvent, GameState, MeResponse } from '@dungeon-copilot/shared';
+import type {
+  CharacterView,
+  GameEvent,
+  GameState,
+  MeResponse,
+  NpcView,
+} from '@dungeon-copilot/shared';
 import { QueryCache, QueryClient, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api } from './api';
 
@@ -11,6 +17,9 @@ export const keys = {
   games: (campaignId: string) => ['campaigns', campaignId, 'games'] as const,
   game: (id: string) => ['games', id] as const,
   screen: (token: string) => ['screens', token] as const,
+  npcs: (campaignId: string) => ['campaigns', campaignId, 'npcs'] as const,
+  npc: (id: string) => ['npcs', id] as const,
+  ai: ['ai'] as const,
 };
 
 export function createQueryClient(): QueryClient {
@@ -99,5 +108,36 @@ export function useStoreGameEvent(gameId: string) {
     queryClient.setQueryData<GameState>(keys.game(gameId), (state) =>
       state ? mergeGameEvent(state, event) : state,
     );
+  };
+}
+
+/** Si el servidor tiene IA. Solo cambia al reiniciarlo con otra configuración. */
+export const useAiStatus = () =>
+  useQuery({ queryKey: keys.ai, queryFn: api.ai, staleTime: Infinity });
+
+/** Los PNJ de una campaña. Solo el máster puede verlos: a los jugadores ni se les piden. */
+export const useNpcs = (campaignId: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.npcs(campaignId),
+    queryFn: () => api.npcs(campaignId),
+    enabled: enabled && campaignId !== '',
+  });
+
+export const useNpc = (id: string) =>
+  useQuery({ queryKey: keys.npc(id), queryFn: () => api.npc(id), enabled: id !== '' });
+
+/**
+ * Guarda el PNJ que devuelve el servidor, también en la lista de su campaña para que se pueda
+ * elegir al momento, y la marca como vieja para recibirla ordenada.
+ */
+export function useStoreNpc() {
+  const queryClient = useQueryClient();
+  return (npc: NpcView) => {
+    queryClient.setQueryData(keys.npc(npc.id), npc);
+    queryClient.setQueryData<NpcView[]>(
+      keys.npcs(npc.campaignId),
+      (list) => list && [...list.filter((known) => known.id !== npc.id), npc],
+    );
+    void queryClient.invalidateQueries({ queryKey: keys.npcs(npc.campaignId) });
   };
 }

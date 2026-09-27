@@ -15,6 +15,13 @@
       "when": 1790497463836,
       "tag": "0001_partidas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790499751478,
+      "tag": "0002_pnj",
+      "breakpoints": true
     }
   ]
 }
