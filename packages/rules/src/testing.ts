@@ -17,3 +17,5 @@ export function fixedDice(...faces: number[]): Random {
     return (face - 0.5) / 6;
   };
 }
+
+export { kael } from './test-fixtures';

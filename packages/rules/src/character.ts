@@ -32,7 +32,7 @@ export const LUCK_PER_SESSION = 3;
 const attributeValue = z.number().int().min(ATTRIBUTE_MIN).max(ATTRIBUTE_MAX);
 
 export const characterBuildSchema = z.object({
-  name: z.string().trim().min(1, 'El personaje necesita un nombre'),
+  name: z.string().trim().min(1, 'El personaje necesita un nombre').max(80),
   /** Una frase de trasfondo ("Mercenaria de la Compañía Libre"). Da ventaja cuando encaja. */
   background: z.string().trim().max(200).default(''),
   attributes: z.object({

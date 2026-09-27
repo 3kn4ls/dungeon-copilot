@@ -1,3 +1,5 @@
 pnpm-lock.yaml
 dist/
 coverage/
+# Migraciones generadas por drizzle-kit
+apps/server/drizzle/
