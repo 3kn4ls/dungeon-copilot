@@ -3,6 +3,7 @@ import {
   closeGameSchema,
   complicationsSchema,
   gameRollSchema,
+  ideasSchema,
   noteSchema,
   openGameSchema,
   recapDraftSchema,
@@ -30,6 +31,7 @@ import {
   cleanScene,
   complicationMessages,
   hasLog,
+  ideaMessages,
   recapMessages,
   sceneMessages,
   visibleIdeas,
@@ -49,7 +51,7 @@ import {
   npcs,
   users,
 } from '../db/schema';
-import { findCampaignContext, findScenes } from '../games/prompt-context';
+import { findCampaignContext, findNpcLines, findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import type { RollingCharacter } from '../games/rolls';
 import { resolveGameRoll } from '../games/rolls';
@@ -586,6 +588,34 @@ export function registerGameRoutes(
       });
     },
   );
+
+  /**
+   * La IA propone qué puede pasar ahora en la escena, para cuando la mesa se atasca: una idea
+   * por línea según las termina. No se enseña nada: el máster elige.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/ideas', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(ideasSchema, request.body, 'Revisa lo que buscas');
+    const { found, model, context } = await findNarratedGame(user, gameId);
+    const { campaignId } = found.game;
+    const scenes = await findScenes(db, gameId, RECENT_SCENES);
+    const recaps = await findRecaps(db, campaignId);
+    const npcLines = await findNpcLines(db, campaignId);
+
+    return sendAiText(request, reply, {
+      ai: model,
+      request: {
+        messages: ideaMessages({ ...context, recaps, npcs: npcLines, scenes, hint: body.hint }),
+        format: IDEAS_FORMAT,
+        temperature: 0.9,
+        maxTokens: 450,
+      },
+      visible: visibleIdeas,
+      finish: cleanIdeas,
+      cutMessage: 'Se cortaron las ideas',
+    });
+  });
 
   // Pantalla de la mesa: sin sesión, con el enlace secreto de la campaña. Solo lo público.
 

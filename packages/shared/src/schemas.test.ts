@@ -5,6 +5,7 @@ import { advanceSchema, awardXpSchema, updateCharacterSchema } from './character
 import {
   complicationsSchema,
   gameRollSchema,
+  ideasSchema,
   openGameSchema,
   revealDraftSchema,
   revealSchema,
@@ -106,6 +107,14 @@ describe('partidas', () => {
   it('las complicaciones no necesitan saber qué se intentaba', () => {
     expect(complicationsSchema.parse({})).toEqual({ intent: '' });
     expect(complicationsSchema.safeParse({ intent: 'a'.repeat(301) }).success).toBe(false);
+  });
+
+  it('las ideas para seguir no necesitan saber qué busca el máster', () => {
+    expect(ideasSchema.parse({})).toEqual({ hint: '' });
+    expect(ideasSchema.parse({ hint: ' algo que les meta prisa ' })).toEqual({
+      hint: 'algo que les meta prisa',
+    });
+    expect(ideasSchema.safeParse({ hint: 'a'.repeat(301) }).success).toBe(false);
   });
 });
 
