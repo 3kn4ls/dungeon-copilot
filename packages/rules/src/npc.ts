@@ -2,7 +2,8 @@
  * Perfiles para PNJ secundarios: el máster tira 2d6 + el bonificador del perfil en lo que
  * el PNJ sabe hacer, y con 2 menos en lo demás. Los PNJ importantes llevan ficha completa.
  */
-export type NpcProfile = 'minion' | 'soldier' | 'veteran' | 'champion';
+export const NPC_PROFILE_IDS = ['minion', 'soldier', 'veteran', 'champion'] as const;
+export type NpcProfile = (typeof NPC_PROFILE_IDS)[number];
 
 export interface NpcProfileInfo {
   label: string;

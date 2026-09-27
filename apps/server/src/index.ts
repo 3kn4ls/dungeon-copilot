@@ -1,3 +1,4 @@
+import { createOllama } from './ai/ollama';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { openDatabase } from './db';
@@ -14,6 +15,7 @@ const app = await buildApp({
   cookieSecure: config.cookieSecure,
   allowRegistration: config.allowRegistration,
   webDist: config.webDist,
+  ai: config.ollama ? createOllama(config.ollama) : null,
 });
 app.addHook('onClose', () => database.close());
 
@@ -23,6 +25,11 @@ app.log.info(
     : `Base de datos: PGlite en ${config.dataDir}`,
 );
 if (!config.webDist) app.log.info('No hay web compilada: solo se sirve la API');
+app.log.info(
+  config.ollama
+    ? `IA: modelo ${config.ollama.model} en ${config.ollama.url}`
+    : 'IA desactivada: para los PNJ con IA, pon OLLAMA_URL y OLLAMA_MODEL',
+);
 
 // Cierra la base de datos con calma al parar (Ctrl+C, o k3s al reiniciar el pod).
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

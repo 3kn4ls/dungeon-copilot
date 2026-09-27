@@ -51,6 +51,18 @@ export const noteSchema = z.object({
 
 export type NoteRequest = z.input<typeof noteSchema>;
 
+/** Lo que dice un PNJ, para que lo vea toda la mesa. */
+export const speechSchema = z.object({
+  npcId: z.uuid('Elige un PNJ'),
+  text: z
+    .string()
+    .trim()
+    .min(1, 'La frase está vacía')
+    .max(2000, 'La frase no puede pasar de 2000 caracteres'),
+});
+
+export type SpeechRequest = z.input<typeof speechSchema>;
+
 const edgeSchema = z.enum(['none', 'advantage', 'disadvantage']).default('none');
 
 /** Un personaje de la campaña: el servidor calcula su bonificador con la ficha. */
@@ -113,7 +125,9 @@ export type GameEventPayload =
   | { kind: 'closed'; xpAwarded: number }
   | { kind: 'reveal'; title: string; body: string }
   | { kind: 'note'; text: string }
-  | { kind: 'roll'; roll: GameRoll };
+  | { kind: 'roll'; roll: GameRoll }
+  /** El nombre se guarda tal cual era: el PNJ puede cambiar de nombre o borrarse después. */
+  | { kind: 'speech'; npcId: string; name: string; text: string };
 
 export type GameEventKind = GameEventPayload['kind'];
 

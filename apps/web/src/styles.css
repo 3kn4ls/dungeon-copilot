@@ -1596,3 +1596,146 @@ h1 .badge {
 .screen-roll.latest .outcome {
   font-size: clamp(32px, 4vw, 64px);
 }
+
+.screen-speech {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  padding-left: clamp(16px, 2vw, 28px);
+  border-left: 6px solid var(--partial);
+}
+
+.screen-speech figcaption {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(20px, 2.4vw, 36px);
+  color: var(--partial);
+}
+
+.screen-speech blockquote {
+  margin: 0;
+  font-size: clamp(24px, 3.2vw, 52px);
+  line-height: 1.3;
+  font-style: italic;
+  max-width: 36ch;
+}
+
+/* PNJ: ficha, editor y charla con la IA */
+
+@media (max-width: 760px) {
+  /* En el móvil, la ayuda de la IA antes que el formulario largo. */
+  .npc-editor .side {
+    order: -1;
+  }
+}
+
+.npc-sheet {
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.npc-sheet dt {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.npc-sheet dd {
+  margin: 2px 0 0;
+}
+
+.npc-summary {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.npc-summary summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.npc-summary[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.feed-speech {
+  border-left: 4px solid var(--partial);
+}
+
+.feed-speech h3 {
+  font-family: var(--display);
+  font-size: 17px;
+  color: var(--partial);
+}
+
+.feed-speech p {
+  font-style: italic;
+}
+
+.chat {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  display: grid;
+  gap: 10px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-line {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.chat-line p {
+  margin: 0;
+}
+
+.chat-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.chat-table {
+  margin-left: 24px;
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.chat-npc {
+  margin-right: 24px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--partial);
+  background: var(--surface);
+}
+
+.chat-npc .chat-who {
+  color: var(--partial);
+}
+
+.chat-pending p {
+  color: var(--muted);
+}
+
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 4px;
+}

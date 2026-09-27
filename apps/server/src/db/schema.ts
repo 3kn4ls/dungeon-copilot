@@ -1,4 +1,4 @@
-import type { Attributes, Severity } from '@dungeon-copilot/rules';
+import type { Attributes, NpcProfile, Severity } from '@dungeon-copilot/rules';
 import type {
   GameEventPayload,
   GameEventVisibility,
@@ -104,6 +104,29 @@ export const characters = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [index('characters_campaign_id_idx').on(table.campaignId)],
+);
+
+/** Personajes no jugadores de una campaña. Son del máster: los jugadores no los ven. */
+export const npcs = pgTable(
+  'npcs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => campaigns.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    concept: text('concept').notNull().default(''),
+    appearance: text('appearance').notNull().default(''),
+    personality: text('personality').notNull().default(''),
+    speech: text('speech').notNull().default(''),
+    goals: text('goals').notNull().default(''),
+    secrets: text('secrets').notNull().default(''),
+    /** Perfil del reglamento para tirar por él; null si no pelea. */
+    profile: text('profile').$type<NpcProfile>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [index('npcs_campaign_id_idx').on(table.campaignId)],
 );
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */

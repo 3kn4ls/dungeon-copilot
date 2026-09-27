@@ -10,6 +10,8 @@ import { CharacterPage } from './pages/CharacterPage';
 import { GamePage } from './pages/GamePage';
 import { LoginPage } from './pages/LoginPage';
 import { NewCharacterPage } from './pages/NewCharacterPage';
+import { NewNpcPage } from './pages/NewNpcPage';
+import { NpcPage } from './pages/NpcPage';
 import { RollerPage } from './pages/RollerPage';
 import { ScreenPage } from './pages/ScreenPage';
 import { createQueryClient } from './queries';
@@ -33,6 +35,8 @@ createRoot(document.getElementById('root')!).render(
               <Route path="campanas/:campaignId" element={<CampaignPage />} />
               <Route path="campanas/:campaignId/personajes/nuevo" element={<NewCharacterPage />} />
               <Route path="personajes/:characterId" element={<CharacterPage />} />
+              <Route path="campanas/:campaignId/pnj/nuevo" element={<NewNpcPage />} />
+              <Route path="pnj/:npcId" element={<NpcPage />} />
               <Route path="partidas/:gameId" element={<GamePage />} />
             </Route>
             <Route

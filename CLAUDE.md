@@ -16,6 +16,12 @@ Asistente web para másters de rol. Monorepo pnpm en TypeScript: `apps/web` (Rea
 
 PostgreSQL con Drizzle ORM. Sin `DATABASE_URL` se usa PGlite (PostgreSQL embebido), también en los tests. Si cambias `apps/server/src/db/schema.ts`, genera la migración con `pnpm --filter @dungeon-copilot/server db:generate --name que-cambia` y súbela junto al cambio; nunca edites una migración ya publicada. Los cambios de una ficha que dependen de su estado (daño, experiencia, mejoras) van en una transacción con la fila bloqueada.
 
+## IA (Ollama)
+
+La IA es opcional. El servidor habla con Ollama a través de la interfaz `Ai` (`apps/server/src/ai/ollama.ts`), que las rutas reciben en `ctx.ai`: es `null` sin `OLLAMA_URL`, y entonces las rutas de IA responden 503 y la web sigue funcionando sin ella. Los prompts, en español y con topes de longitud, viven en `apps/server/src/ai/prompts.ts`. Los tests usan el Ollama de mentira de `apps/server/src/ai/fake-ollama.ts`, nunca uno de verdad.
+
+Los PNJ son solo del máster: a un jugador de la campaña se le responde 403. La charla con un PNJ no escribe nada en la partida; solo la frase que el máster enseña a la mesa queda como evento.
+
 ## Reglas del juego
 
 El reglamento vive en `docs/reglas.md` y el código en `packages/rules`. Si cambias una regla, cambia los dos y regenera las tablas de probabilidades con `pnpm --filter @dungeon-copilot/rules tabla`.

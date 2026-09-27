@@ -5,6 +5,7 @@ import {
   noteSchema,
   openGameSchema,
   revealSchema,
+  speechSchema,
   type GameDetail,
   type GameEvent,
   type GameEventPayload,
@@ -20,7 +21,15 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context';
 import type { Executor, Transaction } from '../db';
 import { isUniqueViolation } from '../db/errors';
-import { campaignMembers, campaigns, characters, gameEvents, games, users } from '../db/schema';
+import {
+  campaignMembers,
+  campaigns,
+  characters,
+  gameEvents,
+  games,
+  npcs,
+  users,
+} from '../db/schema';
 import type { RollingCharacter } from '../games/rolls';
 import { resolveGameRoll } from '../games/rolls';
 import { lastEventId, openEventStream } from '../games/stream';
@@ -333,6 +342,25 @@ export function registerGameRoutes(app: FastifyInstance, { db, hub, random }: Ap
     const { event } = await addEvent(user, gameId, async (_tx, found) => {
       requireMasterOf(found);
       return { visibility: 'master', payload: { kind: 'note', text: body.text } };
+    });
+    return reply.status(201).send({ event });
+  });
+
+  app.post<{ Params: IdParams }>('/api/games/:id/speeches', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(speechSchema, request.body, 'Revisa lo que dice el PNJ');
+    const { event } = await addEvent(user, gameId, async (tx, found) => {
+      requireMasterOf(found);
+      const [npc] = await tx
+        .select({ id: npcs.id, name: npcs.name })
+        .from(npcs)
+        .where(and(eq(npcs.id, body.npcId), eq(npcs.campaignId, found.game.campaignId)));
+      if (!npc) throw notFound('Ese PNJ no está en esta campaña');
+      return {
+        visibility: 'public',
+        payload: { kind: 'speech', npcId: npc.id, name: npc.name, text: body.text },
+      };
     });
     return reply.status(201).send({ event });
   });

@@ -1,5 +1,6 @@
 import type {
   AdvanceRequest,
+  AiStatus,
   ApiErrorBody,
   ApiIssue,
   AuthResponse,
@@ -17,10 +18,14 @@ import type {
   GameRollRequest,
   GameState,
   GameSummary,
+  GenerateNpcRequest,
   JoinCampaignRequest,
   LoginRequest,
   MeResponse,
   NoteRequest,
+  NpcDraft,
+  NpcRequest,
+  NpcView,
   OpenGameRequest,
   RecoverRequest,
   RegisterRequest,
@@ -28,8 +33,12 @@ import type {
   RollRequest,
   RollResponse,
   ScreenState,
+  SpeechRequest,
+  TalkChunk,
+  TalkRequest,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
+  UpdateNpcRequest,
 } from '@dungeon-copilot/shared';
 
 /** Error de la API con el mensaje en español que manda el servidor y, si los hay, los campos que fallan. */
@@ -62,6 +71,59 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+/**
+ * Habla con un PNJ. La respuesta llega a trozos: `onText` recibe el texto acumulado según lo
+ * escribe la IA, y al final se devuelve la respuesta entera ya limpia. Con `signal` se para.
+ */
+async function talk(
+  npcId: string,
+  body: TalkRequest,
+  options: { signal: AbortSignal; onText: (text: string) => void },
+): Promise<string> {
+  const cut = () => new ApiError(0, { error: 'Se cortó la respuesta de la IA' });
+  let response: Response;
+  try {
+    response = await fetch(`/api/npcs/${npcId}/talk`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (options.signal.aborted) throw error;
+    throw new ApiError(0, { error: 'No hay conexión con el servidor' });
+  }
+  if (!response.ok || !response.body) {
+    const data: unknown = await response.json().catch(() => null);
+    throw new ApiError(response.status, data as ApiErrorBody | null);
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  let text = '';
+  for (;;) {
+    let chunk: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      chunk = await reader.read();
+    } catch (error) {
+      if (options.signal.aborted) throw error;
+      throw cut();
+    }
+    if (chunk.done) throw cut();
+    buffer += chunk.value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line) as TalkChunk;
+      if (message.type === 'done') return message.text;
+      if (message.type === 'error') throw new ApiError(502, { error: message.error });
+      text += message.text;
+      options.onText(text);
+    }
+  }
+}
+
 const get = <T>(url: string) => request<T>('GET', url);
 const post = <T>(url: string, body?: unknown) => request<T>('POST', url, body);
 const patch = <T>(url: string, body: unknown) => request<T>('PATCH', url, body);
@@ -70,6 +132,7 @@ const del = (url: string) => request<void>('DELETE', url);
 type CampaignResponse = { campaign: CampaignDetail };
 type CharacterResponse = { character: CharacterView };
 type EventResponse = { event: GameEvent };
+type NpcResponse = { npc: NpcView };
 
 export const api = {
   me: () => get<MeResponse>('/api/auth/me'),
@@ -128,7 +191,22 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/notes`, body).then((r) => r.event),
   gameRoll: (id: string, body: GameRollRequest) =>
     post<EventResponse>(`/api/games/${id}/rolls`, body).then((r) => r.event),
+  speech: (id: string, body: SpeechRequest) =>
+    post<EventResponse>(`/api/games/${id}/speeches`, body).then((r) => r.event),
   screen: (token: string) => get<ScreenState>(`/api/screens/${token}`),
+
+  ai: () => get<AiStatus>('/api/ai'),
+  npcs: (campaignId: string) =>
+    get<{ npcs: NpcView[] }>(`/api/campaigns/${campaignId}/npcs`).then((r) => r.npcs),
+  createNpc: (campaignId: string, body: NpcRequest) =>
+    post<NpcResponse>(`/api/campaigns/${campaignId}/npcs`, body).then((r) => r.npc),
+  generateNpc: (campaignId: string, body: GenerateNpcRequest) =>
+    post<{ npc: NpcDraft }>(`/api/campaigns/${campaignId}/npcs/generate`, body).then((r) => r.npc),
+  npc: (id: string) => get<NpcResponse>(`/api/npcs/${id}`).then((r) => r.npc),
+  updateNpc: (id: string, body: UpdateNpcRequest) =>
+    patch<NpcResponse>(`/api/npcs/${id}`, body).then((r) => r.npc),
+  deleteNpc: (id: string) => del(`/api/npcs/${id}`),
+  talk,
 
   roll: (body: RollRequest) => post<RollResponse>('/api/rolls', body),
 };

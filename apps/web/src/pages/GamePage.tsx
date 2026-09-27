@@ -27,6 +27,7 @@ import {
   type GameDetail,
   type GameRollRequest,
   type GameState,
+  type NpcView,
   type RollSideRequest,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +35,8 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError, api } from '../api';
 import { EventCard } from '../components/GameEvents';
+import { NpcChat } from '../components/NpcChat';
+import { NpcSheet, profileText } from '../components/Npcs';
 import { ScreenLink } from '../components/ScreenLink';
 import {
   ConfirmButton,
@@ -44,7 +47,16 @@ import {
   useDocumentTitle,
 } from '../components/ui';
 import { LIVE_STATUS_LABELS, useLiveEvents, type LiveStatus } from '../live';
-import { keys, useCharacters, useGame, useMe, useStoreGameEvent } from '../queries';
+import {
+  keys,
+  useAiStatus,
+  useCharacters,
+  useGame,
+  useMe,
+  useNpcs,
+  useStoreGameEvent,
+  useStoreNpc,
+} from '../queries';
 import { signed } from '../rules-text';
 
 const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
@@ -149,7 +161,7 @@ function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaig
   void queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
 }
 
-type Action = 'roll' | 'reveal' | 'note';
+type Action = 'roll' | 'reveal' | 'talk' | 'note';
 
 function Actions({ state }: { state: GameState }) {
   const [action, setAction] = useState<Action>('reveal');
@@ -161,12 +173,14 @@ function Actions({ state }: { state: GameState }) {
         value={action}
         options={[
           ['reveal', 'Enseñar'],
+          ['talk', 'Hablar'],
           ['roll', 'Tirar'],
           ['note', 'Anotar'],
         ]}
         onChange={setAction}
       />
       {action === 'reveal' && <RevealForm gameId={state.game.id} />}
+      {action === 'talk' && <TalkPanel game={state.game} />}
       {action === 'roll' && <RollForm game={state.game} embedded />}
       {action === 'note' && <NoteForm gameId={state.game.id} />}
     </section>
@@ -261,10 +275,168 @@ function NoteForm({ gameId }: { gameId: string }) {
   );
 }
 
+/**
+ * Hablar por boca de un PNJ. Con IA, el máster cuenta lo que dice la mesa y la IA responde;
+ * sin ella, escribe él lo que dice el PNJ. En los dos casos, la frase se enseña a la mesa.
+ */
+function TalkPanel({ game }: { game: GameDetail }) {
+  const npcs = useNpcs(game.campaignId);
+  const ai = useAiStatus();
+  const [chosen, setChosen] = useState<string | null>(null);
+
+  if (!npcs.data || !ai.data) return <QueryState error={npcs.error ?? ai.error} />;
+  const list = npcs.data;
+  const aiEnabled = ai.data.enabled;
+  const improvising = aiEnabled && (chosen === 'new' || list.length === 0);
+  const npc = improvising ? undefined : (list.find((n) => n.id === chosen) ?? list[0]);
+
+  return (
+    <div className="stack tight">
+      {list.length > 0 && (
+        <label className="field">
+          <span className="field-label">PNJ</span>
+          <select
+            aria-label="PNJ"
+            value={npc?.id ?? 'new'}
+            onChange={(event) => setChosen(event.target.value)}
+          >
+            {list.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.concept ? `${n.name} · ${n.concept}` : n.name}
+              </option>
+            ))}
+            {aiEnabled && <option value="new">Improvisar uno nuevo con IA…</option>}
+          </select>
+        </label>
+      )}
+      {improvising ? (
+        <ImproviseNpc
+          campaignId={game.campaignId}
+          onCreated={(created) => setChosen(created.id)}
+          {...(list.length > 0 ? { onCancel: () => setChosen(null) } : {})}
+        />
+      ) : npc ? (
+        <>
+          <details className="npc-summary">
+            <summary>Ficha de {npc.name}</summary>
+            <NpcSheet npc={npc} />
+            <Link to={`/pnj/${npc.id}`}>Editar la ficha</Link>
+          </details>
+          {aiEnabled ? (
+            <NpcChat key={npc.id} npc={npc} gameId={game.id} />
+          ) : (
+            <SpeechForm key={npc.id} gameId={game.id} npc={npc} />
+          )}
+        </>
+      ) : (
+        <p className="muted">
+          Aún no hay PNJ en esta campaña.{' '}
+          <Link to={`/campanas/${game.campaignId}/pnj/nuevo`}>Crear un PNJ</Link>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Un PNJ que no estaba preparado: la IA se lo inventa a partir de una línea y lo guarda. */
+function ImproviseNpc(props: {
+  campaignId: string;
+  onCreated: (npc: NpcView) => void;
+  onCancel?: () => void;
+}) {
+  const { campaignId, onCreated, onCancel } = props;
+  const [idea, setIdea] = useState('');
+  const storeNpc = useStoreNpc();
+  const create = useMutation({
+    mutationFn: async () => api.createNpc(campaignId, await api.generateNpc(campaignId, { idea })),
+    onSuccess: (npc) => {
+      storeNpc(npc);
+      onCreated(npc);
+    },
+  });
+
+  return (
+    <form
+      className="stack tight"
+      onSubmit={(event) => {
+        event.preventDefault();
+        create.mutate();
+      }}
+    >
+      <p className="muted">
+        ¿Hablan con alguien que no tenías preparado? Di quién es: la IA se lo inventa y lo guarda en
+        la campaña.
+      </p>
+      <label className="field">
+        <span className="field-label">Quién es</span>
+        <input
+          required
+          maxLength={500}
+          value={idea}
+          placeholder="El guardia aburrido de la puerta norte"
+          onChange={(e) => setIdea(e.target.value)}
+        />
+      </label>
+      <ErrorNote error={create.error} />
+      <div className="actions">
+        <button type="submit" className="button primary" disabled={create.isPending}>
+          {create.isPending ? 'Inventando…' : 'Crear con IA'}
+        </button>
+        {onCancel && (
+          <button type="button" className="button" onClick={onCancel}>
+            Cancelar
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/** Sin IA: el máster escribe lo que dice el PNJ y lo enseña a la mesa. */
+function SpeechForm({ gameId, npc }: { gameId: string; npc: NpcView }) {
+  const [text, setText] = useState('');
+  const storeEvent = useStoreGameEvent(gameId);
+  const speak = useMutation({
+    mutationFn: () => api.speech(gameId, { npcId: npc.id, text }),
+    onSuccess: (event) => {
+      storeEvent(event);
+      setText('');
+    },
+  });
+
+  return (
+    <form
+      className="stack tight"
+      onSubmit={(event) => {
+        event.preventDefault();
+        speak.mutate();
+      }}
+    >
+      <label className="field">
+        <span className="field-label">Lo que dice {npc.name}</span>
+        <textarea
+          required
+          rows={3}
+          maxLength={2000}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
+      <p className="hint">
+        Con Ollama configurado en el servidor, la IA te propondría qué responde {npc.name}.
+      </p>
+      <ErrorNote error={speak.error} />
+      <button type="submit" className="button primary" disabled={speak.isPending}>
+        Enseñar a la mesa
+      </button>
+    </form>
+  );
+}
+
 /** Lado de una tirada mientras se prepara: un personaje o algo que describe el máster. */
 type SideDraft =
   | { kind: 'character'; characterId: string; check: string; modifier: number; edge: Edge }
-  | { kind: 'free'; label: string; bonus: number; edge: Edge };
+  | { kind: 'free'; label: string; bonus: number; edge: Edge; npcId?: string };
 
 /** "skill:athletics" o "attribute:strength": con qué tira el personaje. */
 function parseCheck(check: string): { skill?: string; attribute?: Attribute } {
@@ -293,6 +465,15 @@ const freeDraft = (label: string): SideDraft => ({
   label,
   bonus: NPC_PROFILES.soldier.bonus,
   edge: 'none',
+});
+
+/** Un PNJ de la campaña tira con el bonificador de su perfil (o el de soldado, si no pelea). */
+const npcDraft = (npc: NpcView): SideDraft => ({
+  kind: 'free',
+  label: npc.name,
+  bonus: NPC_PROFILES[npc.profile ?? 'soldier'].bonus,
+  edge: 'none',
+  npcId: npc.id,
 });
 
 function toSideRequest(draft: SideDraft): RollSideRequest {
@@ -344,6 +525,7 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
   const characters = useCharacters(game.campaignId);
   const storeEvent = useStoreGameEvent(game.id);
   const isMaster = game.role === 'master';
+  const npcs = useNpcs(game.campaignId, isMaster).data ?? [];
   // El máster tira con cualquiera; cada jugador, con los suyos.
   const available = (characters.data ?? []).filter(
     (character) => isMaster || character.ownerId === me?.user?.id,
@@ -411,6 +593,7 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
         title="Quién tira"
         draft={actorDraft}
         characters={available}
+        npcs={npcs}
         allowFree={isMaster}
         onChange={setActor}
       />
@@ -448,6 +631,7 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
           title="Quién se opone"
           draft={opponent}
           characters={characters.data}
+          npcs={npcs}
           allowFree
           onChange={setOpponent}
         />
@@ -505,10 +689,12 @@ function SideEditor(props: {
   title: string;
   draft: SideDraft;
   characters: CharacterView[];
+  /** PNJ de la campaña: solo los tiene el máster. */
+  npcs: NpcView[];
   allowFree: boolean;
   onChange: (draft: SideDraft) => void;
 }) {
-  const { title, draft, characters, allowFree, onChange } = props;
+  const { title, draft, characters, npcs, allowFree, onChange } = props;
   const character =
     draft.kind === 'character' ? characters.find((c) => c.id === draft.characterId) : undefined;
   const preview = previewCheck(draft, characters);
@@ -522,10 +708,18 @@ function SideEditor(props: {
       {!fixed && (
         <select
           aria-label={title}
-          value={draft.kind === 'character' ? draft.characterId : 'free'}
+          value={
+            draft.kind === 'character'
+              ? draft.characterId
+              : draft.npcId
+                ? `npc:${draft.npcId}`
+                : 'free'
+          }
           onChange={(event) => {
-            const chosen = characters.find((c) => c.id === event.target.value);
-            onChange(chosen ? characterDraft(chosen) : freeDraft(''));
+            const value = event.target.value;
+            const chosen = characters.find((c) => c.id === value);
+            const npc = npcs.find((n) => `npc:${n.id}` === value);
+            onChange(chosen ? characterDraft(chosen) : npc ? npcDraft(npc) : freeDraft(''));
           }}
         >
           {characters.map((c) => (
@@ -533,6 +727,15 @@ function SideEditor(props: {
               {c.name}
             </option>
           ))}
+          {allowFree && npcs.length > 0 && (
+            <optgroup label="PNJ de la campaña">
+              {npcs.map((npc) => (
+                <option key={npc.id} value={`npc:${npc.id}`}>
+                  {npc.profile ? `${npc.name} (${profileText(npc.profile)})` : npc.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
           {allowFree && <option value="free">Otro: un PNJ o una criatura</option>}
         </select>
       )}
@@ -579,16 +782,18 @@ function SideEditor(props: {
         </>
       ) : draft.kind === 'free' ? (
         <>
-          <label className="field">
-            <span className="field-label">Nombre</span>
-            <input
-              required
-              maxLength={80}
-              value={draft.label}
-              placeholder="Guardia veterano"
-              onChange={(event) => onChange({ ...draft, label: event.target.value })}
-            />
-          </label>
+          {!draft.npcId && (
+            <label className="field">
+              <span className="field-label">Nombre</span>
+              <input
+                required
+                maxLength={80}
+                value={draft.label}
+                placeholder="Guardia veterano"
+                onChange={(event) => onChange({ ...draft, label: event.target.value })}
+              />
+            </label>
+          )}
           <div className="chips">
             {Object.values(NPC_PROFILES).map((profile) => (
               <button

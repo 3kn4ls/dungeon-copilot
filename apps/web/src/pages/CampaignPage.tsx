@@ -4,9 +4,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
+import { profileText } from '../components/Npcs';
 import { ScreenLink } from '../components/ScreenLink';
 import { ConfirmButton, ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
-import { keys, useCampaign, useCharacters, useGames, useMe } from '../queries';
+import { keys, useCampaign, useCharacters, useGames, useMe, useNpcs } from '../queries';
 
 export function CampaignPage() {
   const { campaignId = '' } = useParams();
@@ -34,6 +35,7 @@ export function CampaignPage() {
         <div className="stack">
           <Games campaign={detail} />
           <Characters campaignId={detail.id} />
+          {isMaster && <Npcs campaignId={detail.id} />}
         </div>
         <div className="side">
           {isMaster && detail.inviteCode && <Invite campaign={detail} />}
@@ -181,6 +183,44 @@ function Characters({ campaignId }: { campaignId: string }) {
         )
       ) : (
         <QueryState error={characters.error} />
+      )}
+    </section>
+  );
+}
+
+/** Los PNJ de la campaña. Solo los ve el máster: la mesa los conoce cuando hablan. */
+function Npcs({ campaignId }: { campaignId: string }) {
+  const npcs = useNpcs(campaignId);
+  return (
+    <section className="panel" aria-labelledby="npcs-heading">
+      <div className="panel-heading">
+        <h2 id="npcs-heading">PNJ</h2>
+        <Link to={`/campanas/${campaignId}/pnj/nuevo`} className="button primary small">
+          Crear PNJ
+        </Link>
+      </div>
+      {npcs.data ? (
+        npcs.data.length > 0 ? (
+          <ul className="card-list">
+            {npcs.data.map((npc) => (
+              <li key={npc.id}>
+                <Link to={`/pnj/${npc.id}`} className="card">
+                  <span className="card-title">
+                    {npc.name}
+                    {npc.profile && <span className="badge">{profileText(npc.profile)}</span>}
+                  </span>
+                  {npc.concept && <span className="card-text">{npc.concept}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">
+            Aún no hay PNJ. Solo los ves tú; en la sala hablas por su boca, con ayuda de la IA.
+          </p>
+        )
+      ) : (
+        <QueryState error={npcs.error} />
       )}
     </section>
   );
