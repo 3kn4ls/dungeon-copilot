@@ -1219,3 +1219,380 @@ h1 .badge {
   gap: 8px;
   justify-items: start;
 }
+
+/* Partidas */
+
+.stack.tight {
+  gap: 12px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.check input {
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+
+.badge.live {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.badge.secret {
+  margin-left: 8px;
+  border-style: dashed;
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.live-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.live-status.live-live {
+  color: var(--success);
+}
+
+.live-status.live-live::before {
+  background: var(--success);
+}
+
+.live-status.live-reconnecting,
+.live-status.live-connecting {
+  color: var(--partial);
+}
+
+.live-status.live-reconnecting::before,
+.live-status.live-connecting::before {
+  background: var(--partial);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .live-status.live-live::before {
+    animation: live-pulse 2s ease-in-out infinite;
+  }
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.live-card {
+  gap: 8px;
+  justify-items: start;
+}
+
+.game-list,
+.table-characters {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.game-list li,
+.table-characters li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.table-characters li {
+  display: grid;
+  justify-content: start;
+}
+
+.table-characters .muted {
+  font-size: 14px;
+}
+
+/* Sala: registro a la izquierda y acciones a la derecha; en el móvil, primero las acciones. */
+
+.room {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'feed actions'
+    'feed extras';
+  gap: 20px;
+  align-items: start;
+}
+
+.room-actions {
+  grid-area: actions;
+  display: grid;
+  gap: 20px;
+}
+
+.room-feed {
+  grid-area: feed;
+}
+
+.room-extras {
+  grid-area: extras;
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+
+@media (max-width: 760px) {
+  .room {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: 'actions' 'feed' 'extras';
+  }
+}
+
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.feed-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.feed-item p,
+.feed-item h3 {
+  margin: 0;
+}
+
+.feed-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.feed-reveal {
+  border-left: 4px solid var(--accent);
+}
+
+.feed-reveal h3 {
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.feed-note {
+  border-style: dashed;
+  background: transparent;
+}
+
+.feed-milestone {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+.roll-view {
+  display: grid;
+  gap: 8px;
+}
+
+.roll-view .outcome {
+  font-size: 24px;
+}
+
+.roll-heading {
+  margin: 0;
+}
+
+.roll-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--partial);
+}
+
+.side-editor {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.side-editor legend {
+  padding: 0 4px;
+}
+
+.side-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.side-summary strong {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+.dice.big .die {
+  width: 56px;
+  height: 56px;
+  font-size: 28px;
+  border-width: 3px;
+}
+
+.dice.big .dice-total {
+  font-size: 28px;
+}
+
+/* Pantalla de la mesa: pensada para una tele, siempre oscura y con letra grande. */
+
+.screen {
+  color-scheme: dark;
+  --bg: #0d1116;
+  --surface: #151b23;
+  --ink: #eef1f4;
+  --muted: #9aa3af;
+  --line: #2a313c;
+  --accent: #5cc2aa;
+  --accent-ink: #0d1a16;
+  --accent-soft: #17312b;
+  --fumble: #c24050;
+  --failure: #e07a84;
+  --partial: #d8b45c;
+  --success: #5cc2aa;
+  --critical: #8fe3cf;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--bg);
+  color: var(--ink);
+  padding: clamp(16px, 3vw, 40px);
+  gap: clamp(16px, 3vw, 40px);
+}
+
+.screen-empty {
+  grid-template-rows: 1fr;
+  place-items: center;
+}
+
+.screen-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  color: var(--muted);
+  font-size: clamp(14px, 1.4vw, 20px);
+}
+
+.screen-campaign {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.screen-header .button {
+  margin-left: auto;
+}
+
+.screen-waiting {
+  margin: 0;
+  align-self: center;
+  justify-self: center;
+  text-align: center;
+  font-family: var(--display);
+  font-size: clamp(24px, 4vw, 56px);
+  color: var(--muted);
+}
+
+.screen-main {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: clamp(16px, 3vw, 48px);
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .screen-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.screen-reveal {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.screen-reveal h1 {
+  margin: 0;
+  font-size: clamp(36px, 6vw, 96px);
+}
+
+.screen-reveal p {
+  margin: 0;
+  font-size: clamp(20px, 2.6vw, 40px);
+  line-height: 1.4;
+  max-width: 40ch;
+}
+
+.screen-reveal .screen-waiting {
+  justify-self: start;
+  text-align: left;
+}
+
+.screen-banner {
+  justify-self: start;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 16px;
+  color: var(--muted);
+  font-size: clamp(16px, 1.6vw, 24px) !important;
+}
+
+.screen-rolls {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.screen-roll {
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: clamp(14px, 1.3vw, 20px);
+}
+
+.screen-roll:not(.latest) {
+  opacity: 0.7;
+}
+
+.screen-roll.latest .outcome {
+  font-size: clamp(32px, 4vw, 64px);
+}

@@ -1,11 +1,12 @@
-import { SEVERITY_LABELS } from '@dungeon-copilot/rules';
-import { ROLE_LABELS, type CampaignDetail } from '@dungeon-copilot/shared';
+import { LUCK_PER_SESSION, SEVERITY_LABELS } from '@dungeon-copilot/rules';
+import { ROLE_LABELS, gameName, type CampaignDetail } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
+import { ScreenLink } from '../components/ScreenLink';
 import { ConfirmButton, ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
-import { keys, useCampaign, useCharacters, useMe } from '../queries';
+import { keys, useCampaign, useCharacters, useGames, useMe } from '../queries';
 
 export function CampaignPage() {
   const { campaignId = '' } = useParams();
@@ -30,14 +31,119 @@ export function CampaignPage() {
       </header>
 
       <div className="layout layout-main">
-        <Characters campaignId={detail.id} />
+        <div className="stack">
+          <Games campaign={detail} />
+          <Characters campaignId={detail.id} />
+        </div>
         <div className="side">
           {isMaster && detail.inviteCode && <Invite campaign={detail} />}
+          {isMaster && detail.screenToken && (
+            <ScreenLink campaignId={detail.id} token={detail.screenToken} />
+          )}
           <Members campaign={detail} />
           {isMaster && <MasterTools campaign={detail} />}
         </div>
       </div>
     </>
+  );
+}
+
+const gameDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+
+function Games({ campaign }: { campaign: CampaignDetail }) {
+  const games = useGames(campaign.id);
+  const isMaster = campaign.role === 'master';
+  if (!games.data) return <QueryState error={games.error} />;
+  const open = games.data.find((game) => game.status === 'open');
+  const past = games.data.filter((game) => game.status === 'closed');
+
+  return (
+    <section className="panel" aria-labelledby="games-heading">
+      <h2 id="games-heading">Partidas</h2>
+      {open ? (
+        <Link to={`/partidas/${open.id}`} className="card live-card">
+          <span className="card-title">
+            {gameName(open)} <span className="badge live">En juego</span>
+          </span>
+          <span className="card-meta">
+            {open.title ? `Partida ${open.number} · ` : ''}Empezó el {gameDate(open.openedAt)}
+          </span>
+          <span className="button primary">Entrar en la sala</span>
+        </Link>
+      ) : isMaster ? (
+        <OpenGame campaignId={campaign.id} />
+      ) : (
+        <p className="muted">
+          No hay ninguna partida en juego. Cuando el máster abra una, aparecerá aquí.
+        </p>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3>Anteriores</h3>
+          <ul className="game-list">
+            {past.map((game) => (
+              <li key={game.id}>
+                <Link to={`/partidas/${game.id}`}>{gameName(game)}</Link>
+                <span className="muted">{gameDate(game.openedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+function OpenGame({ campaignId }: { campaignId: string }) {
+  const [title, setTitle] = useState('');
+  const [refillLuck, setRefillLuck] = useState(true);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const open = useMutation({
+    mutationFn: () => api.openGame(campaignId, { title, refillLuck }),
+    onSuccess: async (game) => {
+      // Al abrir se recarga la Suerte: las fichas guardadas ya no están al día.
+      await queryClient.invalidateQueries({ queryKey: keys.campaign(campaignId) });
+      void queryClient.invalidateQueries({ queryKey: ['characters'] });
+      void queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
+      await navigate(`/partidas/${game.id}`);
+    },
+  });
+
+  return (
+    <form
+      className="stack tight"
+      onSubmit={(event) => {
+        event.preventDefault();
+        open.mutate();
+      }}
+    >
+      <p className="muted">
+        Abre la sala de la partida: los jugadores verán en vivo lo que enseñes y las tiradas.
+      </p>
+      <label className="field">
+        <span className="field-label">Título (opcional)</span>
+        <input
+          value={title}
+          maxLength={100}
+          placeholder="La cripta del rey olvidado"
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={refillLuck}
+          onChange={(e) => setRefillLuck(e.target.checked)}
+        />
+        Todos los personajes empiezan con {LUCK_PER_SESSION} de Suerte
+      </label>
+      <ErrorNote error={open.error} />
+      <button type="submit" className="button primary" disabled={open.isPending}>
+        Abrir partida
+      </button>
+    </form>
   );
 }
 

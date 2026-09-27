@@ -7,6 +7,8 @@ Ahora mismo tiene:
 - Cuentas sencillas: usuario y contraseña, sin correo.
 - Campañas: quien la crea es su máster y la comparte con un código de invitación de 6 letras.
 - Fichas de personaje con el [sistema de reglas propio](docs/reglas.md): creación guiada, heridas, Suerte, experiencia y mejoras.
+- Sala de partida: el máster abre una partida en la campaña y la mesa ve en vivo lo que enseña y las tiradas. Las tiradas de los personajes salen de su ficha (con la desventaja por heridas ya aplicada); el máster tira también por los PNJ, en abierto o en secreto, y guarda notas que solo ve él. Al abrir la partida todos recuperan la Suerte y al cerrarla ganan los PX de fin de sesión.
+- Pantalla de la mesa: un enlace secreto por campaña para una tele o una tablet, sin iniciar sesión. Enseña lo último revelado y las últimas tiradas, y pasa sola a la partida siguiente.
 - Un tirador de dados que resuelve las tiradas en el servidor. Desde la ficha se abre con el bonificador ya puesto.
 
 ## Requisitos
@@ -61,23 +63,33 @@ Cada archivo de tests crea su propia base de datos en ese servidor y la borra al
 
 Todo bajo `/api`, en JSON. Los errores responden `{ error, issues? }` con mensajes en español. La sesión va en una cookie `httpOnly` que dura 30 días y se renueva sola con el uso.
 
-| Ruta                                      | Qué hace                                                        |
-| ----------------------------------------- | --------------------------------------------------------------- |
-| `POST /auth/register`, `/auth/login`      | Crear cuenta o entrar                                           |
-| `POST /auth/logout`, `GET /auth/me`       | Salir y saber quién ha entrado                                  |
-| `GET, POST /campaigns`                    | Tus campañas y crear una nueva (quien la crea es su máster)     |
-| `POST /campaigns/join`                    | Unirse con el código de invitación                              |
-| `GET, PATCH, DELETE /campaigns/:id`       | Ver, cambiar o borrar una campaña (cambiar y borrar: el máster) |
-| `POST /campaigns/:id/invite-code`         | Cambiar el código de invitación (el máster)                     |
-| `DELETE /campaigns/:id/members/:userId`   | Salir de la campaña, o echar a un jugador (el máster)           |
-| `GET, POST /campaigns/:id/characters`     | Personajes de la campaña y crear uno                            |
-| `GET, PATCH, DELETE /characters/:id`      | Ver, cambiar nombre, trasfondo o Suerte, y borrar               |
-| `POST /characters/:id/damage`, `/recover` | Recibir daño y recuperarse                                      |
-| `POST /characters/:id/xp`                 | Dar o quitar experiencia (el máster)                            |
-| `POST /characters/:id/advances`           | Gastar experiencia en una mejora                                |
-| `POST /rolls`                             | Tirar dados. No necesita sesión                                 |
+| Ruta                                      | Qué hace                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| `POST /auth/register`, `/auth/login`      | Crear cuenta o entrar                                            |
+| `POST /auth/logout`, `GET /auth/me`       | Salir y saber quién ha entrado                                   |
+| `GET, POST /campaigns`                    | Tus campañas y crear una nueva (quien la crea es su máster)      |
+| `POST /campaigns/join`                    | Unirse con el código de invitación                               |
+| `GET, PATCH, DELETE /campaigns/:id`       | Ver, cambiar o borrar una campaña (cambiar y borrar: el máster)  |
+| `POST /campaigns/:id/invite-code`         | Cambiar el código de invitación (el máster)                      |
+| `POST /campaigns/:id/screen-token`        | Cambiar el enlace de la pantalla de la mesa (el máster)          |
+| `DELETE /campaigns/:id/members/:userId`   | Salir de la campaña, o echar a un jugador (el máster)            |
+| `GET, POST /campaigns/:id/characters`     | Personajes de la campaña y crear uno                             |
+| `GET, PATCH, DELETE /characters/:id`      | Ver, cambiar nombre, trasfondo o Suerte, y borrar                |
+| `POST /characters/:id/damage`, `/recover` | Recibir daño y recuperarse                                       |
+| `POST /characters/:id/xp`                 | Dar o quitar experiencia (el máster)                             |
+| `POST /characters/:id/advances`           | Gastar experiencia en una mejora                                 |
+| `GET, POST /campaigns/:id/games`          | Partidas de la campaña y abrir una (el máster)                   |
+| `GET /games/:id`                          | La partida y su registro, con lo que puede ver quien pregunta    |
+| `GET /games/:id/stream`                   | Directo de la partida (Server-Sent Events)                       |
+| `POST /games/:id/reveals`, `/notes`       | Enseñar algo a la mesa o anotar algo solo para ti (el máster)    |
+| `POST /games/:id/rolls`                   | Tirar en la partida con un personaje, o por un PNJ (el máster)   |
+| `POST /games/:id/close`                   | Terminar la partida (el máster)                                  |
+| `GET /screens/:token`, `/stream`          | Pantalla de la mesa: lo público de la última partida, sin sesión |
+| `POST /rolls`                             | Tirar dados. No necesita sesión                                  |
 
 Quien no es miembro de una campaña recibe un 404, como si no existiera. Una ficha la cambian su jugador y el máster; el resto de la mesa solo la ve.
+
+El directo usa Server-Sent Events: al reconectar, el navegador manda el último evento que recibió y el servidor le envía lo que se perdió. Si el servidor va detrás de un proxy, este no debe acumular las respuestas de `text/event-stream` (Traefik, el de k3s, no lo hace). El reparto en vivo vive en la memoria del proceso, así que el servidor debe correr con una sola réplica.
 
 ## Comandos
 

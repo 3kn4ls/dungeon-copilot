@@ -13,7 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context';
 import type { Executor } from '../db';
 import { isUniqueViolation } from '../db/errors';
-import { campaignMembers, campaigns, characters, users } from '../db/schema';
+import { campaignMembers, campaigns, characters, games, users } from '../db/schema';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, memberRole, requireMaster, requireMember } from './access';
 import { requireUser } from './auth';
@@ -60,6 +60,9 @@ async function findSummaries(db: Executor, userId: string, where?: SQL) {
         sql<number>`(select count(*) from ${characters} as ch where ch.campaign_id = ${campaigns.id})`.mapWith(
           Number,
         ),
+      openGameId: sql<
+        string | null
+      >`(select g.id from ${games} as g where g.campaign_id = ${campaigns.id} and g.status = 'open')`,
       createdAt: campaigns.createdAt,
     })
     .from(campaignMembers)
@@ -99,11 +102,14 @@ async function findDetail(db: Executor, campaignId: string, userId: string) {
     createdAt: campaign.createdAt.toISOString(),
     updatedAt: campaign.updatedAt.toISOString(),
   };
-  if (role === 'master') detail.inviteCode = campaign.inviteCode;
+  if (role === 'master') {
+    detail.inviteCode = campaign.inviteCode;
+    detail.screenToken = campaign.screenToken;
+  }
   return detail;
 }
 
-export function registerCampaignRoutes(app: FastifyInstance, { db }: AppContext): void {
+export function registerCampaignRoutes(app: FastifyInstance, { db, hub }: AppContext): void {
   app.get('/api/campaigns', async (request) => {
     const user = requireUser(request);
     return { campaigns: await findSummaries(db, user.id) };
@@ -169,6 +175,7 @@ export function registerCampaignRoutes(app: FastifyInstance, { db }: AppContext)
     const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
     await requireMaster(db, campaignId, user);
     await db.delete(campaigns).where(eq(campaigns.id, campaignId));
+    hub.disconnect(campaignId);
     return reply.status(204).send();
   });
 
@@ -184,6 +191,22 @@ export function registerCampaignRoutes(app: FastifyInstance, { db }: AppContext)
       return code;
     });
     return { inviteCode };
+  });
+
+  app.post<{ Params: CampaignParams }>('/api/campaigns/:id/screen-token', async (request) => {
+    const user = requireUser(request);
+    const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
+    await requireMaster(db, campaignId, user);
+    // La base de datos genera el enlace nuevo con el valor por defecto de la columna.
+    const [row] = await db
+      .update(campaigns)
+      .set({ screenToken: sql`default`, updatedAt: new Date() })
+      .where(eq(campaigns.id, campaignId))
+      .returning({ screenToken: campaigns.screenToken });
+    if (!row) throw notFound(CAMPAIGN_NOT_FOUND);
+    // Las pantallas con el enlace viejo dejan de recibir la partida.
+    hub.disconnect(campaignId, (subscriber) => subscriber.userId === null);
+    return { screenToken: row.screenToken };
   });
 
   app.delete<{ Params: MemberParams }>(
@@ -213,6 +236,8 @@ export function registerCampaignRoutes(app: FastifyInstance, { db }: AppContext)
         )
         .returning({ userId: campaignMembers.userId });
       if (removed.length === 0) throw notFound('Esa persona no está en la campaña');
+      // Si estaba en la sala de una partida, deja de recibirla.
+      hub.disconnect(campaignId, (subscriber) => subscriber.userId === targetId);
       return reply.status(204).send();
     },
   );

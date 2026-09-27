@@ -55,6 +55,8 @@ export interface CampaignSummary {
   role: MemberRole;
   memberCount: number;
   characterCount: number;
+  /** Partida en juego ahora mismo, si la hay. */
+  openGameId: string | null;
   createdAt: string;
 }
 
@@ -73,6 +75,8 @@ export interface CampaignDetail {
   role: MemberRole;
   /** Solo lo ve el máster, que es quien invita. */
   inviteCode?: string;
+  /** Enlace de la pantalla de la mesa (una tele sin sesión iniciada). Solo lo ve el máster. */
+  screenToken?: string;
   members: CampaignMember[];
   createdAt: string;
   updatedAt: string;

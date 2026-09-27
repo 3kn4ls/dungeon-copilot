@@ -10,6 +10,7 @@ Asistente web para másters de rol. Monorepo pnpm en TypeScript: `apps/web` (Rea
 - Validación de entrada con Zod en `packages/shared`; el servidor responde 400 con `issues` legibles.
 - Errores de la API: se lanza `HttpError` (`apps/server/src/http/errors.ts`) con un mensaje en español que la web enseña tal cual.
 - Permisos: a quien no es miembro de una campaña se le responde 404, no 403. Las fichas las cambian su dueño y el máster; la experiencia solo la da el máster.
+- Partidas: todo lo que pasa en una es un evento de `game_events` con visibilidad `public` (toda la mesa y la pantalla) o `master`. Los eventos se añaden con `addEvent` (`apps/server/src/routes/games.ts`), que bloquea la partida y los reparte en vivo con `GameHub` (en memoria: una sola réplica). Quien deja de tener acceso (le echan, se borra la campaña, cambia el enlace de la pantalla) se desconecta con `hub.disconnect`.
 
 ## Base de datos
 

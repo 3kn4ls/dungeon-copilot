@@ -12,7 +12,6 @@ import {
   opposedOdds,
   successChance,
   testOdds,
-  type DiceRoll,
   type DifficultyLevel,
   type Edge,
   type Outcome,
@@ -22,6 +21,7 @@ import type { RollRequest, RollResponse } from '@dungeon-copilot/shared';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
+import { Dice } from '../components/Dice';
 import { Segmented, Stepper, useDocumentTitle } from '../components/ui';
 import { signed } from '../rules-text';
 
@@ -344,31 +344,6 @@ function RollResult({ result, situation }: { result: RollResponse; situation: Si
         )}
       </p>
       <p className="guide">{OUTCOME_GUIDES[situation][result.outcome]}</p>
-    </div>
-  );
-}
-
-function Dice({ label, dice, total }: { label: string; dice: DiceRoll; total: number }) {
-  // Marca como descartado el dado que no cuenta cuando hay ventaja o desventaja.
-  const remaining = [...dice.kept];
-  const faces = dice.rolled.map((face) => {
-    const index = remaining.indexOf(face);
-    if (index === -1) return { face, kept: false };
-    remaining.splice(index, 1);
-    return { face, kept: true };
-  });
-
-  return (
-    <div className="dice">
-      <span className="dice-label">{label}</span>
-      <div className="faces">
-        {faces.map(({ face, kept }, i) => (
-          <span key={i} className={kept ? 'die' : 'die discarded'} aria-label={`Dado: ${face}`}>
-            {face}
-          </span>
-        ))}
-      </div>
-      <span className="dice-total">= {total}</span>
     </div>
   );
 }

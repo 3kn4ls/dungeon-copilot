@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { registerRequestSchema, usernameSchema } from './auth';
 import { joinCampaignSchema, updateCampaignSchema } from './campaigns';
 import { advanceSchema, awardXpSchema, updateCharacterSchema } from './characters';
+import { gameRollSchema, openGameSchema, revealSchema } from './games';
 
 describe('cuentas', () => {
   it('guarda el usuario en minúsculas y sin espacios alrededor', () => {
@@ -55,5 +56,28 @@ describe('fichas', () => {
     expect(advanceSchema.safeParse({ kind: 'raiseAttribute', attribute: 'luck' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('partidas', () => {
+  it('al abrir, sin título y con la Suerte llena por defecto', () => {
+    expect(openGameSchema.parse({})).toEqual({ title: '', refillLuck: true });
+    expect(revealSchema.safeParse({ title: 'Nada', body: '  ' }).success).toBe(false);
+  });
+
+  it('una tirada necesita quién tira y contra qué', () => {
+    const actor = { kind: 'character', characterId: '5f0c3b7e-9a2d-4c1e-8b6f-0a3d2c1b4e5f' };
+    expect(gameRollSchema.parse({ actor, target: { kind: 'difficulty', difficulty: 10 } })).toEqual(
+      {
+        actor: { ...actor, modifier: 0, edge: 'none' },
+        target: { kind: 'difficulty', difficulty: 10 },
+        situation: 'test',
+        secret: false,
+      },
+    );
+    expect(gameRollSchema.safeParse({ actor }).success).toBe(false);
+    const nameless = { kind: 'free', label: ' ', bonus: 4 };
+    const opposed = { actor, target: { kind: 'opposed', opponent: nameless } };
+    expect(gameRollSchema.safeParse(opposed).success).toBe(false);
   });
 });

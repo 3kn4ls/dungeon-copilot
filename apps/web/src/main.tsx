@@ -7,9 +7,11 @@ import { PageMessage } from './components/ui';
 import { CampaignPage } from './pages/CampaignPage';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { CharacterPage } from './pages/CharacterPage';
+import { GamePage } from './pages/GamePage';
 import { LoginPage } from './pages/LoginPage';
 import { NewCharacterPage } from './pages/NewCharacterPage';
 import { RollerPage } from './pages/RollerPage';
+import { ScreenPage } from './pages/ScreenPage';
 import { createQueryClient } from './queries';
 import './styles.css';
 
@@ -20,6 +22,8 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
+          {/* La pantalla de la mesa va sin cabecera ni sesión: es para una tele. */}
+          <Route path="pantalla/:token" element={<ScreenPage />} />
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/campanas" replace />} />
             <Route path="entrar" element={<LoginPage />} />
@@ -29,6 +33,7 @@ createRoot(document.getElementById('root')!).render(
               <Route path="campanas/:campaignId" element={<CampaignPage />} />
               <Route path="campanas/:campaignId/personajes/nuevo" element={<NewCharacterPage />} />
               <Route path="personajes/:characterId" element={<CharacterPage />} />
+              <Route path="partidas/:gameId" element={<GamePage />} />
             </Route>
             <Route
               path="*"

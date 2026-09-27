@@ -4,10 +4,12 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { DEFAULT_SCRYPT_PARAMS, type ScryptParams } from './auth/password';
 import type { AppContext } from './context';
 import type { Database } from './db';
+import { GameHub } from './games/hub';
 import { registerErrorHandler } from './http/errors';
 import { registerAuthRoutes } from './routes/auth';
 import { registerCampaignRoutes } from './routes/campaigns';
 import { registerCharacterRoutes } from './routes/characters';
+import { registerGameRoutes } from './routes/games';
 import { registerRollRoutes } from './routes/rolls';
 import { registerWeb } from './web';
 
@@ -29,6 +31,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
   const ctx: AppContext = {
     db: options.db,
+    hub: new GameHub(),
+    random: options.random ?? Math.random,
     cookieSecure: options.cookieSecure ?? 'auto',
     allowRegistration: options.allowRegistration ?? true,
     passwordParams: options.passwordParams ?? DEFAULT_SCRYPT_PARAMS,
@@ -38,12 +42,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.removeContentTypeParser('text/plain');
   registerErrorHandler(app);
   await app.register(fastifyCookie);
+  // Los directos no terminan solos: al apagar se cortan para que el cierre no se quede esperando.
+  app.addHook('preClose', async () => ctx.hub.disconnectAll());
 
   app.get('/api/health', async () => ({ status: 'ok' }));
   registerAuthRoutes(app, ctx);
   registerCampaignRoutes(app, ctx);
   registerCharacterRoutes(app, ctx);
-  registerRollRoutes(app, options.random ?? Math.random);
+  registerGameRoutes(app, ctx);
+  registerRollRoutes(app, ctx.random);
   await registerWeb(app, options.webDist);
 
   return app;

@@ -39,6 +39,7 @@ export function CampaignsPage() {
                         <span className={`badge role-${campaign.role}`}>
                           {ROLE_LABELS[campaign.role]}
                         </span>
+                        {campaign.openGameId && <span className="badge live">En juego</span>}
                       </span>
                       {campaign.description && (
                         <span className="card-text">{campaign.description}</span>

@@ -7,17 +7,27 @@ import type {
   CampaignDetail,
   CampaignSummary,
   CharacterView,
+  CloseGameRequest,
   CreateCampaignRequest,
   CreateCharacterRequest,
   DamageRequest,
   DamageResponse,
+  GameDetail,
+  GameEvent,
+  GameRollRequest,
+  GameState,
+  GameSummary,
   JoinCampaignRequest,
   LoginRequest,
   MeResponse,
+  NoteRequest,
+  OpenGameRequest,
   RecoverRequest,
   RegisterRequest,
+  RevealRequest,
   RollRequest,
   RollResponse,
+  ScreenState,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
 } from '@dungeon-copilot/shared';
@@ -59,6 +69,7 @@ const del = (url: string) => request<void>('DELETE', url);
 
 type CampaignResponse = { campaign: CampaignDetail };
 type CharacterResponse = { character: CharacterView };
+type EventResponse = { event: GameEvent };
 
 export const api = {
   me: () => get<MeResponse>('/api/auth/me'),
@@ -79,6 +90,8 @@ export const api = {
     post<{ inviteCode: string }>(`/api/campaigns/${id}/invite-code`).then((r) => r.inviteCode),
   removeMember: (campaignId: string, userId: string) =>
     del(`/api/campaigns/${campaignId}/members/${userId}`),
+  regenerateScreenToken: (id: string) =>
+    post<{ screenToken: string }>(`/api/campaigns/${id}/screen-token`).then((r) => r.screenToken),
 
   characters: (campaignId: string) =>
     get<{ characters: CharacterView[] }>(`/api/campaigns/${campaignId}/characters`).then(
@@ -101,6 +114,21 @@ export const api = {
     post<CharacterResponse>(`/api/characters/${id}/xp`, body).then((r) => r.character),
   advance: (id: string, body: AdvanceRequest) =>
     post<CharacterResponse>(`/api/characters/${id}/advances`, body).then((r) => r.character),
+
+  games: (campaignId: string) =>
+    get<{ games: GameSummary[] }>(`/api/campaigns/${campaignId}/games`).then((r) => r.games),
+  openGame: (campaignId: string, body: OpenGameRequest) =>
+    post<{ game: GameDetail }>(`/api/campaigns/${campaignId}/games`, body).then((r) => r.game),
+  game: (id: string) => get<GameState>(`/api/games/${id}`),
+  closeGame: (id: string, body: CloseGameRequest) =>
+    post<{ game: GameDetail; event: GameEvent }>(`/api/games/${id}/close`, body),
+  reveal: (id: string, body: RevealRequest) =>
+    post<EventResponse>(`/api/games/${id}/reveals`, body).then((r) => r.event),
+  note: (id: string, body: NoteRequest) =>
+    post<EventResponse>(`/api/games/${id}/notes`, body).then((r) => r.event),
+  gameRoll: (id: string, body: GameRollRequest) =>
+    post<EventResponse>(`/api/games/${id}/rolls`, body).then((r) => r.event),
+  screen: (token: string) => get<ScreenState>(`/api/screens/${token}`),
 
   roll: (body: RollRequest) => post<RollResponse>('/api/rolls', body),
 };
