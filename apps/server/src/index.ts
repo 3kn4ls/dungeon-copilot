@@ -4,9 +4,12 @@ import { loadConfig } from './config';
 import { openDatabase } from './db';
 
 const config = loadConfig();
-const database = await openDatabase(
-  config.databaseUrl ? { url: config.databaseUrl } : { dataDir: config.dataDir },
-);
+// Hasta que exista el servidor, con su registro, los avisos de la base de datos van a la consola.
+let warnIdleError = (error: Error) => console.warn(error);
+const database = await openDatabase({
+  ...(config.databaseUrl ? { url: config.databaseUrl } : { dataDir: config.dataDir }),
+  onIdleError: (error) => warnIdleError(error),
+});
 await database.migrate();
 
 const app = await buildApp({
@@ -18,6 +21,11 @@ const app = await buildApp({
   ai: config.ollama ? createOllama(config.ollama) : null,
 });
 app.addHook('onClose', () => database.close());
+warnIdleError = (error) =>
+  app.log.warn(
+    { err: error },
+    'PostgreSQL cortó una conexión libre; la siguiente consulta abrirá otra',
+  );
 
 app.log.info(
   database.kind === 'postgres'

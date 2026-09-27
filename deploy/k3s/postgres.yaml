@@ -1,0 +1,100 @@
+# La base de datos. Su contraseña está en el Secret "postgres", que se crea a mano una sola
+# vez (ver el README): PostgreSQL solo la usa al crear la base de datos.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: dungeon-copilot
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: dungeon-copilot
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: dungeon-copilot
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        # El usuario postgres de la imagen oficial.
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_USER
+              value: dungeon
+            - name: POSTGRES_DB
+              value: dungeon
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: password
+            # En una subcarpeta: initdb quiere una carpeta vacía y la raíz de algunos volúmenes
+            # trae lost+found.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              # Por TCP: la primera vez, mientras se crea la base de datos, solo responde por
+              # el socket local.
+              command: [pg_isready, -h, 127.0.0.1, -U, dungeon, -d, dungeon]
+            periodSeconds: 10
+          lifecycle:
+            # k3s para con SIGTERM, y con eso PostgreSQL espera a que el servidor suelte sus
+            # conexiones. Así para en el acto, sin esperar ni perder nada.
+            preStop:
+              exec:
+                command: [pg_ctl, stop, -m, fast, --no-wait]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  # El volumen no se borra con el StatefulSet: los datos sobreviven a un kubectl delete -k.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
