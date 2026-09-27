@@ -20,7 +20,8 @@ import {
 import { abortWhenGone, requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
 import type { Executor } from '../db';
-import { campaignMembers, campaigns, characters, gameEvents, games, npcs } from '../db/schema';
+import { campaignMembers, campaigns, characters, games, npcs } from '../db/schema';
+import { findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster } from './access';
@@ -73,25 +74,6 @@ async function findCampaign(db: Executor, campaignId: string) {
     .where(eq(campaigns.id, campaignId));
   if (!campaign) throw notFound(CAMPAIGN_NOT_FOUND);
   return campaign;
-}
-
-/** Lo último que el máster ha enseñado en la partida: la escena en la que está el PNJ. */
-async function findScene(db: Executor, gameId: string): Promise<PromptScene | undefined> {
-  const [row] = await db
-    .select({ payload: gameEvents.payload })
-    .from(gameEvents)
-    .where(
-      and(
-        eq(gameEvents.gameId, gameId),
-        eq(gameEvents.visibility, 'public'),
-        sql`${gameEvents.payload}->>'kind' = 'reveal'`,
-      ),
-    )
-    .orderBy(desc(gameEvents.id))
-    .limit(1);
-  return row?.payload.kind === 'reveal'
-    ? { title: row.payload.title, body: row.payload.body }
-    : undefined;
 }
 
 export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext): void {
@@ -211,7 +193,7 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
         .from(games)
         .where(and(eq(games.id, body.gameId), eq(games.campaignId, npc.campaignId)));
       if (!game) throw notFound('Esa partida no es de la campaña de este PNJ');
-      scene = await findScene(db, game.id);
+      scene = (await findScenes(db, game.id)).at(-1);
     }
     const party = await db
       .select({ name: characters.name, background: characters.background })

@@ -1770,3 +1770,41 @@ h1 .badge {
   gap: 8px 14px;
   margin-top: 4px;
 }
+
+/* Complicaciones que propone la IA bajo una tirada: solo las ve el máster. */
+.complications {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.complications .link-button {
+  justify-self: start;
+}
+
+.ideas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.idea {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--partial);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.idea p {
+  margin: 0;
+}
+
+.idea .badge {
+  margin-left: 8px;
+}

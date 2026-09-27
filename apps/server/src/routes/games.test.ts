@@ -151,6 +151,29 @@ describe('resumen sin IA', () => {
   });
 });
 
+describe('ayuda para narrar sin IA', () => {
+  it('describir una escena o proponer complicaciones avisa de que no está configurada', async () => {
+    const { master, campaign, kael } = await table();
+    const { url } = await openGame(master, campaign.id);
+    loadDice(1, 4);
+    const roll = await master.post(`${url}/rolls`, {
+      actor: { kind: 'character', characterId: kael.id, skill: 'melee-weapons' },
+      target: { kind: 'difficulty', difficulty: 10 },
+    });
+    expect(roll.json().event.roll.result.outcome).toBe('partial');
+
+    for (const response of [
+      await master.post(`${url}/reveals/draft`, { notes: 'Una posada' }),
+      await master.post(`${url}/rolls/${roll.json().event.id}/complications`, {}),
+    ]) {
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error).toBe(
+        'La IA no está configurada: el servidor necesita OLLAMA_URL y OLLAMA_MODEL para usar Ollama',
+      );
+    }
+  });
+});
+
 describe('revelar y anotar', () => {
   it('lo que revela el máster lo ve toda la mesa; sus notas, solo él', async () => {
     const { master, ana, campaign } = await table();

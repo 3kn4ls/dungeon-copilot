@@ -1,19 +1,26 @@
-import { resolveOpposed, resolveTest } from '@dungeon-copilot/rules';
+import { OUTCOME_GUIDES, resolveOpposed, resolveTest } from '@dungeon-copilot/rules';
 import { fixedDice } from '@dungeon-copilot/rules/testing';
-import type { GameEventPayload } from '@dungeon-copilot/shared';
+import type { GameEventPayload, GameRoll } from '@dungeon-copilot/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  cleanIdeas,
   cleanRecap,
   cleanReply,
+  cleanScene,
+  complicationMessages,
   fit,
   hasLog,
   npcGenerationMessages,
   parseNpcDraft,
+  partialIdeas,
   recapMessages,
+  sceneMessages,
   spokenReply,
   talkMessages,
+  visibleIdeas,
   visibleRecap,
   visibleReply,
+  visibleScene,
 } from './prompts';
 
 const campaign = {
@@ -402,5 +409,143 @@ describe('resumen de una partida', () => {
     ).toBe('Resumen de lo que pasó en la cripta, que fue mucho y muy variado para todos');
     expect(cleanRecap('**La cripta**')).toBe('');
     expect(cleanRecap('a'.repeat(5000))).toHaveLength(4000);
+  });
+});
+
+describe('describir una escena', () => {
+  it('convierte las notas del máster en una descripción, con la escena anterior', () => {
+    const [system, user] = sceneMessages({
+      campaign,
+      characters: [{ name: 'Kael', background: 'Acróbata' }],
+      scenes: [
+        { title: 'El Ciervo Blanco', body: 'Humo y estofado.' },
+        { title: '', body: 'Salís al callejón.' },
+      ],
+      title: 'La cripta',
+      notes: 'escaleras húmedas, olor a tierra [hay un zombi dormido]',
+    });
+    expect(system?.content).toContain('segunda persona del plural');
+    expect(system?.content).toContain('entre corchetes');
+    expect(user?.content).toBe(
+      [
+        `La campaña se llama «La Marca del Este». De qué va:\n${campaign.description}`,
+        'Personajes de los jugadores:\n- Kael: Acróbata',
+        'Lo último que el máster ha enseñado a la mesa, de lo más antiguo a lo más reciente:\nEl Ciervo Blanco\nHumo y estofado.\n\nSalís al callejón.',
+        'Título de la escena: La cripta',
+        'Notas del máster para la descripción:\nescaleras húmedas, olor a tierra [hay un zombi dormido]',
+        'Escribe la descripción.',
+      ].join('\n\n'),
+    );
+  });
+
+  it('con solo el título, y sin escenas anteriores, también', () => {
+    const [, user] = sceneMessages({
+      campaign,
+      characters: [],
+      scenes: [],
+      title: 'El puerto de noche',
+      notes: '',
+    });
+    expect(user?.content).not.toContain('Notas del máster');
+    expect(user?.content).not.toContain('Lo último');
+    expect(user?.content).toContain('Título de la escena: El puerto de noche\n\nEscribe');
+  });
+
+  it('quita el título que se inventa el modelo, también mientras escribe', () => {
+    expect(visibleScene('Desc')).toBe('');
+    expect(visibleScene('**La cripta**')).toBe('');
+    expect(visibleScene('**La cripta**\n\nBajáis')).toBe('Bajáis');
+    expect(visibleScene('Descripción de la escena:\nBajáis')).toBe('Bajáis');
+    expect(visibleScene('DESCRIPCIÓN:\nBajáis')).toBe('Bajáis');
+    expect(visibleScene('Descendéis por')).toBe('Descendéis por');
+    expect(visibleScene('Ante vosotros')).toBe('Ante vosotros');
+  });
+
+  it('al terminar, quita las comillas que envuelven toda la descripción', () => {
+    expect(cleanScene('«Ante vosotros se alza la cripta.»')).toBe(
+      'Ante vosotros se alza la cripta.',
+    );
+    expect(cleanScene('"Ante vosotros."\n')).toBe('Ante vosotros.');
+    expect(cleanScene('**La cripta**\n\n“Bajáis.”')).toBe('Bajáis.');
+    // Si hay más comillas dentro, no son un envoltorio.
+    expect(cleanScene('«Alto» grita el guardia. «Quietos»')).toBe(
+      '«Alto» grita el guardia. «Quietos»',
+    );
+    expect(cleanScene('**La cripta**')).toBe('');
+  });
+});
+
+describe('complicaciones de una tirada', () => {
+  const roll = (outcome: 'partial' | 'failure' | 'fumble', faces: number[]): GameRoll => ({
+    actor: { label: 'Kael', characterId: 'kael', check: 'Ganzúas' },
+    target: { kind: 'difficulty', label: 'Normal (10)' },
+    situation: 'test',
+    notes: [],
+    result: { kind: 'test', ...resolveTest({ bonus: 6, edge: 'none' }, 10, fixedDice(...faces)) },
+  });
+
+  it('pide tres ideas para lo que cuesta el éxito, con la escena y lo que se intentaba', () => {
+    const partial = roll('partial', [1, 4]);
+    expect(partial.result.outcome).toBe('partial');
+    const [system, user] = complicationMessages({
+      campaign,
+      characters: [{ name: 'Kael', background: 'Acróbata' }],
+      scenes: [{ title: 'El almacén', body: 'Cajas apiladas y un perro atado.' }],
+      roll: partial,
+      intent: 'forzar la puerta',
+    });
+    expect(system?.content).toContain('Es un éxito con coste');
+    expect(system?.content).toContain(OUTCOME_GUIDES.test.partial);
+    expect(system?.content).toContain('{"ideas": ["…", "…", "…"]}');
+    expect(user?.content).toBe(
+      [
+        `La campaña se llama «La Marca del Este». De qué va:\n${campaign.description}`,
+        'Personajes de los jugadores:\n- Kael: Acróbata',
+        'Lo último que el máster ha enseñado a la mesa, de lo más antiguo a lo más reciente:\nEl almacén\nCajas apiladas y un perro atado.',
+        'La tirada: Kael (Ganzúas), prueba normal (10): éxito con coste.',
+        'Lo que intentaba Kael: forzar la puerta',
+        'Propón tres complicaciones.',
+      ].join('\n\n'),
+    );
+  });
+
+  it('un fallo empeora la situación y una pifia trae un problema serio', () => {
+    const failure = roll('failure', [1, 2]);
+    const fumble = roll('fumble', [1, 1]);
+    expect([failure.result.outcome, fumble.result.outcome]).toEqual(['failure', 'fumble']);
+    const prompt = { campaign, characters: [], scenes: [], intent: '' };
+    const [failed] = complicationMessages({ ...prompt, roll: failure });
+    expect(failed?.content).toContain('Es un fallo');
+    const [fumbled, user] = complicationMessages({ ...prompt, roll: fumble });
+    expect(fumbled?.content).toContain('Es una pifia');
+    expect(user?.content).not.toContain('Lo que intentaba');
+  });
+
+  it('va enseñando cada idea cuando termina, y solo crece', () => {
+    const json =
+      '{"ideas": ["El perro ladra \\"¡guau!\\".", "1. **Se rompe** la\\nganzúa.", "Llega la ronda.", "Sobra."]}';
+    expect(partialIdeas('{"ideas": ["El perro')).toEqual([]);
+    expect(partialIdeas(json.slice(0, 40))).toEqual(['El perro ladra "¡guau!".']);
+    let shown = '';
+    for (let end = 0; end <= json.length; end++) {
+      const visible = visibleIdeas(json.slice(0, end));
+      expect(visible.startsWith(shown)).toBe(true);
+      shown = visible;
+    }
+    expect(shown).toBe('El perro ladra "¡guau!".\nSe rompe la ganzúa.\nLlega la ronda.\n');
+    expect(cleanIdeas(json)).toBe('El perro ladra "¡guau!".\nSe rompe la ganzúa.\nLlega la ronda.');
+  });
+
+  it('si se corta o no responde en JSON, aprovecha lo que se entiende', () => {
+    expect(cleanIdeas('{"ideas": ["Se rompe la ganzúa.", "Llega la ro')).toBe(
+      'Se rompe la ganzúa.',
+    );
+    expect(cleanIdeas('<think>…</think>{"ideas": ["Uno."]}')).toBe('Uno.');
+    expect(cleanIdeas('["Uno.", "Dos."]')).toBe('Uno.\nDos.');
+    expect(cleanIdeas('Aquí tienes:\n1. Uno.\n2) **Dos**.\n- Tres.\n¿Quieres más?')).toBe(
+      'Uno.\nDos.\nTres.',
+    );
+    expect(cleanIdeas('{"ideas": []}')).toBe('');
+    expect(cleanIdeas('No sé qué decir.')).toBe('');
   });
 });

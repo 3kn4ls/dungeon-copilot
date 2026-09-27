@@ -170,3 +170,40 @@ export function useSessionState<T>(key: string, initial: () => T) {
   }, [key, value]);
   return [value, setValue] as const;
 }
+
+/** Para retocar un texto corto, como lo que dice un PNJ, o escribirlo desde cero. */
+export function LineEditor(props: {
+  label: string;
+  value: string;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      className="stack tight"
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onSave();
+      }}
+    >
+      <textarea
+        aria-label={props.label}
+        rows={3}
+        maxLength={2000}
+        autoFocus={props.autoFocus}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      <div className="actions">
+        <button type="submit" className="button small primary">
+          Guardar
+        </button>
+        <button type="button" className="button small" onClick={props.onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}

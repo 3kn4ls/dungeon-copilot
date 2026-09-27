@@ -20,7 +20,11 @@ PostgreSQL con Drizzle ORM. Sin `DATABASE_URL` se usa PGlite (PostgreSQL embebid
 
 La IA es opcional. El servidor habla con Ollama a través de la interfaz `Ai` (`apps/server/src/ai/ollama.ts`), que las rutas reciben en `ctx.ai`: es `null` sin `OLLAMA_URL`, y entonces las rutas de IA responden 503 y la web sigue funcionando sin ella. Los prompts, en español y con topes de longitud, viven en `apps/server/src/ai/prompts.ts`. Los tests usan el Ollama de mentira de `apps/server/src/ai/fake-ollama.ts`, nunca uno de verdad.
 
+Los textos que la IA escribe en directo salen en NDJSON con `sendAiText` (`apps/server/src/ai/respond.ts`); lo que se enseña a medias (`visible`) solo puede crecer, porque se manda por trozos.
+
 Los PNJ son solo del máster: a un jugador de la campaña se le responde 403. La charla con un PNJ no escribe nada en la partida; solo la frase que el máster enseña a la mesa queda como evento.
+
+La ayuda para narrar (describir una escena a partir de unas notas y proponer complicaciones para una tirada) es del máster, solo con la partida abierta, y tampoco escribe nada: lo que enseñe va como un `reveal` más. Las complicaciones son para los resultados de `needsComplication` (éxito con coste, fallo y pifia). Estos prompts y el del PNJ reciben las últimas escenas enseñadas (`findScenes`).
 
 El resumen de una partida terminada no es un evento: vive en `games.recap`, lo guarda el máster y es público. Los resúmenes son la memoria de la campaña: los prompts de los PNJ reciben los últimos (`findRecaps`). Al resumen solo llegan las notas del máster si él quiere, y nunca las tiradas secretas.
 

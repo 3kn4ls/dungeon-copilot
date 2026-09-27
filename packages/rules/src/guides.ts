@@ -39,3 +39,14 @@ export const OUTCOME_GUIDES: Record<Situation, Record<Outcome, string>> = {
       'Algo sale mal: se rompe la cuerda, se encasquilla el arma o casi alcanzas a un aliado.',
   },
 };
+
+/**
+ * Resultados en los que el máster decide qué se complica: el precio de un éxito con coste o
+ * lo que sale mal en un fallo o una pifia. En ellos, la IA le propone ideas.
+ */
+export const COMPLICATION_OUTCOMES = ['partial', 'failure', 'fumble'] as const satisfies Outcome[];
+
+export type ComplicationOutcome = (typeof COMPLICATION_OUTCOMES)[number];
+
+export const needsComplication = (outcome: Outcome): outcome is ComplicationOutcome =>
+  (COMPLICATION_OUTCOMES as readonly Outcome[]).includes(outcome);

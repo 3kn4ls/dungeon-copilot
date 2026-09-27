@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { registerRequestSchema, usernameSchema } from './auth';
 import { joinCampaignSchema, updateCampaignSchema } from './campaigns';
 import { advanceSchema, awardXpSchema, updateCharacterSchema } from './characters';
-import { gameRollSchema, openGameSchema, revealSchema, speechSchema } from './games';
+import {
+  complicationsSchema,
+  gameRollSchema,
+  openGameSchema,
+  revealDraftSchema,
+  revealSchema,
+  speechSchema,
+} from './games';
 import { TALK_MEMORY, generateNpcSchema, npcSchema, talkSchema, updateNpcSchema } from './npcs';
 
 describe('cuentas', () => {
@@ -80,6 +87,25 @@ describe('partidas', () => {
     const nameless = { kind: 'free', label: ' ', bonus: 4 };
     const opposed = { actor, target: { kind: 'opposed', opponent: nameless } };
     expect(gameRollSchema.safeParse(opposed).success).toBe(false);
+  });
+
+  it('para describir una escena, la IA necesita unas notas o al menos el título', () => {
+    expect(revealDraftSchema.parse({ notes: ' posada, de noche ' })).toEqual({
+      title: '',
+      notes: 'posada, de noche',
+    });
+    expect(revealDraftSchema.parse({ title: 'La cripta' })).toEqual({
+      title: 'La cripta',
+      notes: '',
+    });
+    const empty = revealDraftSchema.safeParse({ title: ' ', notes: ' ' });
+    expect(empty.success).toBe(false);
+    expect(empty.error?.issues.map((issue) => issue.path)).toEqual([['notes']]);
+  });
+
+  it('las complicaciones no necesitan saber qué se intentaba', () => {
+    expect(complicationsSchema.parse({})).toEqual({ intent: '' });
+    expect(complicationsSchema.safeParse({ intent: 'a'.repeat(301) }).success).toBe(false);
   });
 });
 

@@ -54,16 +54,53 @@ export const recapDraftSchema = z.object({
 
 export type RecapDraftRequest = z.input<typeof recapDraftSchema>;
 
+/** Tope de lo que el máster enseña a la mesa de una vez. */
+export const REVEAL_MAX = 5000;
+
+const revealTitle = z
+  .string()
+  .trim()
+  .max(120, 'El título no puede pasar de 120 caracteres')
+  .default('');
+
 export const revealSchema = z.object({
-  title: z.string().trim().max(120, 'El título no puede pasar de 120 caracteres').default(''),
+  title: revealTitle,
   body: z
     .string()
     .trim()
     .min(1, 'Escribe lo que quieres enseñar a la mesa')
-    .max(5000, 'El texto no puede pasar de 5000 caracteres'),
+    .max(REVEAL_MAX, `El texto no puede pasar de ${REVEAL_MAX} caracteres`),
 });
 
 export type RevealRequest = z.input<typeof revealSchema>;
+
+/**
+ * Lo que el máster le da a la IA para que describa una escena: unas notas ("taberna del
+ * puerto, de noche, un encapuchado en la esquina") o solo el título. No se enseña nada aún.
+ */
+export const revealDraftSchema = z
+  .object({
+    title: revealTitle,
+    notes: z
+      .string()
+      .trim()
+      .max(REVEAL_MAX, `Las notas no pueden pasar de ${REVEAL_MAX} caracteres`)
+      .default(''),
+  })
+  .refine((draft) => draft.notes !== '' || draft.title !== '', {
+    path: ['notes'],
+    message: 'Escribe unas notas o un título para que la IA sepa qué describir',
+  });
+
+export type RevealDraftRequest = z.input<typeof revealDraftSchema>;
+
+/** Para que la IA proponga complicaciones a una tirada que ha salido a medias o mal. */
+export const complicationsSchema = z.object({
+  /** Lo que intentaba quien tiraba, que la tirada no dice: "forzar la puerta del almacén". */
+  intent: z.string().trim().max(300, 'No puede pasar de 300 caracteres').default(''),
+});
+
+export type ComplicationsRequest = z.input<typeof complicationsSchema>;
 
 export const noteSchema = z.object({
   text: z

@@ -1,11 +1,13 @@
-import { LUCK_PER_SESSION, XP_AWARDS } from '@dungeon-copilot/rules';
+import { LUCK_PER_SESSION, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
 import {
   closeGameSchema,
+  complicationsSchema,
   gameRollSchema,
   noteSchema,
   openGameSchema,
   recapDraftSchema,
   recapSchema,
+  revealDraftSchema,
   revealSchema,
   speechSchema,
   type GameDetail,
@@ -20,7 +22,20 @@ import {
 } from '@dungeon-copilot/shared';
 import { and, asc, desc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { cleanRecap, hasLog, recapMessages, visibleRecap } from '../ai/prompts';
+import {
+  IDEAS_FORMAT,
+  RECENT_SCENES,
+  cleanIdeas,
+  cleanRecap,
+  cleanScene,
+  complicationMessages,
+  hasLog,
+  recapMessages,
+  sceneMessages,
+  visibleIdeas,
+  visibleRecap,
+  visibleScene,
+} from '../ai/prompts';
 import { requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
 import type { Executor, Transaction } from '../db';
@@ -34,6 +49,7 @@ import {
   npcs,
   users,
 } from '../db/schema';
+import { findCampaignContext, findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import type { RollingCharacter } from '../games/rolls';
 import { resolveGameRoll } from '../games/rolls';
@@ -64,6 +80,12 @@ const GAME_STILL_OPEN = 'La partida sigue en juego: el resumen se escribe al ter
  */
 const RECAP_TIMEOUT_MS = 300_000;
 const MASTER_ONLY = 'Solo el máster de la campaña puede hacer eso';
+const ROLL_NOT_FOUND = 'Esa tirada no existe en esta partida';
+const ROLL_WENT_WELL =
+  'Esa tirada salió bien: las complicaciones son para los éxitos con coste, los fallos y las pifias';
+
+/** Los ids de los eventos son un integer de PostgreSQL: fuera de rango, no existen. */
+const isEventId = (id: number) => Number.isInteger(id) && id > 0 && id <= 2 ** 31 - 1;
 
 /** Los enlaces de pantalla son 32 caracteres hexadecimales (ver el esquema de campaigns). */
 const SCREEN_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
@@ -466,25 +488,16 @@ export function registerGameRoutes(
       );
     }
     const { campaignId } = found.game;
-    const [campaign] = await db
-      .select({ name: campaigns.name, description: campaigns.description })
-      .from(campaigns)
-      .where(eq(campaigns.id, campaignId));
+    const context = await findCampaignContext(db, campaignId);
     // Borrada justo entre medias.
-    if (!campaign) throw notFound(GAME_NOT_FOUND);
-    const party = await db
-      .select({ name: characters.name, background: characters.background })
-      .from(characters)
-      .where(eq(characters.campaignId, campaignId))
-      .orderBy(asc(characters.createdAt));
+    if (!context) throw notFound(GAME_NOT_FOUND);
     const [previous] = await findRecaps(db, campaignId, { before: found.game.number, limit: 1 });
 
     return sendAiText(request, reply, {
       ai: model,
       request: {
         messages: recapMessages({
-          campaign,
-          characters: party,
+          ...context,
           game: found.game,
           previous,
           events,
@@ -499,6 +512,80 @@ export function registerGameRoutes(
       cutMessage: 'Se cortó el resumen de la partida',
     });
   });
+
+  /** Una partida en juego que dirige `user`, con la IA lista: para pedirle ayuda al narrar. */
+  async function findNarratedGame(user: PublicUser, gameId: string) {
+    const found = await findGame(db, user, gameId);
+    requireMasterOf(found);
+    if (found.game.status !== 'open') throw new HttpError(409, GAME_CLOSED);
+    const model = requireAi(ai);
+    const context = await findCampaignContext(db, found.game.campaignId);
+    // Borrada justo entre medias.
+    if (!context) throw notFound(GAME_NOT_FOUND);
+    return { found, model, context };
+  }
+
+  /**
+   * La IA convierte las notas del máster en la descripción de una escena, en directo. No se
+   * enseña nada: el máster la retoca y decide si la enseña a la mesa.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/reveals/draft', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(revealDraftSchema, request.body, 'Revisa las notas para la IA');
+    const { model, context } = await findNarratedGame(user, gameId);
+    const scenes = await findScenes(db, gameId, RECENT_SCENES);
+
+    return sendAiText(request, reply, {
+      ai: model,
+      request: {
+        messages: sceneMessages({ ...context, scenes, title: body.title, notes: body.notes }),
+        temperature: 0.8,
+        maxTokens: 350,
+      },
+      visible: visibleScene,
+      finish: cleanScene,
+      cutMessage: 'Se cortó la descripción de la escena',
+    });
+  });
+
+  /**
+   * La IA propone complicaciones para una tirada con éxito con coste, fallo o pifia, en
+   * directo: una idea por línea según las termina. No se enseña nada: el máster elige.
+   */
+  app.post<{ Params: IdParams & { eventId: string } }>(
+    '/api/games/:id/rolls/:eventId/complications',
+    async (request, reply) => {
+      const user = requireUser(request);
+      const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+      const body = parseBody(complicationsSchema, request.body, 'Revisa lo que intentaba');
+      const { model, context } = await findNarratedGame(user, gameId);
+      const eventId = Number(request.params.eventId);
+      const [row] = isEventId(eventId)
+        ? await db
+            .select({ payload: gameEvents.payload })
+            .from(gameEvents)
+            .where(and(eq(gameEvents.id, eventId), eq(gameEvents.gameId, gameId)))
+        : [];
+      if (row?.payload.kind !== 'roll') throw notFound(ROLL_NOT_FOUND);
+      const { roll } = row.payload;
+      if (!needsComplication(roll.result.outcome)) throw new HttpError(409, ROLL_WENT_WELL);
+      const scenes = await findScenes(db, gameId, RECENT_SCENES);
+
+      return sendAiText(request, reply, {
+        ai: model,
+        request: {
+          messages: complicationMessages({ ...context, scenes, roll, intent: body.intent }),
+          format: IDEAS_FORMAT,
+          temperature: 0.9,
+          maxTokens: 450,
+        },
+        visible: visibleIdeas,
+        finish: cleanIdeas,
+        cutMessage: 'Se cortaron las complicaciones',
+      });
+    },
+  );
 
   // Pantalla de la mesa: sin sesión, con el enlace secreto de la campaña. Solo lo público.
 

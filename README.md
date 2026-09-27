@@ -11,6 +11,7 @@ Ahora mismo tiene:
 - Pantalla de la mesa: un enlace secreto por campaña para una tele o una tablet, sin iniciar sesión. Enseña lo último revelado y las últimas tiradas, y pasa sola a la partida siguiente.
 - PNJ con IA: el máster guarda los PNJ de cada campaña con su aspecto, carácter, forma de hablar, lo que quieren y lo que ocultan. Ollama puede inventarlos o completar lo que falte, también en plena partida. En la sala, el máster cuenta lo que dicen o hacen los personajes, la IA responde como el PNJ y él decide qué frase enseña a la mesa, tal cual o retocada; también puede escribirla él.
 - Resumen de cada partida: al terminarla, la IA propone uno con el registro y con lo que el máster le cuente de lo que se jugó de palabra. El máster lo retoca (o lo escribe él) y lo lee toda la mesa, en la partida y en la campaña. Al empezar la siguiente, un botón lo enseña a la mesa y a la pantalla, y los PNJ recuerdan los resúmenes de las últimas partidas.
+- Ayuda para narrar: en la sala, el máster apunta unas notas (lo que la IA debe saber pero no contar, entre corchetes) y la IA las convierte en una descripción que él retoca, si quiere, antes de enseñarla a la mesa. Tras un éxito con coste, un fallo o una pifia, la IA propone tres complicaciones que encajan con la escena, y el máster enseña la que quiera, tal cual o retocada, o se la guarda para contarla de palabra.
 - Un tirador de dados que resuelve las tiradas en el servidor. Desde la ficha se abre con el bonificador ya puesto.
 
 ## Requisitos
@@ -50,11 +51,11 @@ El servidor se configura con variables de entorno:
 
 ## IA
 
-La IA es opcional: sin `OLLAMA_URL` todo funciona igual, pero el máster escribe él mismo lo que dicen los PNJ y los resúmenes. Con ella, el servidor habla con Ollama para tres cosas: inventar o completar la ficha de un PNJ, responder como el PNJ en la sala y proponer el resumen de una partida terminada, estas dos con el texto escrito poco a poco.
+La IA es opcional: sin `OLLAMA_URL` todo funciona igual, pero el máster escribe él mismo las descripciones, lo que dicen los PNJ y los resúmenes. Con ella, el servidor habla con Ollama para inventar o completar la ficha de un PNJ y, con el texto escrito poco a poco, para responder como el PNJ en la sala, describir una escena a partir de unas notas, proponer complicaciones cuando una tirada sale a medias o mal, y proponer el resumen de una partida terminada.
 
 Vale cualquier Ollama al que llegue el servidor: el del cluster, otro servidor con GPU o los modelos en la nube de Ollama (`OLLAMA_URL=https://ollama.com` y la clave en `OLLAMA_API_KEY`). El modelo tiene que estar descargado (`ollama pull qwen2.5:7b`); si no, la web lo dice con el comando para descargarlo. Un modelo pequeño en una máquina lenta puede tardar: cada petición espera como mucho 3 minutos, y 5 el resumen de una partida, que tiene que leerla entera.
 
-A Ollama le llega la ficha del PNJ, con lo que oculta, la descripción de la campaña, el nombre y trasfondo de los personajes, lo último que el máster ha enseñado a la mesa y los resúmenes de las tres últimas partidas. Para el resumen le llega además el registro de la partida, sin las tiradas secretas. Las notas del máster solo salen del servidor para escribir el resumen, y el máster puede dejarlas fuera. La charla con el PNJ no se guarda en la base de datos: vive en el navegador del máster hasta que la borra o cierra la pestaña, y a la partida solo pasa la frase que enseña a la mesa. Tampoco se guarda el resumen que propone la IA hasta que el máster lo acepta.
+A Ollama le llega la ficha del PNJ, con lo que oculta, la descripción de la campaña, el nombre y trasfondo de los personajes, lo último que el máster ha enseñado a la mesa y los resúmenes de las tres últimas partidas. Para describir una escena le llega además lo que el máster apunta para ella, también lo que va entre corchetes; para las complicaciones, la tirada, aunque sea secreta, y lo que intentaba quien tiró, si el máster lo cuenta; y para el resumen, el registro de la partida, sin las tiradas secretas. Lo que el máster anota solo para él sale del servidor únicamente para escribir el resumen, y puede dejarlo fuera. La charla con el PNJ no se guarda en la base de datos: vive en el navegador del máster hasta que la borra o cierra la pestaña, y a la partida solo pasa la frase que enseña a la mesa. Tampoco se guarda lo que la IA propone para una escena, una tirada o el resumen hasta que el máster lo enseña o lo acepta.
 
 ## Desplegar
 
@@ -120,37 +121,39 @@ Cada archivo de tests crea su propia base de datos en ese servidor y la borra al
 
 Todo bajo `/api`, en JSON. Los errores responden `{ error, issues? }` con mensajes en español. La sesión va en una cookie `httpOnly` que dura 30 días y se renueva sola con el uso.
 
-| Ruta                                      | Qué hace                                                                             |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| `POST /auth/register`, `/auth/login`      | Crear cuenta o entrar                                                                |
-| `POST /auth/logout`, `GET /auth/me`       | Salir y saber quién ha entrado                                                       |
-| `GET, POST /campaigns`                    | Tus campañas y crear una nueva (quien la crea es su máster)                          |
-| `POST /campaigns/join`                    | Unirse con el código de invitación                                                   |
-| `GET, PATCH, DELETE /campaigns/:id`       | Ver, cambiar o borrar una campaña (cambiar y borrar: el máster)                      |
-| `POST /campaigns/:id/invite-code`         | Cambiar el código de invitación (el máster)                                          |
-| `POST /campaigns/:id/screen-token`        | Cambiar el enlace de la pantalla de la mesa (el máster)                              |
-| `DELETE /campaigns/:id/members/:userId`   | Salir de la campaña, o echar a un jugador (el máster)                                |
-| `GET, POST /campaigns/:id/characters`     | Personajes de la campaña y crear uno                                                 |
-| `GET, PATCH, DELETE /characters/:id`      | Ver, cambiar nombre, trasfondo o Suerte, y borrar                                    |
-| `POST /characters/:id/damage`, `/recover` | Recibir daño y recuperarse                                                           |
-| `POST /characters/:id/xp`                 | Dar o quitar experiencia (el máster)                                                 |
-| `POST /characters/:id/advances`           | Gastar experiencia en una mejora                                                     |
-| `GET, POST /campaigns/:id/npcs`           | PNJ de la campaña y crear uno (el máster)                                            |
-| `POST /campaigns/:id/npcs/generate`       | La IA inventa un PNJ o completa uno a medias, sin guardarlo (el máster)              |
-| `GET, PATCH, DELETE /npcs/:id`            | Ver, cambiar y borrar un PNJ (el máster)                                             |
-| `POST /npcs/:id/talk`                     | Lo que responde el PNJ, en NDJSON según lo escribe la IA. No guarda nada (el máster) |
-| `GET, POST /campaigns/:id/games`          | Partidas de la campaña y abrir una (el máster)                                       |
-| `GET /games/:id`                          | La partida y su registro, con lo que puede ver quien pregunta                        |
-| `GET /games/:id/stream`                   | Directo de la partida (Server-Sent Events)                                           |
-| `POST /games/:id/reveals`, `/notes`       | Enseñar algo a la mesa o anotar algo solo para ti (el máster)                        |
-| `POST /games/:id/rolls`                   | Tirar en la partida con un personaje, o por un PNJ (el máster)                       |
-| `POST /games/:id/speeches`                | Enseñar a la mesa lo que dice un PNJ (el máster)                                     |
-| `POST /games/:id/close`                   | Terminar la partida (el máster)                                                      |
-| `PUT /games/:id/recap`                    | Guardar el resumen de una partida terminada, que ve toda la mesa (el máster)         |
-| `POST /games/:id/recap/draft`             | La IA propone el resumen, en NDJSON según lo escribe. No guarda nada (el máster)     |
-| `GET /screens/:token`, `/stream`          | Pantalla de la mesa: lo público de la última partida, sin sesión                     |
-| `POST /rolls`                             | Tirar dados. No necesita sesión                                                      |
-| `GET /ai`                                 | Si la IA está configurada y con qué modelo                                           |
+| Ruta                                           | Qué hace                                                                                            |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `POST /auth/register`, `/auth/login`           | Crear cuenta o entrar                                                                               |
+| `POST /auth/logout`, `GET /auth/me`            | Salir y saber quién ha entrado                                                                      |
+| `GET, POST /campaigns`                         | Tus campañas y crear una nueva (quien la crea es su máster)                                         |
+| `POST /campaigns/join`                         | Unirse con el código de invitación                                                                  |
+| `GET, PATCH, DELETE /campaigns/:id`            | Ver, cambiar o borrar una campaña (cambiar y borrar: el máster)                                     |
+| `POST /campaigns/:id/invite-code`              | Cambiar el código de invitación (el máster)                                                         |
+| `POST /campaigns/:id/screen-token`             | Cambiar el enlace de la pantalla de la mesa (el máster)                                             |
+| `DELETE /campaigns/:id/members/:userId`        | Salir de la campaña, o echar a un jugador (el máster)                                               |
+| `GET, POST /campaigns/:id/characters`          | Personajes de la campaña y crear uno                                                                |
+| `GET, PATCH, DELETE /characters/:id`           | Ver, cambiar nombre, trasfondo o Suerte, y borrar                                                   |
+| `POST /characters/:id/damage`, `/recover`      | Recibir daño y recuperarse                                                                          |
+| `POST /characters/:id/xp`                      | Dar o quitar experiencia (el máster)                                                                |
+| `POST /characters/:id/advances`                | Gastar experiencia en una mejora                                                                    |
+| `GET, POST /campaigns/:id/npcs`                | PNJ de la campaña y crear uno (el máster)                                                           |
+| `POST /campaigns/:id/npcs/generate`            | La IA inventa un PNJ o completa uno a medias, sin guardarlo (el máster)                             |
+| `GET, PATCH, DELETE /npcs/:id`                 | Ver, cambiar y borrar un PNJ (el máster)                                                            |
+| `POST /npcs/:id/talk`                          | Lo que responde el PNJ, en NDJSON según lo escribe la IA. No guarda nada (el máster)                |
+| `GET, POST /campaigns/:id/games`               | Partidas de la campaña y abrir una (el máster)                                                      |
+| `GET /games/:id`                               | La partida y su registro, con lo que puede ver quien pregunta                                       |
+| `GET /games/:id/stream`                        | Directo de la partida (Server-Sent Events)                                                          |
+| `POST /games/:id/reveals`, `/notes`            | Enseñar algo a la mesa o anotar algo solo para ti (el máster)                                       |
+| `POST /games/:id/reveals/draft`                | La IA describe una escena a partir de unas notas, en NDJSON. No guarda nada (el máster)             |
+| `POST /games/:id/rolls`                        | Tirar en la partida con un personaje, o por un PNJ (el máster)                                      |
+| `POST /games/:id/rolls/:eventId/complications` | La IA propone complicaciones para una tirada a medias o mala, en NDJSON. No guarda nada (el máster) |
+| `POST /games/:id/speeches`                     | Enseñar a la mesa lo que dice un PNJ (el máster)                                                    |
+| `POST /games/:id/close`                        | Terminar la partida (el máster)                                                                     |
+| `PUT /games/:id/recap`                         | Guardar el resumen de una partida terminada, que ve toda la mesa (el máster)                        |
+| `POST /games/:id/recap/draft`                  | La IA propone el resumen, en NDJSON según lo escribe. No guarda nada (el máster)                    |
+| `GET /screens/:token`, `/stream`               | Pantalla de la mesa: lo público de la última partida, sin sesión                                    |
+| `POST /rolls`                                  | Tirar dados. No necesita sesión                                                                     |
+| `GET /ai`                                      | Si la IA está configurada y con qué modelo                                                          |
 
 Quien no es miembro de una campaña recibe un 404, como si no existiera. Una ficha la cambian su jugador y el máster; el resto de la mesa solo la ve. Los PNJ son solo del máster: los jugadores los conocen por lo que dicen en la partida.
 
