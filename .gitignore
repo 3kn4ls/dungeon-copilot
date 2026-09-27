@@ -7,3 +7,5 @@ coverage/
 !.env.example
 .DS_Store
 *.tsbuildinfo
+# Datos de PGlite en desarrollo
+apps/server/data/

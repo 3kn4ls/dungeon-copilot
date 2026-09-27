@@ -2,12 +2,19 @@
 
 Asistente web para dirigir partidas de rol: preparación de campañas, ayuda en mesa con IA local (Ollama) y memoria de todo lo que pasa en la partida. El máster abre partidas a las que se unen los jugadores, en persona u online.
 
-Ahora mismo el repositorio tiene la base del monorepo, el motor del [sistema de reglas propio](docs/reglas.md) y un tirador de dados que recorre toda la pila: web, servidor y reglas.
+Ahora mismo tiene:
+
+- Cuentas sencillas: usuario y contraseña, sin correo.
+- Campañas: quien la crea es su máster y la comparte con un código de invitación de 6 letras.
+- Fichas de personaje con el [sistema de reglas propio](docs/reglas.md): creación guiada, heridas, Suerte, experiencia y mejoras.
+- Un tirador de dados que resuelve las tiradas en el servidor. Desde la ficha se abre con el bonificador ya puesto.
 
 ## Requisitos
 
 - Node 22.12 o superior
 - pnpm 10 (con `corepack enable` se usa la versión fijada en `package.json`)
+
+Para desarrollar no hace falta instalar PostgreSQL: sin `DATABASE_URL`, el servidor usa [PGlite](https://pglite.dev), un PostgreSQL embebido que guarda los datos en `apps/server/data/pglite`.
 
 ## Arrancar
 
@@ -16,7 +23,61 @@ pnpm install
 pnpm dev
 ```
 
-La web queda en http://localhost:5173 y la API en http://localhost:3000.
+La web queda en http://localhost:5173 y la API en http://localhost:3000. La primera vez, crea una cuenta desde la pantalla de entrada.
+
+En producción, `pnpm build` y después `pnpm --filter @dungeon-copilot/server start`: el servidor aplica las migraciones al arrancar y sirve también la web compilada, todo en un solo puerto.
+
+## Configuración
+
+El servidor se configura con variables de entorno:
+
+| Variable             | Por defecto   | Qué hace                                                                                                            |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`       |               | PostgreSQL, por ejemplo `postgres://dungeon:clave@postgres:5432/dungeon`. Sin ella se usa PGlite                    |
+| `DATA_DIR`           | `data/pglite` | Carpeta de datos de PGlite, relativa a donde arranca el servidor                                                    |
+| `PORT`               | `3000`        | Puerto del servidor                                                                                                 |
+| `HOST`               | `0.0.0.0`     | Interfaz en la que escucha                                                                                          |
+| `ALLOW_REGISTRATION` | `true`        | Con `false` nadie puede crear cuentas nuevas                                                                        |
+| `COOKIE_SECURE`      | `auto`        | Con `auto`, la cookie de sesión es solo HTTPS cuando la petición llega por HTTPS (o con `X-Forwarded-Proto: https`) |
+| `WEB_DIST`           | `../web/dist` | Web compilada que sirve el servidor. Si no existe, solo sirve la API                                                |
+
+## Base de datos
+
+El esquema está en `apps/server/src/db/schema.ts` (Drizzle ORM) y las migraciones SQL en `apps/server/drizzle`. Si cambias el esquema, genera la migración:
+
+```sh
+pnpm --filter @dungeon-copilot/server db:generate --name que-cambia
+```
+
+Los tests de la API usan PGlite en memoria. Para repetirlos contra un PostgreSQL de verdad, como hace la CI:
+
+```sh
+TEST_DATABASE_URL=postgres://postgres@localhost:5432/postgres pnpm --filter @dungeon-copilot/server test
+```
+
+Cada archivo de tests crea su propia base de datos en ese servidor y la borra al acabar.
+
+## API
+
+Todo bajo `/api`, en JSON. Los errores responden `{ error, issues? }` con mensajes en español. La sesión va en una cookie `httpOnly` que dura 30 días y se renueva sola con el uso.
+
+| Ruta                                      | Qué hace                                                        |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| `POST /auth/register`, `/auth/login`      | Crear cuenta o entrar                                           |
+| `POST /auth/logout`, `GET /auth/me`       | Salir y saber quién ha entrado                                  |
+| `GET, POST /campaigns`                    | Tus campañas y crear una nueva (quien la crea es su máster)     |
+| `POST /campaigns/join`                    | Unirse con el código de invitación                              |
+| `GET, PATCH, DELETE /campaigns/:id`       | Ver, cambiar o borrar una campaña (cambiar y borrar: el máster) |
+| `POST /campaigns/:id/invite-code`         | Cambiar el código de invitación (el máster)                     |
+| `DELETE /campaigns/:id/members/:userId`   | Salir de la campaña, o echar a un jugador (el máster)           |
+| `GET, POST /campaigns/:id/characters`     | Personajes de la campaña y crear uno                            |
+| `GET, PATCH, DELETE /characters/:id`      | Ver, cambiar nombre, trasfondo o Suerte, y borrar               |
+| `POST /characters/:id/damage`, `/recover` | Recibir daño y recuperarse                                      |
+| `POST /characters/:id/xp`                 | Dar o quitar experiencia (el máster)                            |
+| `POST /characters/:id/advances`           | Gastar experiencia en una mejora                                |
+| `POST /rolls`                             | Tirar dados. No necesita sesión                                 |
+
+Quien no es miembro de una campaña recibe un 404, como si no existiera. Una ficha la cambian su jugador y el máster; el resto de la mesa solo la ve.
 
 ## Comandos
 
@@ -35,7 +96,7 @@ La web queda en http://localhost:5173 y la API en http://localhost:3000.
 | Carpeta           | Contenido                                                                                           |
 | ----------------- | --------------------------------------------------------------------------------------------------- |
 | `apps/web`        | Interfaz en React + Vite                                                                            |
-| `apps/server`     | API en Fastify. Resuelve las tiradas para que todos los jugadores vean la misma                     |
+| `apps/server`     | API en Fastify con PostgreSQL (Drizzle). Resuelve las tiradas para que todos vean la misma          |
 | `packages/rules`  | Motor de reglas: tiradas, habilidades, combate, heridas, PNJ y avance. Sin dependencias de interfaz |
 | `packages/shared` | Contratos entre web y servidor (esquemas Zod de la API)                                             |
 | `docs`            | Reglamento y documentación del proyecto                                                             |

@@ -20,7 +20,10 @@ import {
 } from '@dungeon-copilot/rules';
 import type { RollRequest, RollResponse } from '@dungeon-copilot/shared';
 import { useMemo, useState } from 'react';
-import { requestRoll } from './api';
+import { useSearchParams } from 'react-router';
+import { api } from '../api';
+import { Segmented, Stepper, useDocumentTitle } from '../components/ui';
+import { signed } from '../rules-text';
 
 type Mode = 'test' | 'opposed';
 
@@ -39,15 +42,33 @@ const percent = (value: number) => {
   if (value < 1 && value > 0.995) return '>99%';
   return `${Math.round(value * 100)}%`;
 };
-const signed = (value: number) => (value >= 0 ? `+${value}` : `${value}`);
+/** Lee un número de la URL si está dentro de los límites; si no, usa el valor por defecto. */
+function numberParam(
+  params: URLSearchParams,
+  name: string,
+  min: number,
+  max: number,
+  fallback: number,
+) {
+  const value = Number(params.get(name));
+  return params.has(name) && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : fallback;
+}
 
-export function App() {
+export function RollerPage() {
+  // La ficha enlaza aquí con el atributo y la habilidad ya puestos.
+  const [params] = useSearchParams();
+  const label = params.get('etiqueta');
+  useDocumentTitle('Tirador');
   const [mode, setMode] = useState<Mode>('test');
   const [situation, setSituation] = useState<Situation>('test');
-  const [attribute, setAttribute] = useState(3);
-  const [rank, setRank] = useState(1);
+  const [attribute, setAttribute] = useState(() => numberParam(params, 'atributo', 1, 5, 3));
+  const [rank, setRank] = useState(() => numberParam(params, 'habilidad', 0, 3, 1));
   const [modifier, setModifier] = useState(0);
-  const [edge, setEdge] = useState<Edge>('none');
+  const [edge, setEdge] = useState<Edge>(() =>
+    params.get('desventaja') === '1' ? 'disadvantage' : 'none',
+  );
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('normal');
   const [opponentBonus, setOpponentBonus] = useState(NPC_PROFILES.soldier.bonus);
   const [opponentEdge, setOpponentEdge] = useState<Edge>('none');
@@ -82,35 +103,33 @@ export function App() {
     setPending(true);
     setError(null);
     try {
-      const response = await requestRoll(request);
+      const response = await api.roll(request);
       setResult(response);
       setHistory((previous) => [
         { id: ++nextHistoryId, summary: describe(response), outcome: response.outcome },
         ...previous.slice(0, 7),
       ]);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? `${cause.message}. ¿Está arrancado el servidor?`
-          : 'No se pudo tirar.',
-      );
+      setError(cause instanceof Error ? cause.message : 'No se pudo tirar.');
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="page">
+    <>
       <header className="masthead">
         <p className="eyebrow">Dungeon Copilot</p>
         <h1>Tirador</h1>
         <p className="lede">
-          2d6 + atributo + habilidad contra una dificultad o contra la tirada del rival. Sistema
-          base v0.1.
+          {label
+            ? `Tirada de ${label}.`
+            : '2d6 + atributo + habilidad contra una dificultad o contra la tirada del rival.'}{' '}
+          Sistema base v0.1.
         </p>
       </header>
 
-      <main className="layout">
+      <div className="layout">
         <section className="panel" aria-labelledby="roll-heading">
           <h2 id="roll-heading">Tirada</h2>
 
@@ -278,8 +297,8 @@ export function App() {
             </section>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -350,71 +369,6 @@ function Dice({ label, dice, total }: { label: string; dice: DiceRoll; total: nu
         ))}
       </div>
       <span className="dice-total">= {total}</span>
-    </div>
-  );
-}
-
-function Stepper(props: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
-  format?: (value: number) => string;
-  hint?: string;
-}) {
-  const { label, value, min, max, onChange, format = String, hint } = props;
-  return (
-    <div className="stepper">
-      <span className="field-label">{label}</span>
-      <div className="stepper-controls">
-        <button
-          type="button"
-          aria-label={`Bajar ${label}`}
-          onClick={() => onChange(Math.max(min, value - 1))}
-          disabled={value <= min}
-        >
-          −
-        </button>
-        <output className="num" aria-live="polite">
-          {format(value)}
-        </output>
-        <button
-          type="button"
-          aria-label={`Subir ${label}`}
-          onClick={() => onChange(Math.min(max, value + 1))}
-          disabled={value >= max}
-        >
-          +
-        </button>
-      </div>
-      {hint && <span className="hint">{hint}</span>}
-    </div>
-  );
-}
-
-function Segmented<T extends string>(props: {
-  label: string;
-  value: T;
-  options: [T, string][];
-  onChange: (value: T) => void;
-}) {
-  const { label, value, options, onChange } = props;
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      <div className="segmented" role="group" aria-label={label}>
-        {options.map(([option, text]) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={value === option}
-            onClick={() => onChange(option)}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

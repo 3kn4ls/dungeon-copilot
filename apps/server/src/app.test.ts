@@ -1,18 +1,21 @@
 import { fixedDice } from '@dungeon-copilot/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from './app';
+import { useTestApp } from './testing';
+
+const t = useTestApp();
 
 describe('GET /api/health', () => {
   it('responde que el servidor está vivo', async () => {
-    const response = await buildApp().inject({ method: 'GET', url: '/api/health' });
+    const response = await t.anonymous().get('/api/health');
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'ok' });
   });
 });
 
 describe('POST /api/rolls', () => {
-  it('resuelve una prueba contra dificultad', async () => {
-    const app = buildApp({ random: fixedDice(4, 5) });
+  it('resuelve una prueba contra dificultad sin necesidad de sesión', async () => {
+    const app = await buildApp({ db: t.db, random: fixedDice(4, 5) });
     const response = await app.inject({
       method: 'POST',
       url: '/api/rolls',
@@ -28,7 +31,7 @@ describe('POST /api/rolls', () => {
   });
 
   it('resuelve una tirada enfrentada, tirando también por el rival', async () => {
-    const app = buildApp({ random: fixedDice(3, 3, 6, 6) });
+    const app = await buildApp({ db: t.db, random: fixedDice(3, 3, 6, 6) });
     const response = await app.inject({
       method: 'POST',
       url: '/api/rolls',
@@ -43,15 +46,45 @@ describe('POST /api/rolls', () => {
   });
 
   it('rechaza peticiones mal formadas con un 400 explicativo', async () => {
-    const response = await buildApp().inject({
-      method: 'POST',
-      url: '/api/rolls',
-      payload: { kind: 'test', check: { bonus: 'mucho' }, difficulty: 10 },
+    const response = await t.anonymous().post('/api/rolls', {
+      kind: 'test',
+      check: { bonus: 'mucho' },
+      difficulty: 10,
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
       error: 'La tirada no es válida',
       issues: [{ path: 'check.bonus' }],
     });
+  });
+});
+
+describe('errores genéricos', () => {
+  it('responde 404 en JSON a rutas de la API que no existen', async () => {
+    const response = await t.anonymous().get('/api/nada');
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'Esa ruta no existe' });
+  });
+
+  it('solo acepta cuerpos JSON', async () => {
+    const response = await t.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'text/plain' },
+      payload: '{"username":"edu","password":"x"}',
+    });
+    expect(response.statusCode).toBe(415);
+    expect(response.json()).toEqual({ error: 'La API solo acepta JSON' });
+  });
+
+  it('explica cuando el JSON está roto', async () => {
+    const response = await t.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"username":',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'El cuerpo de la petición no es JSON válido' });
   });
 });
