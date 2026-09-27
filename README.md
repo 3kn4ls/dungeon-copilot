@@ -20,15 +20,15 @@ La web queda en http://localhost:5173 y la API en http://localhost:3000.
 
 ## Comandos
 
-| Comando          | Qué hace                                        |
-| ---------------- | ----------------------------------------------- |
-| `pnpm dev`       | Arranca web y servidor en modo desarrollo       |
-| `pnpm test`      | Ejecuta los tests de todos los paquetes         |
-| `pnpm typecheck` | Comprueba los tipos                             |
-| `pnpm lint`      | Pasa ESLint                                     |
-| `pnpm format`    | Formatea con Prettier                           |
-| `pnpm check`     | Todo lo anterior salvo formatear, como en la CI |
-| `pnpm build`     | Compila el servidor y la web para producción    |
+| Comando          | Qué hace                                           |
+| ---------------- | -------------------------------------------------- |
+| `pnpm dev`       | Arranca web y servidor en modo desarrollo          |
+| `pnpm test`      | Ejecuta los tests de todos los paquetes            |
+| `pnpm typecheck` | Comprueba los tipos                                |
+| `pnpm lint`      | Pasa ESLint                                        |
+| `pnpm format`    | Formatea con Prettier                              |
+| `pnpm check`     | Comprueba formato, lint, tipos y tests, como la CI |
+| `pnpm build`     | Compila el servidor y la web para producción       |
 
 ## Estructura
 
