@@ -124,6 +124,8 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
     if (request.signal) signals.push(request.signal);
     inFlight.add(closing);
     const finish = () => void inFlight.delete(closing);
+    // Si quien preguntó se va antes de leer la respuesta, nadie llegará a llamar a finish.
+    request.signal?.addEventListener('abort', finish, { once: true });
     const abortReason = (): AbortReason => {
       if (request.signal?.aborted) return 'caller';
       if (closing.signal.aborted) return 'closing';

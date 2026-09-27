@@ -4,6 +4,7 @@ import {
   fit,
   npcGenerationMessages,
   parseNpcDraft,
+  spokenReply,
   talkMessages,
   visibleReply,
 } from './prompts';
@@ -126,6 +127,17 @@ describe('respuestas del modelo', () => {
     );
     expect(cleanReply('Señor (el) Oscuro: Arrodíllate.', 'Señor (el) Oscuro')).toBe('Arrodíllate.');
   });
+
+  it('mientras escribe, espera a ver si lo que empieza es su nombre', () => {
+    const shown = (text: string) => spokenReply(text, 'Brunilda');
+    expect(shown('Bru')).toBe('');
+    expect(shown('**Brunilda** ')).toBe('');
+    expect(shown('Brunilda: ¿Otra')).toBe('¿Otra');
+    expect(shown('<think>…</think>brunilda: ¿Otra')).toBe('¿Otra');
+    expect(shown('Brunilda se ríe')).toBe('Brunilda se ríe');
+    expect(shown('*Frunce el ceño*')).toBe('*Frunce el ceño*');
+    expect(shown('¿Otra ronda?')).toBe('¿Otra ronda?');
+  });
 });
 
 describe('inventar un PNJ', () => {
@@ -168,6 +180,16 @@ describe('inventar un PNJ', () => {
     });
     // Si el modelo se deja el nombre que ya estaba decidido, vale el del máster.
     expect(parseNpcDraft('{"concept": "Posadera"}', { name: 'Brunilda' })?.name).toBe('Brunilda');
+  });
+
+  it('«no pelea» también es una decisión del máster; sin perfil, lo elige la IA', () => {
+    const generated = JSON.stringify({ name: 'Odo', profile: 'soldier' });
+    expect(parseNpcDraft(generated, { name: 'Odo', profile: null })?.profile).toBeNull();
+    expect(parseNpcDraft(generated, { name: 'Odo' })?.profile).toBe('soldier');
+
+    const draft = { name: 'Odo', profile: null };
+    const [, user] = npcGenerationMessages({ campaign, idea: '', existing: [], draft });
+    expect(user?.content).toContain('- name: Odo\n- profile: none');
   });
 
   it('lee el PNJ aunque venga con razonamiento o texto alrededor', () => {

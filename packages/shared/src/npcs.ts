@@ -69,7 +69,10 @@ export interface NpcView extends NpcDraft {
 export const generateNpcSchema = z.object({
   /** Lo que tiene en mente el máster: "una posadera que esconde algo". Vacío: sorpresa. */
   idea: z.string().trim().max(500, 'La idea no puede pasar de 500 caracteres').default(''),
-  /** Lo que el máster ya ha rellenado: la IA lo respeta y completa el resto. */
+  /**
+   * Lo que el máster ya ha rellenado: la IA lo respeta y completa el resto. En `profile`, null
+   * es «no pelea»; si no viene, lo elige la IA.
+   */
   draft: z
     .object({
       name: npcText('Nombre', NPC_LIMITS.name),

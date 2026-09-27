@@ -1,9 +1,9 @@
-import { request } from 'node:http';
+import { Agent, request } from 'node:http';
 import { kael } from '@dungeon-copilot/rules/testing';
 import type { GameEvent, NpcRequest, NpcView, TalkChunk } from '@dungeon-copilot/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startFakeOllama, type FakeOllama } from '../ai/fake-ollama';
-import { createOllama } from '../ai/ollama';
+import { createOllama, type Ai } from '../ai/ollama';
 import { buildApp } from '../app';
 import { TEST_PASSWORD_PARAMS, createClient, useTestApp, type TestClient } from '../testing';
 
@@ -182,12 +182,16 @@ describe('la IA inventa PNJ', () => {
 
   it('completa lo que el máster ya ha rellenado sin cambiárselo', async () => {
     const { master, campaign } = await table();
+    const url = `/api/campaigns/${campaign.id}/npcs/generate`;
     ollama.queue({ kind: 'chunks', chunks: [JSON.stringify(odo)] });
-    const response = await master.post(`/api/campaigns/${campaign.id}/npcs/generate`, {
-      draft: { name: 'Brunilda', concept: '', profile: null },
-    });
+    const response = await master.post(url, { draft: { name: 'Brunilda', concept: '' } });
     expect(response.json().npc).toEqual({ ...odo, name: 'Brunilda' });
     expect(ollama.requests[0]?.body.messages.at(-1)?.content).toContain('- name: Brunilda');
+
+    // «No pelea» también lo ha decidido el máster.
+    ollama.queue({ kind: 'chunks', chunks: [JSON.stringify(odo)] });
+    const peaceful = await master.post(url, { draft: { name: 'Brunilda', profile: null } });
+    expect(peaceful.json().npc).toEqual({ ...odo, name: 'Brunilda', profile: null });
   });
 
   it('avisa si la IA no devuelve un PNJ que se entienda', async () => {
@@ -241,8 +245,9 @@ describe('hablar con un PNJ', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('application/x-ndjson');
+    // Sin el razonamiento ni «Brunilda:» delante, tampoco mientras se escribe.
     expect(chunksOf(response.body)).toEqual([
-      { type: 'delta', text: 'Brunilda: ¿Un soldado? ' },
+      { type: 'delta', text: '¿Un soldado? ' },
       { type: 'delta', text: 'Aquí solo vienen borrachos.' },
       { type: 'done', text: '¿Un soldado? Aquí solo vienen borrachos.' },
     ]);
@@ -349,6 +354,102 @@ describe('hablar con un PNJ', () => {
     });
     expect(chunksOf(first)).toEqual([{ type: 'delta', text: 'Érase una vez… ' }]);
     await aborted;
+  });
+
+  it('si el máster se va antes de que empiece la respuesta, ni se pregunta a Ollama', async () => {
+    const { master, campaign } = await table();
+    const npc = await createNpc(master, campaign.id);
+    const real = createOllama({ url: ollama.url, model: 'fake' });
+    const asked: Promise<AsyncIterable<string>>[] = [];
+    const ai: Ai = {
+      model: real.model,
+      stream: (question) => {
+        const answer = real.stream(question);
+        asked.push(answer);
+        return answer;
+      },
+      complete: (question) => real.complete(question),
+      close: () => real.close(),
+    };
+    const app = await buildApp({ db: t.db, passwordParams: TEST_PASSWORD_PARAMS, ai });
+    // Se va mientras el servidor aún consulta la base de datos.
+    let reached!: () => void;
+    const waiting = new Promise<void>((resolve) => (reached = resolve));
+    app.addHook('preHandler', async (req) => {
+      reached();
+      await new Promise((resolve) => req.raw.socket.once('close', resolve));
+    });
+    try {
+      const url = await app.listen({ port: 0, host: '127.0.0.1' });
+      const talk = request(`${url}/api/npcs/${npc.id}/talk`, {
+        method: 'POST',
+        agent: false,
+        headers: { cookie: master.cookie ?? '', 'content-type': 'application/json' },
+      });
+      talk.on('error', () => undefined);
+      talk.end(JSON.stringify({ input: 'Hola' }));
+      await waiting;
+      talk.destroy();
+
+      await vi.waitFor(() => expect(asked).toHaveLength(1));
+      await expect(asked[0]).rejects.toThrow();
+      expect(ollama.requests).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('al apagar el servidor avisa del corte y no se queda esperando a la conexión', async () => {
+    const { master, campaign } = await table();
+    const npc = await createNpc(master, campaign.id);
+    const app = await buildApp({
+      db: t.db,
+      passwordParams: TEST_PASSWORD_PARAMS,
+      ai: createOllama({ url: ollama.url, model: 'fake' }),
+    });
+    // Como un navegador: la conexión queda abierta para la siguiente petición.
+    const agent = new Agent({ keepAlive: true });
+    let closed = false;
+    try {
+      const url = await app.listen({ port: 0, host: '127.0.0.1' });
+      ollama.queue({ kind: 'chunks', chunks: ['Érase una vez… '], hang: true });
+      let started!: () => void;
+      const streaming = new Promise<void>((resolve) => (started = resolve));
+      const body = new Promise<string>((resolve, reject) => {
+        const talk = request(
+          `${url}/api/npcs/${npc.id}/talk`,
+          {
+            method: 'POST',
+            agent,
+            headers: { cookie: master.cookie ?? '', 'content-type': 'application/json' },
+          },
+          (response) => {
+            let text = '';
+            response.setEncoding('utf8');
+            response.on('data', (data: string) => {
+              text += data;
+              started();
+            });
+            response.on('end', () => resolve(text));
+          },
+        );
+        talk.on('error', reject);
+        talk.end(JSON.stringify({ input: 'Cuéntanos una historia larga' }));
+      });
+      await streaming;
+
+      const start = Date.now();
+      await app.close();
+      closed = true;
+      expect(Date.now() - start).toBeLessThan(2_000);
+      expect(chunksOf(await body)).toEqual([
+        { type: 'delta', text: 'Érase una vez… ' },
+        { type: 'error', error: 'El servidor se está apagando' },
+      ]);
+    } finally {
+      agent.destroy();
+      if (!closed) await app.close();
+    }
   });
 
   it('sin Ollama configurado, la web lo sabe y la IA responde 503', async () => {

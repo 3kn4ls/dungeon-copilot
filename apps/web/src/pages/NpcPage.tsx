@@ -109,7 +109,7 @@ function EditNpc({ npc, onDone }: { npc: NpcView; onDone: () => void }) {
       </form>
       <section className="panel" aria-labelledby="complete-heading">
         <h2 id="complete-heading">Con ayuda de la IA</h2>
-        <NpcGenerator campaignId={npc.campaignId} draft={draft} onDraft={setDraft} />
+        <NpcGenerator campaignId={npc.campaignId} draft={draft} onDraft={setDraft} keepProfile />
       </section>
     </>
   );

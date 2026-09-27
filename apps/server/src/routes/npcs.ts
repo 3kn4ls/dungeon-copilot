@@ -9,15 +9,15 @@ import {
   type TalkChunk,
 } from '@dungeon-copilot/shared';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Ai } from '../ai/ollama';
 import {
   NPC_DRAFT_FORMAT,
   cleanReply,
   npcGenerationMessages,
   parseNpcDraft,
+  spokenReply,
   talkMessages,
-  visibleReply,
   type PromptScene,
 } from '../ai/prompts';
 import type { AppContext } from '../context';
@@ -101,9 +101,11 @@ async function findScene(db: Executor, gameId: string): Promise<PromptScene | un
  * Señal que se corta cuando la web deja de esperar la respuesta (el máster pulsa «Parar» o
  * se va): así Ollama deja de escribir algo que nadie va a leer.
  */
-function abortWhenGone(reply: FastifyReply): AbortController {
+function abortWhenGone(request: FastifyRequest, reply: FastifyReply): AbortController {
   const controller = new AbortController();
   reply.raw.on('close', () => controller.abort());
+  // Si se fue mientras se consultaba la base de datos, "close" ya pasó y no volverá a avisar.
+  if (request.raw.socket.destroyed) controller.abort();
   return controller;
 }
 
@@ -183,7 +185,7 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
       .where(eq(npcs.campaignId, campaignId))
       .orderBy(desc(npcs.createdAt));
 
-    const controller = abortWhenGone(reply);
+    const controller = abortWhenGone(request, reply);
     let content: string;
     try {
       content = await model.complete({
@@ -237,7 +239,7 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
       .where(eq(characters.campaignId, npc.campaignId))
       .orderBy(asc(characters.createdAt));
 
-    const controller = abortWhenGone(reply);
+    const controller = abortWhenGone(request, reply);
     let chunks: AsyncIterable<string>;
     try {
       chunks = await model.stream({
@@ -264,7 +266,7 @@ export function registerNpcRoutes(app: FastifyInstance, { db, ai }: AppContext):
       try {
         for await (const chunk of chunks) {
           full += chunk;
-          const visible = visibleReply(full);
+          const visible = spokenReply(full, npc.name);
           if (visible.length > shown.length) {
             yield ndjson({ type: 'delta', text: visible.slice(shown.length) });
             shown = visible;

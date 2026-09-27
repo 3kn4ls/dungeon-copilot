@@ -131,15 +131,23 @@ export function NpcGenerator({
   campaignId,
   draft,
   onDraft,
+  keepProfile = false,
 }: {
   campaignId: string;
   draft: NpcDraft;
   onDraft: (draft: NpcDraft) => void;
+  /** El PNJ ya existe: su «Si hay pelea» se respeta aunque sea «No pelea». */
+  keepProfile?: boolean;
 }) {
   const ai = useAiStatus();
   const [idea, setIdea] = useState('');
   const generate = useMutation({
-    mutationFn: () => api.generateNpc(campaignId, { idea, draft }),
+    mutationFn: () => {
+      // En un PNJ nuevo, «No pelea» es lo que viene puesto, no algo decidido: elige la IA.
+      const { profile, ...rest } = draft;
+      const decided = profile === null && !keepProfile ? rest : draft;
+      return api.generateNpc(campaignId, { idea, draft: decided });
+    },
     onSuccess: onDraft,
   });
 

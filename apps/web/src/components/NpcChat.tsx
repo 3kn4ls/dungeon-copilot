@@ -38,7 +38,8 @@ function useSessionState<T>(key: string, initial: () => T) {
 /**
  * Conversación con un PNJ: el máster cuenta lo que dicen o hacen los personajes y la IA
  * responde como el PNJ. En la sala (con `gameId`), cada respuesta se puede retocar y enseñar a
- * la mesa. Se monta con `key` por PNJ: la charla guardada es de uno solo.
+ * la mesa, y el máster puede escribirla él si prefiere, o si Ollama falla. Se monta con `key`
+ * por PNJ: la charla guardada es de uno solo.
  */
 export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   const [lines, setLines] = useSessionState<ChatLine[]>(
@@ -49,6 +50,8 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  /** Lo que el máster escribe él como respuesta del PNJ, mientras lo escribe. */
+  const [writing, setWriting] = useState<string | null>(null);
   const request = useRef<AbortController | null>(null);
   const log = useRef<HTMLOListElement>(null);
   const storeEvent = useStoreGameEvent(gameId ?? '');
@@ -65,10 +68,11 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   });
 
   // Lo último, siempre a la vista.
+  const isWriting = writing !== null;
   useEffect(() => {
     const list = log.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [lines, pending]);
+  }, [lines, pending, isWriting]);
 
   // Al cambiar de PNJ o salir de la sala, se para la respuesta que estuviera a medias.
   useEffect(() => () => request.current?.abort(), []);
@@ -113,12 +117,32 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
     }
   }
 
-  function send() {
-    if (pending !== null) return;
+  /** Lo que dice la mesa pasa a la charla. */
+  function takeInput(): string {
     const said = input.trim();
     if (said) setLines((old) => [...old, { id: newLineId(), role: 'table', text: said }]);
     setInput('');
+    return said;
+  }
+
+  function send() {
+    if (pending !== null || writing !== null) return;
+    const said = takeInput();
     void ask(lines, said);
+  }
+
+  /** El máster responde él por el PNJ; queda en la charla como si lo hubiera dicho la IA. */
+  function writeMyself() {
+    if (pending !== null || writing !== null) return;
+    takeInput();
+    setError(null);
+    setWriting('');
+  }
+
+  function saveWriting() {
+    const text = writing?.trim();
+    if (text) setLines((old) => [...old, { id: newLineId(), role: 'npc', text }]);
+    setWriting(null);
   }
 
   /** Otra respuesta a lo último que dijo la mesa (o, si falló, la que faltaba). */
@@ -134,14 +158,21 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   function saveEdit() {
     if (!editing) return;
     const text = editing.text.trim();
-    if (text) setLines((old) => old.map((l) => (l.id === editing.id ? { ...l, text } : l)));
+    // Retocada ya no es lo que vio la mesa: se puede volver a enseñar.
+    if (text) {
+      setLines((old) =>
+        old.map((l) =>
+          l.id === editing.id && l.text !== text ? { ...l, text, revealed: false } : l,
+        ),
+      );
+    }
     setEditing(null);
   }
 
   const last = lines.at(-1);
   return (
     <div className="chat">
-      {lines.length === 0 && pending === null ? (
+      {lines.length === 0 && pending === null && writing === null ? (
         <p className="muted">
           Cuenta lo que dicen o hacen los personajes y {npc.name} responderá. Si lo dejas vacío,{' '}
           {npc.name} toma la palabra.
@@ -161,33 +192,13 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
                   {line.revealed && <span className="badge live">Enseñado</span>}
                 </span>
                 {editing?.id === line.id ? (
-                  <form
-                    className="stack tight"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      saveEdit();
-                    }}
-                  >
-                    <textarea
-                      aria-label={`Lo que dice ${npc.name}`}
-                      rows={3}
-                      maxLength={2000}
-                      value={editing.text}
-                      onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-                    />
-                    <div className="actions">
-                      <button type="submit" className="button small primary">
-                        Guardar
-                      </button>
-                      <button
-                        type="button"
-                        className="button small"
-                        onClick={() => setEditing(null)}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </form>
+                  <LineEditor
+                    label={`Lo que dice ${npc.name}`}
+                    value={editing.text}
+                    onChange={(text) => setEditing({ ...editing, text })}
+                    onSave={saveEdit}
+                    onCancel={() => setEditing(null)}
+                  />
                 ) : (
                   <>
                     <p className="prewrap">{line.text}</p>
@@ -209,7 +220,7 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
                       >
                         Retocar
                       </button>
-                      {line === last && pending === null && (
+                      {line === last && pending === null && !line.revealed && (
                         <button type="button" className="link-button" onClick={retry}>
                           Otra respuesta
                         </button>
@@ -224,6 +235,19 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
             <li className="chat-line chat-npc chat-pending">
               <span className="chat-who">{npc.name}</span>
               <p className="prewrap">{pending || 'Pensando…'}</p>
+            </li>
+          )}
+          {writing !== null && (
+            <li className="chat-line chat-npc">
+              <span className="chat-who">{npc.name}</span>
+              <LineEditor
+                label={`Lo que dice ${npc.name}`}
+                value={writing}
+                autoFocus
+                onChange={setWriting}
+                onSave={saveWriting}
+                onCancel={() => setWriting(null)}
+              />
             </li>
           )}
         </ol>
@@ -278,11 +302,16 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
               Parar
             </button>
           ) : (
-            <button key="send" type="submit" className="button primary">
+            <button key="send" type="submit" className="button primary" disabled={writing !== null}>
               {input.trim() ? 'Que responda' : `Que hable ${npc.name}`}
             </button>
           )}
-          {lines.length > 0 && pending === null && (
+          {gameId && pending === null && writing === null && (
+            <button type="button" className="button" onClick={writeMyself}>
+              Lo escribo yo
+            </button>
+          )}
+          {lines.length > 0 && pending === null && writing === null && (
             <ConfirmButton
               confirmLabel="¿Borrar la charla?"
               onConfirm={() => {
@@ -296,5 +325,42 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
         </div>
       </form>
     </div>
+  );
+}
+
+/** Para retocar lo que dice el PNJ, o escribirlo desde cero. */
+function LineEditor(props: {
+  label: string;
+  value: string;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      className="stack tight"
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onSave();
+      }}
+    >
+      <textarea
+        aria-label={props.label}
+        rows={3}
+        maxLength={2000}
+        autoFocus={props.autoFocus}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      <div className="actions">
+        <button type="submit" className="button small primary">
+          Guardar
+        </button>
+        <button type="button" className="button small" onClick={props.onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </form>
   );
 }

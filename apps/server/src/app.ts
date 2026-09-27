@@ -50,9 +50,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(fastifyCookie);
   // Los directos y las respuestas de la IA no terminan solos: al apagar se cortan para que el
   // cierre no se quede esperando.
+  let closing = false;
   app.addHook('preClose', async () => {
+    closing = true;
     ctx.hub.disconnectAll();
     ctx.ai?.close();
+  });
+  // Una respuesta que acaba ya apagando (la de la IA, que avisa del corte) deja libre una
+  // conexión keep-alive después de que Fastify cerrara las libres; sin esto, el apagado espera
+  // a que caduque (72 s) y k3s mata el proceso antes de cerrar la base de datos.
+  app.addHook('onResponse', async () => {
+    if (closing) app.server.closeIdleConnections();
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));

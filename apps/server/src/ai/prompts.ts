@@ -131,10 +131,32 @@ export function visibleReply(text: string): string {
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** "Brunilda:" o "**Brunilda**:" al principio, como en un guion. */
+const speakerPrefix = (name: string) =>
+  new RegExp(`^[*_]*${escapeRegExp(name)}[*_]*\\s*:\\s*`, 'i');
+
+/** Si lo escrito hasta ahora aún puede acabar siendo "Brunilda:". */
+function mayBeSpeaker(text: string, name: string): boolean {
+  const rest = text.replace(/^[*_]+/, '').toLowerCase();
+  const lower = name.toLowerCase();
+  if (lower.startsWith(rest)) return true;
+  return rest.startsWith(lower) && /^[*_]*\s*$/.test(rest.slice(lower.length));
+}
+
+/**
+ * Lo que se puede enseñar de la respuesta del PNJ mientras se escribe: sin razonamiento ni su
+ * nombre delante. Mientras el principio aún puede ser su nombre, espera a ver si sigue ":".
+ */
+export function spokenReply(text: string, name: string): string {
+  const visible = visibleReply(text);
+  const prefix = speakerPrefix(name).exec(visible);
+  if (prefix) return visible.slice(prefix[0].length);
+  return mayBeSpeaker(visible, name) ? '' : visible;
+}
+
 /** La respuesta del PNJ lista para guardar: sin razonamiento ni su nombre delante. */
 export function cleanReply(text: string, name: string): string {
-  const prefix = new RegExp(`^[*_]*${escapeRegExp(name)}[*_]*\\s*:\\s*`, 'i');
-  return visibleReply(text).trim().replace(prefix, '').trim();
+  return visibleReply(text).trim().replace(speakerPrefix(name), '').trim();
 }
 
 /** Formato de la respuesta al inventar un PNJ (JSON Schema, lo impone Ollama). */
@@ -162,7 +184,10 @@ export const NPC_DRAFT_FORMAT = {
   ],
 } as const;
 
-/** Lo que el máster ya ha rellenado de un PNJ: la IA lo respeta y completa el resto. */
+/**
+ * Lo que el máster ya ha rellenado de un PNJ: la IA lo respeta y completa el resto. En
+ * `profile`, null es «no pelea»; si no viene, lo elige la IA.
+ */
 export type PartialNpc = Partial<Record<Exclude<keyof NpcDraft, 'profile'>, string>> & {
   profile?: NpcDraft['profile'] | undefined;
 };
@@ -212,7 +237,8 @@ export function npcGenerationMessages(prompt: NpcGenerationPrompt): AiMessage[] 
     const value = prompt.draft?.[key]?.trim();
     return value ? [`- ${key}: ${value}`] : [];
   });
-  if (prompt.draft?.profile) decided.push(`- profile: ${prompt.draft.profile}`);
+  const profile = prompt.draft?.profile;
+  if (profile !== undefined) decided.push(`- profile: ${profile ?? 'none'}`);
   const user = [
     campaignBlock(prompt.campaign),
     existing.length > 0
@@ -269,6 +295,9 @@ export function parseNpcDraft(content: string, draft: PartialNpc = {}): NpcDraft
     speech: field('speech'),
     goals: field('goals'),
     secrets: field('secrets'),
-    profile: draft.profile ?? NPC_PROFILE_IDS.find((id) => id === record.profile) ?? null,
+    profile:
+      draft.profile !== undefined
+        ? draft.profile
+        : (NPC_PROFILE_IDS.find((id) => id === record.profile) ?? null),
   };
 }
