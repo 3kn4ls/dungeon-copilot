@@ -1,0 +1,25 @@
+{
+  "name": "@dungeon-copilot/rules",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Motor de reglas de Dungeon Copilot: tiradas, habilidades, combate, heridas y avance.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tabla": "tsx scripts/probability-table.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.2"
+  }
+}
