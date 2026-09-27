@@ -16,6 +16,8 @@ export interface AiRequest {
   maxTokens?: number;
   /** JSON Schema: la respuesta será un JSON que lo cumple. */
   format?: object;
+  /** Cuánto se espera como mucho a la respuesta entera, si no vale lo de siempre. */
+  timeoutMs?: number;
 }
 
 /** La IA que escribe por el máster. En producción es Ollama; en los tests, uno de mentira. */
@@ -119,7 +121,7 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
 
   async function start(request: AiRequest, stream: boolean): Promise<Call> {
     const closing = new AbortController();
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const timeout = AbortSignal.timeout(request.timeoutMs ?? timeoutMs);
     const signals = [closing.signal, timeout];
     if (request.signal) signals.push(request.signal);
     inFlight.add(closing);

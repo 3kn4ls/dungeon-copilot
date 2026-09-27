@@ -22,6 +22,8 @@ La IA es opcional. El servidor habla con Ollama a través de la interfaz `Ai` (`
 
 Los PNJ son solo del máster: a un jugador de la campaña se le responde 403. La charla con un PNJ no escribe nada en la partida; solo la frase que el máster enseña a la mesa queda como evento.
 
+El resumen de una partida terminada no es un evento: vive en `games.recap`, lo guarda el máster y es público. Los resúmenes son la memoria de la campaña: los prompts de los PNJ reciben los últimos (`findRecaps`). Al resumen solo llegan las notas del máster si él quiere, y nunca las tiradas secretas.
+
 ## Reglas del juego
 
 El reglamento vive en `docs/reglas.md` y el código en `packages/rules`. Si cambias una regla, cambia los dos y regenera las tablas de probabilidades con `pnpm --filter @dungeon-copilot/rules tabla`.

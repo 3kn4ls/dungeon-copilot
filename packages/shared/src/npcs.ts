@@ -113,18 +113,3 @@ export const talkSchema = z.object({
 });
 
 export type TalkRequest = z.input<typeof talkSchema>;
-
-/**
- * La respuesta de un PNJ llega en directo, una línea JSON por trozo: "delta" con el texto
- * nuevo según lo escribe la IA, y al final "done" con la respuesta entera ya limpia, o "error".
- */
-export type TalkChunk =
-  | { type: 'delta'; text: string }
-  | { type: 'done'; text: string }
-  | { type: 'error'; error: string };
-
-/** Si el servidor tiene IA (Ollama) y con qué modelo. */
-export interface AiStatus {
-  enabled: boolean;
-  model: string | null;
-}

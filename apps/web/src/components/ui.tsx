@@ -149,3 +149,24 @@ export function useDocumentTitle(title: string | undefined) {
     document.title = title ? `${title} · Dungeon Copilot` : 'Dungeon Copilot';
   }, [title]);
 }
+
+/** Estado que aguanta una recarga de la pestaña, como cuando el móvil la descarta. */
+export function useSessionState<T>(key: string, initial: () => T) {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (saved) return JSON.parse(saved) as T;
+    } catch {
+      // Sin almacenamiento (modo privado): se empieza de cero.
+    }
+    return initial();
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Sin almacenamiento: lo escrito se perderá al recargar.
+    }
+  }, [key, value]);
+  return [value, setValue] as const;
+}

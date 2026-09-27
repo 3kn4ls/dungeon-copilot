@@ -143,6 +143,8 @@ export const games = pgTable(
     status: text('status').$type<GameStatus>().notNull().default('open'),
     openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    /** Resumen de lo que pasó, que el máster escribe al terminar. Es público. */
+    recap: text('recap').notNull().default(''),
   },
   (table) => [
     uniqueIndex('games_campaign_number_idx').on(table.campaignId, table.number),
@@ -153,7 +155,7 @@ export const games = pgTable(
   ],
 );
 
-/** Registro de la partida: lo que se revela, se tira o se anota. Alimentará el resumen. */
+/** Registro de la partida: lo que se revela, se tira o se anota. De él sale el resumen. */
 export const gameEvents = pgTable(
   'game_events',
   {

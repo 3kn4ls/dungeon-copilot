@@ -1323,6 +1323,37 @@ h1 .badge {
   justify-content: start;
 }
 
+/* El resumen de cada partida anterior, en tres líneas: entero, en la partida. */
+.game-recap {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.recap-text {
+  margin: 0;
+}
+
+/* Al empezar una partida, recordar a la mesa la anterior. */
+.recall {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.recall p {
+  margin: 0;
+}
+
 .table-characters .muted {
   font-size: 14px;
 }

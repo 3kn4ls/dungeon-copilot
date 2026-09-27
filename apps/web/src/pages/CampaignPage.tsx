@@ -88,6 +88,7 @@ function Games({ campaign }: { campaign: CampaignDetail }) {
               <li key={game.id}>
                 <Link to={`/partidas/${game.id}`}>{gameName(game)}</Link>
                 <span className="muted">{gameDate(game.openedAt)}</span>
+                {game.recap && <p className="game-recap">{game.recap}</p>}
               </li>
             ))}
           </ul>

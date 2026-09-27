@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStoreGameEvent } from '../queries';
-import { ConfirmButton, ErrorNote } from './ui';
+import { ConfirmButton, ErrorNote, useSessionState } from './ui';
 
 interface ChatLine extends TalkLine {
   id: string;
@@ -13,27 +13,6 @@ interface ChatLine extends TalkLine {
 
 let lineCount = 0;
 const newLineId = () => `${Date.now().toString(36)}-${(lineCount++).toString(36)}`;
-
-/** Estado que aguanta una recarga de la pestaña, como cuando el móvil la descarta. */
-function useSessionState<T>(key: string, initial: () => T) {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const saved = sessionStorage.getItem(key);
-      if (saved) return JSON.parse(saved) as T;
-    } catch {
-      // Sin almacenamiento (modo privado): se empieza de cero.
-    }
-    return initial();
-  });
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Sin almacenamiento: la charla se perderá al recargar.
-    }
-  }, [key, value]);
-  return [value, setValue] as const;
-}
 
 /**
  * Conversación con un PNJ: el máster cuenta lo que dicen o hacen los personajes y la IA

@@ -1,6 +1,7 @@
 import type {
   AdvanceRequest,
   AiStatus,
+  AiTextChunk,
   ApiErrorBody,
   ApiIssue,
   AuthResponse,
@@ -27,6 +28,8 @@ import type {
   NpcRequest,
   NpcView,
   OpenGameRequest,
+  RecapDraftRequest,
+  RecapRequest,
   RecoverRequest,
   RegisterRequest,
   RevealRequest,
@@ -34,7 +37,6 @@ import type {
   RollResponse,
   ScreenState,
   SpeechRequest,
-  TalkChunk,
   TalkRequest,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
@@ -71,19 +73,22 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+export interface AiTextOptions {
+  /** Para dejar de esperar la respuesta: la IA deja de escribir. */
+  signal: AbortSignal;
+  /** Recibe el texto acumulado según lo escribe la IA. */
+  onText: (text: string) => void;
+}
+
 /**
- * Habla con un PNJ. La respuesta llega a trozos: `onText` recibe el texto acumulado según lo
- * escribe la IA, y al final se devuelve la respuesta entera ya limpia. Con `signal` se para.
+ * Pide un texto a la IA, que llega a trozos según lo escribe. Al final se devuelve el texto
+ * entero ya limpio, que puede no ser exactamente la suma de los trozos.
  */
-async function talk(
-  npcId: string,
-  body: TalkRequest,
-  options: { signal: AbortSignal; onText: (text: string) => void },
-): Promise<string> {
+async function aiText(url: string, body: unknown, options: AiTextOptions): Promise<string> {
   const cut = () => new ApiError(0, { error: 'Se cortó la respuesta de la IA' });
   let response: Response;
   try {
-    response = await fetch(`/api/npcs/${npcId}/talk`, {
+    response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -115,7 +120,7 @@ async function talk(
     buffer = lines.pop() ?? '';
     for (const line of lines) {
       if (!line.trim()) continue;
-      const message = JSON.parse(line) as TalkChunk;
+      const message = JSON.parse(line) as AiTextChunk;
       if (message.type === 'done') return message.text;
       if (message.type === 'error') throw new ApiError(502, { error: message.error });
       text += message.text;
@@ -126,6 +131,7 @@ async function talk(
 
 const get = <T>(url: string) => request<T>('GET', url);
 const post = <T>(url: string, body?: unknown) => request<T>('POST', url, body);
+const put = <T>(url: string, body: unknown) => request<T>('PUT', url, body);
 const patch = <T>(url: string, body: unknown) => request<T>('PATCH', url, body);
 const del = (url: string) => request<void>('DELETE', url);
 
@@ -193,6 +199,11 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/rolls`, body).then((r) => r.event),
   speech: (id: string, body: SpeechRequest) =>
     post<EventResponse>(`/api/games/${id}/speeches`, body).then((r) => r.event),
+  saveRecap: (id: string, body: RecapRequest) =>
+    put<{ game: GameDetail }>(`/api/games/${id}/recap`, body).then((r) => r.game),
+  /** La IA propone un resumen de la partida, sin guardarlo. */
+  draftRecap: (id: string, body: RecapDraftRequest, options: AiTextOptions) =>
+    aiText(`/api/games/${id}/recap/draft`, body, options),
   screen: (token: string) => get<ScreenState>(`/api/screens/${token}`),
 
   ai: () => get<AiStatus>('/api/ai'),
@@ -206,7 +217,9 @@ export const api = {
   updateNpc: (id: string, body: UpdateNpcRequest) =>
     patch<NpcResponse>(`/api/npcs/${id}`, body).then((r) => r.npc),
   deleteNpc: (id: string) => del(`/api/npcs/${id}`),
-  talk,
+  /** Lo que responde un PNJ a lo que le dice la mesa. No guarda nada. */
+  talk: (npcId: string, body: TalkRequest, options: AiTextOptions) =>
+    aiText(`/api/npcs/${npcId}/talk`, body, options),
 
   roll: (body: RollRequest) => post<RollResponse>('/api/rolls', body),
 };

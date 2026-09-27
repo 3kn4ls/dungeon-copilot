@@ -4,6 +4,8 @@ import {
   gameRollSchema,
   noteSchema,
   openGameSchema,
+  recapDraftSchema,
+  recapSchema,
   revealSchema,
   speechSchema,
   type GameDetail,
@@ -18,6 +20,8 @@ import {
 } from '@dungeon-copilot/shared';
 import { and, asc, desc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import { cleanRecap, hasLog, recapMessages, visibleRecap } from '../ai/prompts';
+import { requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
 import type { Executor, Transaction } from '../db';
 import { isUniqueViolation } from '../db/errors';
@@ -30,6 +34,7 @@ import {
   npcs,
   users,
 } from '../db/schema';
+import { findRecaps } from '../games/recaps';
 import type { RollingCharacter } from '../games/rolls';
 import { resolveGameRoll } from '../games/rolls';
 import { lastEventId, openEventStream } from '../games/stream';
@@ -52,6 +57,12 @@ interface StreamQuery {
 const GAME_NOT_FOUND = 'Esa partida no existe o no es de tus campañas';
 const SCREEN_NOT_FOUND = 'Esta pantalla no existe o el máster ha cambiado su enlace';
 const GAME_CLOSED = 'La partida ya ha terminado';
+const GAME_STILL_OPEN = 'La partida sigue en juego: el resumen se escribe al terminarla';
+/**
+ * El resumen lee la partida entera: sin GPU, el modelo puede tardar minutos solo en leerla.
+ * El máster ya ha terminado de jugar y puede esperar más que a un PNJ.
+ */
+const RECAP_TIMEOUT_MS = 300_000;
 const MASTER_ONLY = 'Solo el máster de la campaña puede hacer eso';
 
 /** Los enlaces de pantalla son 32 caracteres hexadecimales (ver el esquema de campaigns). */
@@ -75,6 +86,7 @@ function toSummary(row: GameRow): GameSummary {
     status: row.status,
     openedAt: row.openedAt.toISOString(),
     closedAt: row.closedAt?.toISOString() ?? null,
+    recap: row.recap,
   };
 }
 
@@ -177,7 +189,10 @@ async function findRollingCharacters(
   );
 }
 
-export function registerGameRoutes(app: FastifyInstance, { db, hub, random }: AppContext): void {
+export function registerGameRoutes(
+  app: FastifyInstance,
+  { db, hub, random, ai }: AppContext,
+): void {
   /**
    * Añade un evento a una partida en juego y lo reparte en vivo. La fila de la partida queda
    * bloqueada durante la transacción: así los eventos de una partida se guardan en orden y
@@ -413,6 +428,76 @@ export function registerGameRoutes(app: FastifyInstance, { db, hub, random }: Ap
       return { visibility: 'public', payload: { kind: 'closed', xpAwarded } };
     });
     return { game: toDetail(await findGame(db, user, gameId)), event };
+  });
+
+  /** El máster deja el resumen de una partida terminada; vacío, la deja sin él. Lo ve la mesa. */
+  app.put<{ Params: IdParams }>('/api/games/:id/recap', async (request) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(recapSchema, request.body, 'Revisa el resumen');
+    const found = await findGame(db, user, gameId);
+    requireMasterOf(found);
+    if (found.game.status === 'open') throw new HttpError(409, GAME_STILL_OPEN);
+    await db.update(games).set({ recap: body.recap }).where(eq(games.id, gameId));
+    return { game: toDetail(await findGame(db, user, gameId)) };
+  });
+
+  /**
+   * La IA propone un resumen de la partida a partir de su registro, en directo como la charla
+   * con un PNJ. No se guarda: el máster lo revisa antes de enseñarlo.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/recap/draft', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(recapDraftSchema, request.body, 'Revisa lo que añades al resumen');
+    const found = await findGame(db, user, gameId);
+    requireMasterOf(found);
+    if (found.game.status === 'open') throw new HttpError(409, GAME_STILL_OPEN);
+    const model = requireAi(ai);
+
+    // Las tiradas secretas se quedan fuera; las notas, si el máster lo prefiere.
+    const events = (await findEvents(db, gameId, { includeMaster: true })).filter(
+      (event) => event.visibility === 'public' || (body.useNotes && event.kind === 'note'),
+    );
+    if (!hasLog(events) && !body.hint) {
+      throw new HttpError(
+        409,
+        'No hay nada que resumir: el registro de la partida está vacío. Cuenta a la IA qué pasó o escribe tú el resumen.',
+      );
+    }
+    const { campaignId } = found.game;
+    const [campaign] = await db
+      .select({ name: campaigns.name, description: campaigns.description })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId));
+    // Borrada justo entre medias.
+    if (!campaign) throw notFound(GAME_NOT_FOUND);
+    const party = await db
+      .select({ name: characters.name, background: characters.background })
+      .from(characters)
+      .where(eq(characters.campaignId, campaignId))
+      .orderBy(asc(characters.createdAt));
+    const [previous] = await findRecaps(db, campaignId, { before: found.game.number, limit: 1 });
+
+    return sendAiText(request, reply, {
+      ai: model,
+      request: {
+        messages: recapMessages({
+          campaign,
+          characters: party,
+          game: found.game,
+          previous,
+          events,
+          hint: body.hint,
+        }),
+        temperature: 0.5,
+        maxTokens: 800,
+        timeoutMs: RECAP_TIMEOUT_MS,
+      },
+      visible: visibleRecap,
+      finish: cleanRecap,
+      cutMessage: 'Se cortó el resumen de la partida',
+    });
   });
 
   // Pantalla de la mesa: sin sesión, con el enlace secreto de la campaña. Solo lo público.
