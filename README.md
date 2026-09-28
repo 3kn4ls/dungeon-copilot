@@ -8,6 +8,7 @@ Ahora mismo tiene:
 - Campañas: quien la crea es su máster y la comparte con un código de invitación de 6 letras.
 - Fichas de personaje con el [sistema de reglas propio](docs/reglas.md): creación guiada, heridas, Suerte, experiencia y mejoras.
 - Sala de partida: el máster abre una partida en la campaña y la mesa ve en vivo lo que enseña y las tiradas. Las tiradas de los personajes salen de su ficha (con la desventaja por heridas ya aplicada); el máster tira también por los PNJ, en abierto o en secreto, y guarda notas que solo ve él. Al abrir la partida todos recuperan la Suerte y al cerrarla ganan los PX de fin de sesión.
+- Repetir con Suerte: bajo las últimas tiradas, quien juega con el personaje (o el máster, si se lo pide de palabra) gasta un punto de Suerte para repetir sus dados. Cuenta la segunda tirada, la ficha lo descuenta y la pantalla enseña solo la que cuenta. En una tirada enfrentada, cada personaje repite solo sus dados, una vez. Las tiradas secretas no se repiten.
 - Pantalla de la mesa: un enlace secreto por campaña para una tele o una tablet, sin iniciar sesión. Enseña lo último revelado y las últimas tiradas, y pasa sola a la partida siguiente.
 - PNJ con IA: el máster guarda los PNJ de cada campaña con su aspecto, carácter, forma de hablar, lo que quieren y lo que ocultan. Ollama puede inventarlos o completar lo que falte, también en plena partida. En la sala, el máster cuenta lo que dicen o hacen los personajes, la IA responde como el PNJ y él decide qué frase enseña a la mesa, tal cual o retocada; también puede escribirla él.
 - Resumen de cada partida: al terminarla, la IA propone uno con el registro y con lo que el máster le cuente de lo que se jugó de palabra. El máster lo retoca (o lo escribe él) y lo lee toda la mesa, en la partida y en la campaña. Al empezar la siguiente, un botón lo enseña a la mesa y a la pantalla, y los PNJ recuerdan los resúmenes de las últimas partidas.
@@ -147,6 +148,7 @@ Todo bajo `/api`, en JSON. Los errores responden `{ error, issues? }` con mensaj
 | `POST /games/:id/reveals`, `/notes`            | Enseñar algo a la mesa o anotar algo solo para ti (el máster)                                       |
 | `POST /games/:id/reveals/draft`                | La IA describe una escena a partir de unas notas, en NDJSON. No guarda nada (el máster)             |
 | `POST /games/:id/rolls`                        | Tirar en la partida con un personaje, o por un PNJ (el máster)                                      |
+| `POST /games/:id/rolls/:eventId/reroll`        | Gastar 1 de Suerte y repetir los dados de un personaje: cuenta la nueva (su jugador o el máster)    |
 | `POST /games/:id/rolls/:eventId/complications` | La IA propone complicaciones para una tirada a medias o mala, en NDJSON. No guarda nada (el máster) |
 | `POST /games/:id/ideas`                        | La IA propone qué puede pasar ahora en la escena, en NDJSON. No guarda nada (el máster)             |
 | `POST /games/:id/speeches`                     | Enseñar a la mesa lo que dice un PNJ (el máster)                                                    |

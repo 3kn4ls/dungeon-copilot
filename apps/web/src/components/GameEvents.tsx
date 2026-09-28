@@ -1,5 +1,5 @@
 import { OUTCOME_GUIDES, OUTCOME_LABELS, doublesShift } from '@dungeon-copilot/rules';
-import type { GameEvent, GameRoll } from '@dungeon-copilot/shared';
+import { rerollerLabel, type GameEvent, type GameRoll } from '@dungeon-copilot/shared';
 import type { ReactNode } from 'react';
 import { signed } from '../rules-text';
 import { Dice } from './Dice';
@@ -17,6 +17,7 @@ export function targetText(roll: GameRoll): string {
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */
 export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean }) {
   const { result } = roll;
+  const luckyOne = rerollerLabel(roll);
   const shift =
     result.kind === 'test'
       ? doublesShift(result.roller.dice.kept)
@@ -24,6 +25,7 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
 
   return (
     <div className="roll-view">
+      {luckyOne && <p className="roll-luck">{luckyOne} repite con Suerte</p>}
       <p className="roll-heading">
         <strong>{roll.actor.label}</strong>
         {roll.actor.check && <> · {roll.actor.check}</>}{' '}
@@ -79,9 +81,18 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
 
 /**
  * Un evento del registro de la partida, tal como se ve en la sala. `children` va debajo de
- * una tirada, como las complicaciones que propone la IA al máster.
+ * una tirada, como las complicaciones que propone la IA al máster. Una tirada `superseded`
+ * se ha repetido con Suerte y ya no cuenta.
  */
-export function EventCard({ event, children }: { event: GameEvent; children?: ReactNode }) {
+export function EventCard({
+  event,
+  superseded = false,
+  children,
+}: {
+  event: GameEvent;
+  superseded?: boolean;
+  children?: ReactNode;
+}) {
   const meta = (
     <p className="feed-meta">
       {eventTime(event)}
@@ -129,8 +140,9 @@ export function EventCard({ event, children }: { event: GameEvent; children?: Re
       );
     case 'roll':
       return (
-        <article className="feed-item">
+        <article className={superseded ? 'feed-item feed-superseded' : 'feed-item'}>
           {meta}
+          {superseded && <p className="roll-superseded">No cuenta: se repitió con Suerte</p>}
           <RollView roll={event.roll} />
           {children}
         </article>

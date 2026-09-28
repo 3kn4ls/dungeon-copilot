@@ -116,17 +116,32 @@ function rollFor(check: Check, random: Random): RollerResult {
   return { dice, bonus: check.bonus, total: sumDice(dice.kept) + check.bonus };
 }
 
+/** Los mismos dados otra vez, con el mismo bonificador y la misma ventaja o desventaja. */
+function rollAgain(roller: RollerResult, random: Random): RollerResult {
+  return rollFor({ bonus: roller.bonus, edge: roller.dice.edge }, random);
+}
+
+function testResult(roller: RollerResult, difficulty: number): TestResult {
+  const margin = roller.total - difficulty;
+  const baseOutcome = outcomeFromMargin(margin);
+  const outcome = evaluateTest(roller.dice.kept, roller.bonus, difficulty);
+  return { roller, difficulty, margin, baseOutcome, outcome, success: isSuccess(outcome) };
+}
+
+function opposedResult(actor: RollerResult, opponent: RollerResult): OpposedResult {
+  const margin = actor.total - opponent.total;
+  const baseOutcome = outcomeFromMargin(margin);
+  const outcome = evaluateOpposed(actor.dice.kept, actor.bonus, opponent.dice.kept, opponent.bonus);
+  return { actor, opponent, margin, baseOutcome, outcome, success: isSuccess(outcome) };
+}
+
 /** Prueba contra una dificultad fija: una cerradura, un muro, una flecha a distancia. */
 export function resolveTest(
   check: Check,
   difficulty: number,
   random: Random = Math.random,
 ): TestResult {
-  const roller = rollFor(check, random);
-  const margin = roller.total - difficulty;
-  const baseOutcome = outcomeFromMargin(margin);
-  const outcome = evaluateTest(roller.dice.kept, check.bonus, difficulty);
-  return { roller, difficulty, margin, baseOutcome, outcome, success: isSuccess(outcome) };
+  return testResult(rollFor(check, random), difficulty);
 }
 
 /** Tirada enfrentada: los dos bandos tiran y el total del rival es el objetivo. */
@@ -136,21 +151,30 @@ export function resolveOpposed(
   random: Random = Math.random,
 ): OpposedResult {
   const actorRoll = rollFor(actor, random);
-  const opponentRoll = rollFor(opponent, random);
-  const margin = actorRoll.total - opponentRoll.total;
-  const baseOutcome = outcomeFromMargin(margin);
-  const outcome = evaluateOpposed(
-    actorRoll.dice.kept,
-    actor.bonus,
-    opponentRoll.dice.kept,
-    opponent.bonus,
-  );
-  return {
-    actor: actorRoll,
-    opponent: opponentRoll,
-    margin,
-    baseOutcome,
-    outcome,
-    success: isSuccess(outcome),
-  };
+  return opposedResult(actorRoll, rollFor(opponent, random));
+}
+
+/** Los dos bandos de una tirada enfrentada. */
+export type OpposedSide = 'actor' | 'opponent';
+
+/**
+ * Repite una prueba gastando Suerte: dados nuevos con el mismo bonificador, la misma ventaja
+ * y la misma dificultad. Cuenta el segundo resultado.
+ */
+export function rerollTest(result: TestResult, random: Random = Math.random): TestResult {
+  return testResult(rollAgain(result.roller, random), result.difficulty);
+}
+
+/**
+ * Repite con Suerte los dados de un bando de una tirada enfrentada: el otro se queda con los
+ * suyos. Cuenta el segundo resultado.
+ */
+export function rerollOpposed(
+  result: OpposedResult,
+  side: OpposedSide,
+  random: Random = Math.random,
+): OpposedResult {
+  return side === 'actor'
+    ? opposedResult(rollAgain(result.actor, random), result.opponent)
+    : opposedResult(result.actor, rollAgain(result.opponent, random));
 }

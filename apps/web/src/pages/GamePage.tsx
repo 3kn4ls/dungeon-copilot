@@ -24,6 +24,7 @@ import {
 import {
   GAME_STATUS_LABELS,
   gameName,
+  supersededRolls,
   type CharacterView,
   type GameDetail,
   type GameRollRequest,
@@ -40,6 +41,7 @@ import { ApiError, api } from '../api';
 import { Complications } from '../components/Complications';
 import { EventCard } from '../components/GameEvents';
 import { AiIdeas } from '../components/Ideas';
+import { LuckReroll, refreshLuck } from '../components/Luck';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
 import { RecapPanel } from '../components/Recap';
@@ -67,7 +69,7 @@ import {
 import { signed } from '../rules-text';
 
 const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
-/** Tiradas del final del registro a las que se pueden pedir complicaciones. */
+/** Tiradas del final del registro que aún se pueden repetir o complicar. */
 const RECENT_ROLLS = 3;
 const SITUATIONS: Situation[] = ['test', 'melee', 'ranged'];
 
@@ -86,6 +88,10 @@ export function GamePage() {
       storeEvent(event);
       // Al cerrar se reparten PX: las fichas guardadas ya no están al día.
       if (event.kind === 'closed' && game) refreshCampaign(queryClient, game.campaignId);
+      // Alguien ha gastado Suerte para repetir una tirada.
+      if (event.kind === 'roll' && event.roll.reroll && game) {
+        refreshLuck(queryClient, game.campaignId);
+      }
     },
     endsWith: (event) => event.kind === 'closed',
     // Ya no deja conectar (por ejemplo, han echado a quien mira): se vuelve a pedir la partida.
@@ -98,15 +104,24 @@ export function GamePage() {
   if (!state.data || !game || lost) return <QueryState error={state.error} />;
   const isMaster = game.role === 'master';
   const isOpen = game.status === 'open';
-  // Las complicaciones se piden al momento: solo en las últimas tiradas, y solo el máster.
+  // Una tirada repetida con Suerte ya no cuenta: cuenta la repetición.
+  const superseded = supersededRolls(state.data.events);
+  // Repetir y complicar se hace al momento: solo en las últimas tiradas que cuentan.
+  const recent = isOpen
+    ? state.data.events
+        .filter((event) => event.kind === 'roll' && !superseded.has(event.id))
+        .slice(-RECENT_ROLLS)
+    : [];
   const complicated = new Set(
-    isMaster && isOpen && ai.data?.enabled
-      ? state.data.events
-          .filter((event) => event.kind === 'roll')
-          .slice(-RECENT_ROLLS)
-          .filter((event) => needsComplication(event.roll.result.outcome))
+    isMaster && ai.data?.enabled
+      ? recent
+          .filter((event) => event.kind === 'roll' && needsComplication(event.roll.result.outcome))
           .map((event) => event.id)
       : [],
+  );
+  // La Suerte se gasta en lo que ve la mesa: las tiradas secretas no se repiten.
+  const rerollable = new Set(
+    recent.filter((event) => event.visibility === 'public').map((event) => event.id),
   );
 
   return (
@@ -155,7 +170,10 @@ export function GamePage() {
           <ol className="feed" aria-live="polite">
             {[...state.data.events].reverse().map((event) => (
               <li key={event.id}>
-                <EventCard event={event}>
+                <EventCard event={event} superseded={superseded.has(event.id)}>
+                  {event.kind === 'roll' && rerollable.has(event.id) && (
+                    <LuckReroll game={game} event={event} />
+                  )}
                   {event.kind === 'roll' && complicated.has(event.id) && (
                     <Complications game={game} event={event} />
                   )}

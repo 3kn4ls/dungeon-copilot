@@ -1,6 +1,7 @@
 import {
   GAME_STATUS_LABELS,
   gameName,
+  supersededRolls,
   type GameEvent,
   type ScreenState,
 } from '@dungeon-copilot/shared';
@@ -64,8 +65,10 @@ export function ScreenPage() {
   // Lo que dice un PNJ se ve bajo la escena en la que lo dijo, hasta que el máster enseñe otra.
   const lastSpeech = events.findLast((event) => event.kind === 'speech');
   const speech = lastSpeech && (!reveal || lastSpeech.id > reveal.id) ? lastSpeech : undefined;
+  // Una tirada repetida con Suerte ya no cuenta: solo se ve la repetición.
+  const superseded = supersededRolls(events);
   const rolls = events
-    .filter((event) => event.kind === 'roll')
+    .filter((event) => event.kind === 'roll' && !superseded.has(event.id))
     .slice(-3)
     .reverse();
 

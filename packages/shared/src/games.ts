@@ -1,4 +1,4 @@
-import { ATTRIBUTES, type Situation } from '@dungeon-copilot/rules';
+import { ATTRIBUTES, type OpposedSide, type Situation } from '@dungeon-copilot/rules';
 import { z } from 'zod';
 import type { MemberRole } from './campaigns';
 import type { RollResponse } from './rolls';
@@ -171,6 +171,14 @@ export const gameRollSchema = z.object({
 
 export type GameRollRequest = z.input<typeof gameRollSchema>;
 
+/** Para repetir una tirada gastando un punto de Suerte del personaje que tira. */
+export const rerollSchema = z.object({
+  /** De quién son los dados que se repiten: en una tirada enfrentada, cada bando repite los suyos. */
+  side: z.enum(['actor', 'opponent']).default('actor'),
+});
+
+export type RerollRequest = z.input<typeof rerollSchema>;
+
 export interface GameRollSide {
   /** Nombre del personaje o lo que haya escrito el máster. */
   label: string;
@@ -187,6 +195,51 @@ export interface GameRoll {
   /** Lo que ha cambiado la tirada sin que nadie lo pidiera, como la desventaja por herida grave. */
   notes: string[];
   result: RollResponse;
+  /** Si repite con Suerte otra tirada, que deja de contar. */
+  reroll?: GameRollReroll;
+}
+
+export interface GameRollReroll {
+  /** El evento de la tirada que se repite, que deja de contar. */
+  of: number;
+  /** El bando que gasta Suerte y vuelve a tirar sus dados; los del otro se quedan. */
+  side: OpposedSide;
+  /** Los bandos que han repetido desde la tirada original, este incluido: cada uno, una vez. */
+  sides: OpposedSide[];
+}
+
+/** Un bando de una tirada por el que tira un personaje de la campaña. */
+export interface CharacterSide {
+  side: OpposedSide;
+  characterId: string;
+  label: string;
+}
+
+/** Los bandos de una tirada por los que tira un personaje: solo ellos tienen Suerte. */
+export function characterSides(roll: GameRoll): CharacterSide[] {
+  const sides: CharacterSide[] = [];
+  if (roll.actor.characterId) {
+    sides.push({ side: 'actor', characterId: roll.actor.characterId, label: roll.actor.label });
+  }
+  if (roll.target.kind === 'opposed' && roll.target.characterId) {
+    sides.push({
+      side: 'opponent',
+      characterId: roll.target.characterId,
+      label: roll.target.label,
+    });
+  }
+  return sides;
+}
+
+/** Los personajes de una tirada que aún pueden repetirla con Suerte: cada uno, una vez. */
+export const rerollableSides = (roll: GameRoll): CharacterSide[] =>
+  characterSides(roll).filter((side) => !roll.reroll?.sides.includes(side.side));
+
+/** Quién ha repetido la tirada con Suerte, si es una repetición. */
+export function rerollerLabel(roll: GameRoll): string | undefined {
+  if (!roll.reroll) return undefined;
+  if (roll.reroll.side === 'actor' || roll.target.kind !== 'opposed') return roll.actor.label;
+  return roll.target.label;
 }
 
 export type GameEventPayload =
@@ -245,6 +298,15 @@ export interface ScreenState {
   campaignName: string;
   game: GameSummary | null;
   events: GameEvent[];
+}
+
+/** Las tiradas que se han repetido con Suerte: ya no cuentan, cuenta la repetición. */
+export function supersededRolls(events: readonly GameEvent[]): Set<number> {
+  return new Set(
+    events.flatMap((event) =>
+      event.kind === 'roll' && event.roll.reroll ? [event.roll.reroll.of] : [],
+    ),
+  );
 }
 
 /** Nombre corto de una partida: su título o, si no tiene, su número. */

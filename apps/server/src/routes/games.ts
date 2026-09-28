@@ -1,5 +1,6 @@
 import { LUCK_PER_SESSION, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
 import {
+  characterSides,
   closeGameSchema,
   complicationsSchema,
   gameRollSchema,
@@ -8,6 +9,7 @@ import {
   openGameSchema,
   recapDraftSchema,
   recapSchema,
+  rerollSchema,
   revealDraftSchema,
   revealSchema,
   speechSchema,
@@ -54,7 +56,7 @@ import {
 import { findCampaignContext, findNpcLines, findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import type { RollingCharacter } from '../games/rolls';
-import { resolveGameRoll } from '../games/rolls';
+import { rerollGameRoll, resolveGameRoll } from '../games/rolls';
 import { lastEventId, openEventStream } from '../games/stream';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster, requireMember } from './access';
@@ -85,6 +87,7 @@ const MASTER_ONLY = 'Solo el máster de la campaña puede hacer eso';
 const ROLL_NOT_FOUND = 'Esa tirada no existe en esta partida';
 const ROLL_WENT_WELL =
   'Esa tirada salió bien: las complicaciones son para los éxitos con coste, los fallos y las pifias';
+const ROLL_REPEATED = 'Esa tirada ya se ha repetido: cuenta la segunda';
 
 /** Los ids de los eventos son un integer de PostgreSQL: fuera de rango, no existen. */
 const isEventId = (id: number) => Number.isInteger(id) && id > 0 && id <= 2 ** 31 - 1;
@@ -433,6 +436,91 @@ export function registerGameRoutes(
     });
     return reply.status(201).send({ event });
   });
+
+  /**
+   * Un personaje gasta un punto de Suerte para repetir su tirada: vuelve a tirar sus dados y
+   * cuenta el segundo resultado. La gastan su jugador o el máster, en las tiradas que ve la mesa.
+   */
+  app.post<{ Params: IdParams & { eventId: string } }>(
+    '/api/games/:id/rolls/:eventId/reroll',
+    async (request, reply) => {
+      const user = requireUser(request);
+      const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+      const eventId = Number(request.params.eventId);
+      const body = parseBody(rerollSchema, request.body, 'Revisa qué tirada repites');
+
+      const { event } = await addEvent(user, gameId, async (tx, found) => {
+        const isMaster = found.role === 'master';
+        const [row] = isEventId(eventId)
+          ? await tx
+              .select({ visibility: gameEvents.visibility, payload: gameEvents.payload })
+              .from(gameEvents)
+              .where(and(eq(gameEvents.id, eventId), eq(gameEvents.gameId, gameId)))
+          : [];
+        // Una tirada secreta no existe para los jugadores.
+        if (row?.payload.kind !== 'roll' || (row.visibility !== 'public' && !isMaster)) {
+          throw notFound(ROLL_NOT_FOUND);
+        }
+        if (row.visibility !== 'public') {
+          throw new HttpError(409, 'Las tiradas secretas no se repiten con Suerte');
+        }
+        const { roll } = row.payload;
+        if (body.side === 'opponent' && roll.target.kind !== 'opposed') {
+          throw new HttpError(400, 'Esa tirada es contra una dificultad: no tiene rival');
+        }
+        const side = characterSides(roll).find((candidate) => candidate.side === body.side);
+        if (!side) {
+          const label = body.side === 'actor' ? roll.actor.label : roll.target.label;
+          throw new HttpError(400, `${label} no tiene Suerte: solo la tienen los personajes`);
+        }
+
+        const [character] = await tx
+          .select({
+            id: characters.id,
+            name: characters.name,
+            ownerId: characters.ownerId,
+            luck: characters.luck,
+          })
+          .from(characters)
+          .where(
+            and(
+              eq(characters.id, side.characterId),
+              eq(characters.campaignId, found.game.campaignId),
+            ),
+          )
+          .for('update');
+        if (!character) throw notFound('Ese personaje ya no está en la campaña');
+        if (!isMaster && character.ownerId !== user.id) {
+          throw forbidden('Solo puedes gastar la Suerte de tus personajes');
+        }
+        if (roll.reroll?.sides.includes(body.side)) {
+          throw new HttpError(409, `${side.label} ya ha repetido esta tirada`);
+        }
+        const [repeated] = await tx
+          .select({ id: gameEvents.id })
+          .from(gameEvents)
+          .where(
+            and(
+              eq(gameEvents.gameId, gameId),
+              sql`${gameEvents.payload} -> 'roll' -> 'reroll' ->> 'of' = ${String(eventId)}`,
+            ),
+          )
+          .limit(1);
+        if (repeated) throw new HttpError(409, ROLL_REPEATED);
+        if (character.luck < 1) throw new HttpError(409, `A ${character.name} no le queda Suerte`);
+
+        await tx
+          .update(characters)
+          .set({ luck: character.luck - 1, updatedAt: new Date() })
+          .where(eq(characters.id, character.id));
+        return {
+          visibility: 'public',
+          payload: { kind: 'roll', roll: rerollGameRoll(roll, eventId, body.side, random) },
+        };
+      });
+      return reply.status(201).send({ event });
+    },
+  );
 
   app.post<{ Params: IdParams }>('/api/games/:id/close', async (request) => {
     const user = requireUser(request);

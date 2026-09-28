@@ -10,11 +10,11 @@ Asistente web para másters de rol. Monorepo pnpm en TypeScript: `apps/web` (Rea
 - Validación de entrada con Zod en `packages/shared`; el servidor responde 400 con `issues` legibles.
 - Errores de la API: se lanza `HttpError` (`apps/server/src/http/errors.ts`) con un mensaje en español que la web enseña tal cual.
 - Permisos: a quien no es miembro de una campaña se le responde 404, no 403. Las fichas las cambian su dueño y el máster; la experiencia solo la da el máster.
-- Partidas: todo lo que pasa en una es un evento de `game_events` con visibilidad `public` (toda la mesa y la pantalla) o `master`. Los eventos se añaden con `addEvent` (`apps/server/src/routes/games.ts`), que bloquea la partida y los reparte en vivo con `GameHub` (en memoria: una sola réplica). Quien deja de tener acceso (le echan, se borra la campaña, cambia el enlace de la pantalla) se desconecta con `hub.disconnect`.
+- Partidas: todo lo que pasa en una es un evento de `game_events` con visibilidad `public` (toda la mesa y la pantalla) o `master`. Los eventos se añaden con `addEvent` (`apps/server/src/routes/games.ts`), que bloquea la partida y los reparte en vivo con `GameHub` (en memoria: una sola réplica). Quien deja de tener acceso (le echan, se borra la campaña, cambia el enlace de la pantalla) se desconecta con `hub.disconnect`. Los eventos no se cambian: una tirada repetida con Suerte es otro `roll` con `reroll.of`, y la original deja de contar (`supersededRolls`).
 
 ## Base de datos
 
-PostgreSQL con Drizzle ORM. Sin `DATABASE_URL` se usa PGlite (PostgreSQL embebido), también en los tests. Si cambias `apps/server/src/db/schema.ts`, genera la migración con `pnpm --filter @dungeon-copilot/server db:generate --name que-cambia` y súbela junto al cambio; nunca edites una migración ya publicada. Los cambios de una ficha que dependen de su estado (daño, experiencia, mejoras) van en una transacción con la fila bloqueada.
+PostgreSQL con Drizzle ORM. Sin `DATABASE_URL` se usa PGlite (PostgreSQL embebido), también en los tests. Si cambias `apps/server/src/db/schema.ts`, genera la migración con `pnpm --filter @dungeon-copilot/server db:generate --name que-cambia` y súbela junto al cambio; nunca edites una migración ya publicada. Los cambios de una ficha que dependen de su estado (daño, experiencia, mejoras, Suerte) van en una transacción con la fila bloqueada.
 
 ## IA (Ollama)
 
