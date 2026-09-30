@@ -8,7 +8,7 @@ import {
 } from '@dungeon-copilot/shared';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context';
-import { findCombatTarget } from '../games/combat';
+import { findBlow, findCombatTarget } from '../games/combat';
 import {
   CHARACTER_NOT_HERE,
   GAME_NOT_FOUND,
@@ -192,7 +192,8 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
       const rolling = await findRollingCharacters(tx, found.game.campaignId, ids);
       if (ids.some((id) => !rolling.has(id))) throw notFound(CHARACTER_NOT_HERE);
       const roller = rolling.get(rollerId)!;
-      const { preview } = planGameRoll(body.roll, rolling);
+      const blow = body.roll.blow && (await findBlow(tx, gameId, body.roll.blow));
+      const { preview } = planGameRoll(body.roll, rolling, blow);
       return {
         // En secreto, la petición y la tirada las ven el máster y el jugador que tira.
         visibility: body.secret ? 'private' : 'public',
@@ -223,7 +224,7 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
       const { event } = await addEvent(user, gameId, async (tx, found) => {
         const row = await findVisibleEvent(tx, gameId, eventId, viewerOf(found, user));
         if (row?.payload.kind !== 'rollRequest') throw notFound(ROLL_REQUEST_NOT_FOUND);
-        const { request: roll, characterId } = row.payload;
+        const { request: roll, characterId, preview } = row.payload;
         const ids = rollingIds(roll);
         const rolling = await findRollingCharacters(tx, found.game.campaignId, ids);
         const roller = rolling.get(characterId);
@@ -238,7 +239,8 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
           playerId: row.playerId,
           payload: {
             kind: 'roll',
-            roll: { ...resolveGameRoll(roll, rolling, random), requested: row.id },
+            // Quién ataca a quién ya se sabe desde que se pidió.
+            roll: { ...resolveGameRoll(roll, rolling, random, preview.blow), requested: row.id },
           },
         };
       });

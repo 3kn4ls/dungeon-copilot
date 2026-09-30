@@ -34,11 +34,28 @@ describe('crear fichas', () => {
       skills: { 'melee-weapons': 2, athletics: 1 },
       advancedSkills: ['brutal-charge'],
       wounds: { scratches: 0, severity: 'none', scratchBoxes: 2 },
+      gear: { melee: { name: '', weapon: 'medium' }, ranged: null, armor: 'none', shield: false },
       luck: 3,
       xp: 0,
       canEdit: true,
       canAwardXp: false,
     });
+  });
+
+  it('se elige lo que lleva para pelear', async () => {
+    const { ana, campaign } = await table();
+    const gear = {
+      melee: { name: 'Espada larga', weapon: 'medium' },
+      ranged: { name: 'Arco corto', weapon: 'medium' },
+      armor: 'light',
+      shield: false,
+    };
+    const response = await ana.post(
+      `/api/campaigns/${campaign.id}/characters`,
+      kael({ name: 'Mira', gear } as object),
+    );
+    expect(response.statusCode).toBe(201);
+    expect(response.json().character.gear).toEqual(gear);
   });
 
   it('aplica las reglas de creación y explica qué falla', async () => {
@@ -105,6 +122,22 @@ describe('cambiar fichas', () => {
 
     expect((await ana.patch(url, { luck: 4 })).statusCode).toBe(400);
     expect((await ana.patch(url, {})).statusCode).toBe(400);
+  });
+
+  it('la dueña y el máster cambian el equipo, y tiene que ser del reglamento', async () => {
+    const { master, ana, bruno, url } = await table();
+    const heavy = { melee: { name: 'Mandoble', weapon: 'heavy' }, armor: 'heavy', shield: false };
+    const changed = await ana.patch(url, { gear: heavy });
+    expect(changed.json().character.gear).toEqual({ ...heavy, ranged: null });
+    const shield = { ...heavy, melee: { name: 'Hacha', weapon: 'medium' }, shield: true };
+    expect((await master.patch(url, { gear: shield })).json().character.gear.shield).toBe(true);
+    expect((await bruno.patch(url, { gear: heavy })).statusCode).toBe(403);
+
+    const wrong = await ana.patch(url, { gear: { ...heavy, armor: 'mithril' } });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().issues).toEqual([
+      { path: 'gear.armor', message: 'Elige la armadura: ninguna, ligera o pesada' },
+    ]);
   });
 
   it('solo la dueña o el máster pueden borrarla', async () => {

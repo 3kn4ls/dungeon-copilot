@@ -1,4 +1,10 @@
-import { ATTRIBUTES, type OpposedSide, type Situation } from '@dungeon-copilot/rules';
+import {
+  ATTRIBUTES,
+  type NpcHarm,
+  type OpposedSide,
+  type Situation,
+  type WoundState,
+} from '@dungeon-copilot/rules';
 import { z } from 'zod';
 import type { MemberRole } from './campaigns';
 import type { Combatant, CombatantRef, CombatPosition } from './combat';
@@ -131,6 +137,24 @@ export const ideasSchema = z.object({
 
 export type IdeasRequest = z.input<typeof ideasSchema>;
 
+/** Para que la IA proponga cómo contar un golpe de una tirada de combate. */
+export const narrationSchema = z.object({
+  /** Lo que quiere destacar el máster: "que Garrick retroceda hacia el fuego". */
+  hint: z.string().trim().max(300, 'No puede pasar de 300 caracteres').default(''),
+});
+
+export type NarrationRequest = z.input<typeof narrationSchema>;
+
+/** Para que la IA proponga qué hacen unos PNJ en su turno. */
+export const tacticsSchema = z.object({
+  /** Los PNJ que actúan: su id en el combate. */
+  combatantId: z.uuid('Elige qué PNJ actúa'),
+  /** Lo que busca el máster: "que intenten huir". */
+  hint: z.string().trim().max(300, 'No puede pasar de 300 caracteres').default(''),
+});
+
+export type TacticsRequest = z.input<typeof tacticsSchema>;
+
 export const noteSchema = z.object({
   text: z
     .string()
@@ -262,6 +286,14 @@ const rollSideSchema = z.discriminatedUnion('kind', [characterSideSchema, freeSi
 
 export type RollSideRequest = z.input<typeof rollSideSchema>;
 
+/** En combate, quién ataca a quién: sus ids en el combate. Así se sabe a quién va el daño. */
+const blowSchema = z.object({
+  attackerId: z.uuid('Di quién ataca'),
+  defenderId: z.uuid('Di a quién ataca'),
+});
+
+export type BlowRequest = z.input<typeof blowSchema>;
+
 export const gameRollSchema = z.object({
   actor: rollSideSchema,
   target: z.discriminatedUnion('kind', [
@@ -271,6 +303,7 @@ export const gameRollSchema = z.object({
   situation: z.enum(['test', 'melee', 'ranged']).default('test'),
   /** Tirada secreta: solo la ve el máster. */
   secret: z.boolean().default(false),
+  blow: blowSchema.optional(),
 });
 
 export type GameRollRequest = z.input<typeof gameRollSchema>;
@@ -307,6 +340,12 @@ export interface GameRollSide {
   check?: string;
 }
 
+/** En combate, quién ataca a quién, con los nombres que tenían entonces. */
+export interface Blow {
+  attacker: CombatantRef;
+  defender: CombatantRef;
+}
+
 export interface GameRoll {
   actor: GameRollSide;
   /** Contra qué: una dificultad ("Difícil (12)") o quien se opone. */
@@ -319,10 +358,12 @@ export interface GameRoll {
   reroll?: GameRollReroll;
   /** La tirada pedida por el máster que cumple, si viene de una. */
   requested?: number;
+  /** En combate, quién ataca a quién: a quién va el daño del golpe. */
+  blow?: Blow;
 }
 
 /** Quién tira y contra qué: lo que se enseña de una tirada pedida mientras espera. */
-export type GameRollPreview = Pick<GameRoll, 'actor' | 'target' | 'situation'>;
+export type GameRollPreview = Pick<GameRoll, 'actor' | 'target' | 'situation' | 'blow'>;
 
 export interface GameRollReroll {
   /** El evento de la tirada que se repite, que deja de contar. */
@@ -366,6 +407,30 @@ export function rerollerLabel(roll: GameRoll): string | undefined {
   if (roll.reroll.side === 'actor' || roll.target.kind !== 'opposed') return roll.actor.label;
   return roll.target.label;
 }
+
+/**
+ * Quien recibe un golpe y cómo queda: un personaje (su ficha antes y después, y si el golpe lo
+ * mata salvo que gaste Suerte) o PNJ del combate (cuántos son, lo que aguanta cada uno, cómo va el
+ * grupo y si cae uno con este golpe).
+ */
+export type DamageTarget =
+  | {
+      kind: 'character';
+      id: string;
+      name: string;
+      before: WoundState;
+      after: WoundState;
+      lethal: boolean;
+    }
+  | {
+      kind: 'npc';
+      id: string;
+      name: string;
+      count: number;
+      toughness: number;
+      harm: NpcHarm;
+      fell: boolean;
+    };
 
 export type GameEventPayload =
   | { kind: 'opened'; number: number; title: string; luckRefilled: boolean }
@@ -420,7 +485,27 @@ export type GameEventPayload =
   /** Sale del combate alguien que cae o huye, y así queda. */
   | ({ kind: 'combatLeft'; left: CombatantRef } & CombatPosition)
   /** Termina el combate en la ronda `rounds`. `recovered`: quienes recuperan el aliento. */
-  | { kind: 'combatEnded'; rounds: number; recovered: CharacterRef[] };
+  | { kind: 'combatEnded'; rounds: number; recovered: CharacterRef[] }
+  /**
+   * Alguien recibe un golpe de `amount`. `roll`: la tirada de la que sale, y `by`, quién lo da, si
+   * se sabe. `dodged`: gasta Esquiva prodigiosa. Si caen todos los de un grupo y queda alguien más,
+   * salen del combate y así queda (`position`).
+   */
+  | {
+      kind: 'damage';
+      amount: number;
+      target: DamageTarget;
+      roll?: number;
+      by?: CombatantRef;
+      dodged?: boolean;
+      position?: CombatPosition;
+    }
+  /** Un personaje gasta un punto de Suerte para no morir del golpe `of`. */
+  | { kind: 'survived'; of: number; characterId: string; name: string }
+  /** Empieza una escena y termina la anterior. `recovered`: quienes recuperan el aliento. */
+  | { kind: 'scene'; title: string; recovered: CharacterRef[] }
+  /** Un personaje usa una técnica que se gasta: una vez por escena o por sesión. */
+  | { kind: 'ability'; characterId: string; name: string; skill: string; label: string };
 
 export type GameEventKind = GameEventPayload['kind'];
 

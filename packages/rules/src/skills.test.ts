@@ -4,6 +4,7 @@ import {
   DEFAULT_SKILLS,
   createSkillCatalog,
   defaultSkillCatalog,
+  limitedSkills,
   unmetRequirements,
 } from './skills';
 import type { AdvancedSkill } from './skills';
@@ -23,6 +24,26 @@ describe('catálogo por defecto', () => {
       const minimum = skill.requires.attributes?.[skill.attribute];
       expect(minimum === 3 || minimum === 4).toBe(true);
     }
+  });
+});
+
+describe('técnicas que se gastan', () => {
+  it('las que dicen «una vez por escena» o «por sesión» llevan ese límite', () => {
+    for (const skill of DEFAULT_SKILLS.filter((s): s is AdvancedSkill => s.tier === 'advanced')) {
+      const expected = skill.description.includes('Una vez por escena')
+        ? 'scene'
+        : skill.description.includes('Una vez por sesión')
+          ? 'session'
+          : undefined;
+      expect(skill.limit, skill.id).toBe(expected);
+    }
+  });
+
+  it('limitedSkills da las de un personaje, en el orden del catálogo', () => {
+    expect(
+      limitedSkills(['unstoppable', 'tactician', 'uncanny-dodge']).map((skill) => skill.id),
+    ).toEqual(['uncanny-dodge', 'unstoppable']);
+    expect(limitedSkills(['brutal-charge'])).toEqual([]);
   });
 });
 

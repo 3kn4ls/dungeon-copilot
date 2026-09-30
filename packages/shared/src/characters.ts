@@ -1,14 +1,19 @@
 import {
   ATTRIBUTES,
+  DEFAULT_GEAR,
   LUCK_PER_SESSION,
   characterBuildSchema,
+  gearSchema,
   type Attributes,
+  type Gear,
   type Severity,
 } from '@dungeon-copilot/rules';
 import { z } from 'zod';
 
-/** Crear un personaje: el reparto de creación del reglamento. */
-export const createCharacterSchema = characterBuildSchema;
+/** Crear un personaje: el reparto de creación del reglamento y lo que lleva para pelear. */
+export const createCharacterSchema = characterBuildSchema.extend({
+  gear: gearSchema.default(DEFAULT_GEAR),
+});
 
 export type CreateCharacterRequest = z.input<typeof createCharacterSchema>;
 
@@ -17,6 +22,7 @@ export const updateCharacterSchema = z
     name: characterBuildSchema.shape.name.optional(),
     background: z.string().trim().max(200).optional(),
     luck: z.number().int().min(0).max(LUCK_PER_SESSION).optional(),
+    gear: gearSchema.optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
     message: 'No hay nada que cambiar',
@@ -68,6 +74,8 @@ export interface CharacterView {
   skills: Record<string, number>;
   advancedSkills: string[];
   wounds: { scratches: number; severity: Severity; scratchBoxes: number };
+  /** Lo que lleva para pelear: sale por defecto al atacar, parar y recibir un golpe. */
+  gear: Gear;
   luck: number;
   xp: number;
   createdAt: string;

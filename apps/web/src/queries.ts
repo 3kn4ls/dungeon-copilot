@@ -62,6 +62,27 @@ export const useCharacters = (campaignId: string) =>
 export const useCharacter = (id: string) =>
   useQuery({ queryKey: keys.character(id), queryFn: () => api.character(id), enabled: id !== '' });
 
+/**
+ * Si un evento de la partida ha cambiado las fichas (la Suerte, los rasguños, las heridas): una
+ * tirada repetida con Suerte, un golpe a un personaje, quien se salva con Suerte o quienes
+ * recuperan el aliento al acabar un combate o una escena.
+ */
+export function changesSheets(event: GameEvent): boolean {
+  switch (event.kind) {
+    case 'roll':
+      return event.roll.reroll !== undefined;
+    case 'combatEnded':
+    case 'scene':
+      return event.recovered.length > 0;
+    case 'damage':
+      return event.target.kind === 'character';
+    case 'survived':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Algo ha cambiado en las fichas de una campaña (la Suerte, los rasguños): se vuelven a pedir. */
 export function refreshCharacters(queryClient: QueryClient, campaignId: string) {
   void queryClient.invalidateQueries({ queryKey: keys.characters(campaignId) });

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COST_BLOW,
+  attackExtras,
   characterAttackDamage,
+  combatBlows,
   compareInitiative,
   conditionEdges,
   damageOnHit,
+  hitDamage,
   initiativeEdge,
   meleeAttack,
   meleeDefense,
@@ -99,6 +103,99 @@ describe('characterAttackDamage', () => {
         surprise: true,
       }),
     ).toBe(1);
+  });
+});
+
+describe('hitDamage', () => {
+  const sword = { label: 'Espada larga', value: 2 };
+
+  it('explica de dónde sale el daño: arma, crítico, técnicas y armadura', () => {
+    expect(
+      hitDamage({
+        source: sword,
+        critical: true,
+        extras: [{ label: 'Ataque furtivo', value: 2 }],
+        armor: 'light',
+      }),
+    ).toEqual({
+      amount: 4,
+      parts: [
+        sword,
+        { label: 'Crítico', value: 1 },
+        { label: 'Ataque furtivo', value: 2 },
+        { label: 'Armadura ligera', value: -1 },
+      ],
+    });
+  });
+
+  it('un impacto hace al menos 1', () => {
+    expect(hitDamage({ source: { label: 'Esbirro', value: 1 }, armor: 'heavy' })).toMatchObject({
+      amount: 1,
+      capped: 'minimum',
+    });
+    expect(hitDamage({ source: { label: 'Soldado', value: 2 }, extras: [COST_BLOW] })).toEqual({
+      amount: 1,
+      parts: [{ label: 'Soldado', value: 2 }, COST_BLOW],
+    });
+  });
+
+  it('con Esquiva prodigiosa se queda en 1', () => {
+    expect(hitDamage({ source: sword, critical: true, dodge: true })).toMatchObject({
+      amount: 1,
+      capped: 'dodge',
+    });
+  });
+});
+
+describe('attackExtras', () => {
+  it('Golpe demoledor, con arma pesada en éxito pleno o crítico', () => {
+    const brute = kael({ advancedSkills: ['crushing-blow'] });
+    expect(attackExtras(brute, 'heavy', 'critical')).toEqual([
+      { label: 'Golpe demoledor', value: 1 },
+    ]);
+    expect(attackExtras(brute, 'heavy', 'partial')).toEqual([]);
+    expect(attackExtras(brute, 'medium', 'success')).toEqual([]);
+  });
+
+  it('Ataque furtivo, solo por sorpresa', () => {
+    const rogue = kael({ advancedSkills: ['sneak-attack'] });
+    expect(attackExtras(rogue, 'light', 'partial', true)).toEqual([
+      { label: 'Ataque furtivo', value: 2 },
+    ]);
+    expect(attackExtras(rogue, 'light', 'partial')).toEqual([]);
+  });
+});
+
+describe('combatBlows', () => {
+  it('quien actúa impacta con éxito con coste, pleno o crítico', () => {
+    expect(combatBlows('melee', 'success')).toEqual({
+      hit: true,
+      critical: false,
+      counter: null,
+      lessOnCost: false,
+    });
+    expect(combatBlows('ranged', 'critical')).toMatchObject({ hit: true, critical: true });
+    expect(combatBlows('melee', 'failure')).toMatchObject({ hit: false, counter: null });
+  });
+
+  it('cuerpo a cuerpo, el rival devuelve el golpe por el coste o tras una pifia', () => {
+    expect(combatBlows('melee', 'partial')).toMatchObject({ hit: true, counter: 'cost' });
+    expect(combatBlows('melee', 'fumble')).toMatchObject({ hit: false, counter: 'exposed' });
+    expect(combatBlows('ranged', 'fumble')).toMatchObject({ hit: false, counter: null });
+  });
+
+  it('a distancia, el coste puede ser 1 de daño menos', () => {
+    expect(combatBlows('ranged', 'partial')).toMatchObject({ hit: true, lessOnCost: true });
+    expect(combatBlows('melee', 'partial').lessOnCost).toBe(false);
+  });
+
+  it('una prueba no es un golpe', () => {
+    expect(combatBlows('test', 'critical')).toEqual({
+      hit: false,
+      critical: false,
+      counter: null,
+      lessOnCost: false,
+    });
   });
 });
 

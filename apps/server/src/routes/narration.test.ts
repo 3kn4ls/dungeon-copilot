@@ -421,3 +421,174 @@ describe('la IA propone qué puede pasar ahora', () => {
     expect(ollama.requests).toHaveLength(0);
   });
 });
+
+/** Un combate entre Kael y lo que se diga, en la escena «El puente». */
+async function combatOn(master: TestClient, url: string, combatants: object[]) {
+  await master.post(`${url}/scenes`, { title: 'El puente' });
+  dice = fixedDice(...combatants.flatMap(() => [3, 3]));
+  const response = await master.post(`${url}/combat`, { combatants });
+  expect(response.statusCode).toBe(201);
+  const started: GameEvent = response.json().event;
+  if (started.kind !== 'combatStarted') throw new Error('No ha empezado el combate');
+  return started.order;
+}
+
+describe('la IA narra un golpe', () => {
+  it('propone tres maneras de contarlo, con la tirada, lo que ha causado y las armas', async () => {
+    const { master, campaign, kael: sheet } = await table();
+    await master.patch(`/api/characters/${sheet.id}`, {
+      gear: { melee: { name: 'Espada larga', weapon: 'medium' }, armor: 'light', shield: false },
+    });
+    const url = await openGame(master, campaign.id);
+    const order = await combatOn(master, url, [
+      { kind: 'character', characterId: sheet.id },
+      { kind: 'npc', name: 'Garrick', profile: 'veteran' },
+    ]);
+    const garrick = order.find(({ name }) => name === 'Garrick')!;
+    // Kael 6 + 6 + 6 contra Garrick 1 + 1 + 6: crítico.
+    dice = fixedDice(6, 6, 1, 1);
+    const attack = await master.post(`${url}/rolls`, {
+      actor: { kind: 'character', characterId: sheet.id, skill: 'melee-weapons' },
+      target: { kind: 'opposed', opponent: { kind: 'free', label: 'Garrick', bonus: 6 } },
+      situation: 'melee',
+      blow: { attackerId: sheet.id, defenderId: garrick.id },
+    });
+    expect(attack.statusCode).toBe(201);
+    const roll: GameEvent & { kind: 'roll' } = attack.json().event;
+    expect(roll.roll.result.outcome).toBe('critical');
+    await master.post(`${url}/damage`, { targetId: garrick.id, amount: 4, roll: roll.id });
+    const before = await eventsOf(master, url);
+
+    ollama.queue({
+      kind: 'chunks',
+      chunks: [
+        '{"ideas": ["La espada muerde el hombro.", "Garrick se desploma.", "Cruje el puente."]}',
+      ],
+    });
+    const response = await master.post(`${url}/rolls/${roll.id}/narration`, {
+      hint: 'que caiga al río',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(chunksOf(response.body).at(-1)).toEqual({
+      type: 'done',
+      text: 'La espada muerde el hombro.\nGarrick se desploma.\nCruje el puente.',
+    });
+    expect(ollama.requests[0]?.body).toMatchObject({ format: IDEAS_FORMAT });
+    const { system, user } = lastPrompt();
+    expect(system).toContain('tres maneras de contar');
+    expect(system).toContain(OUTCOME_GUIDES.melee.critical);
+    expect(user).toContain('Escena en juego: El puente');
+    expect(user).toContain(
+      'Kael ataca a Garrick.\nLa tirada: Kael (Armas cuerpo a cuerpo) contra Garrick, cuerpo a cuerpo: crítico para Kael.',
+    );
+    expect(user).toContain('Con qué pelean:\n- Kael: Espada larga (media), armadura ligera');
+    expect(user).toContain('Lo que ha causado:\n- Golpe de Kael a Garrick (4 de daño): cae.');
+    expect(user).toContain('Lo que quiere destacar el máster: que caiga al río');
+    expect(await eventsOf(master, url)).toEqual(before);
+  });
+
+  it('solo para tiradas de combate, y solo la pide el máster', async () => {
+    const { master, ana, campaign, kael: sheet } = await table();
+    const url = await openGame(master, campaign.id);
+    const test = await rollKael(master, url, sheet.id, [3, 3]);
+    const conflict = await master.post(`${url}/rolls/${test.id}/narration`, {});
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).toBe('Esa tirada no es de combate: se narran los golpes');
+
+    const melee = await rollKael(master, url, sheet.id, [3, 3], { situation: 'melee' });
+    expect((await ana.post(`${url}/rolls/${melee.id}/narration`, {})).statusCode).toBe(403);
+    const reveal = (await master.post(`${url}/reveals`, { body: 'El puente cruje.' })).json().event;
+    const missing = await master.post(`${url}/rolls/${reveal.id}/narration`, {});
+    expect(missing.statusCode).toBe(404);
+    expect(ollama.requests).toHaveLength(0);
+  });
+});
+
+describe('la IA propone qué hacen los PNJ', () => {
+  it('da tres ideas sabiendo cómo va cada uno que pelea', async () => {
+    const { master, campaign, kael: sheet } = await table();
+    const url = await openGame(master, campaign.id);
+    const order = await combatOn(master, url, [
+      { kind: 'character', characterId: sheet.id },
+      { kind: 'npc', name: 'Bandidos', profile: 'minion', count: 3 },
+    ]);
+    const bandits = order.find(({ name }) => name === 'Bandidos')!;
+    await master.post(`${url}/damage`, { targetId: bandits.id, amount: 1 });
+    await master.post(`${url}/damage`, { targetId: sheet.id, amount: 3 });
+
+    ollama.queue({
+      kind: 'chunks',
+      chunks: ['{"ideas": ["Táctica: rodean a Kael.", "Cortan la cuerda.", "Huyen."]}'],
+    });
+    const response = await master.post(`${url}/combat/tactics`, {
+      combatantId: bandits.id,
+      hint: 'que huyan',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(chunksOf(response.body).at(-1)).toEqual({
+      type: 'done',
+      text: 'Rodean a Kael.\nCortan la cuerda.\nHuyen.',
+    });
+    const { system, user } = lastPrompt();
+    expect(system).toContain('Le toca a Bandidos');
+    expect(user).toContain('Escena en juego: El puente');
+    expect(user).toContain(
+      'Ronda 1. Quién pelea y cómo va:\n- Kael (PJ): herido; lleva Arma media\n- Bandidos (PNJ, esbirro): quedan 2 de 3 en pie',
+    );
+    expect(user).toContain('Le toca a:\n- Bandidos (PNJ, esbirro): quedan 2 de 3 en pie');
+    expect(user).toContain('Lo que busca el máster: que huyan');
+  });
+
+  it('de un PNJ de la campaña sabe su concepto y sus objetivos, pero no sus secretos', async () => {
+    const { master, campaign, kael: sheet } = await table();
+    const npc = (
+      await master.post(`/api/campaigns/${campaign.id}/npcs`, {
+        name: 'Brunilda',
+        concept: 'Posadera con un pasado de contrabandista',
+        personality: 'Desconfiada y leal a los suyos',
+        goals: 'Proteger la posada',
+        secrets: 'Guarda el mapa de las cuevas',
+        profile: 'veteran',
+      })
+    ).json().npc;
+    const url = await openGame(master, campaign.id);
+    const order = await combatOn(master, url, [
+      { kind: 'character', characterId: sheet.id },
+      { kind: 'npc', name: 'Brunilda', profile: 'veteran', npcId: npc.id },
+    ]);
+    const brunilda = order.find(({ name }) => name === 'Brunilda')!;
+
+    ollama.queue({
+      kind: 'chunks',
+      chunks: ['{"ideas": ["Rompe una jarra en la cabeza de Kael."]}'],
+    });
+    const response = await master.post(`${url}/combat/tactics`, { combatantId: brunilda.id });
+    expect(response.statusCode).toBe(200);
+    const { user } = lastPrompt();
+    expect(user).toContain(
+      'Le toca a:\n- Brunilda (PNJ, veterano): sin heridas\nConcepto: Posadera con un pasado de contrabandista\nPersonalidad: Desconfiada y leal a los suyos\nObjetivos: Proteger la posada',
+    );
+    expect(user).not.toContain('mapa de las cuevas');
+  });
+
+  it('solo en combate, para PNJ que pelean, y solo las pide el máster', async () => {
+    const { master, ana, campaign, kael: sheet } = await table();
+    const url = await openGame(master, campaign.id);
+    const noCombat = await master.post(`${url}/combat/tactics`, { combatantId: sheet.id });
+    expect(noCombat.statusCode).toBe(409);
+    expect(noCombat.json().error).toBe('No hay ningún combate en juego');
+
+    const order = await combatOn(master, url, [
+      { kind: 'character', characterId: sheet.id },
+      { kind: 'npc', name: 'Lobos', profile: 'soldier', count: 2 },
+    ]);
+    const wolves = order.find(({ name }) => name === 'Lobos')!;
+    const notNpc = await master.post(`${url}/combat/tactics`, { combatantId: sheet.id });
+    expect(notNpc.statusCode).toBe(404);
+    expect(notNpc.json().error).toBe('Esos PNJ no están en el combate');
+    expect((await ana.post(`${url}/combat/tactics`, { combatantId: wolves.id })).statusCode).toBe(
+      403,
+    );
+    expect(ollama.requests).toHaveLength(0);
+  });
+});

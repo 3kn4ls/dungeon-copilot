@@ -2193,3 +2193,123 @@ h1 .badge {
   font-family: var(--mono);
   opacity: 0.7;
 }
+
+/* El daño: el golpe de una tirada, cómo se calcula y cómo queda quien lo recibe. */
+.roll-damage {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.damage-form {
+  padding: 10px 12px;
+  border: 1px dashed var(--failure);
+  border-radius: 6px;
+}
+
+.damage-form .field-label:first-child {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.damage-breakdown {
+  margin: 0;
+  font-size: 14px;
+}
+
+.damage-breakdown strong {
+  font-family: var(--mono);
+  font-size: 16px;
+}
+
+.feed-damage {
+  border-left: 4px solid var(--failure);
+}
+
+.feed-damage p {
+  margin: 0;
+}
+
+.lethal {
+  color: var(--fumble);
+  font-weight: 700;
+}
+
+.blow-note {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--failure);
+  background: var(--bg);
+  font-size: 14px;
+}
+
+/* Las escenas y las técnicas que se gastan. */
+.scene-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.abilities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.abilities li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 14px;
+}
+
+.abilities li.spent > span:first-child {
+  color: var(--muted);
+}
+
+/* El equipo, en la ficha y al crear el personaje. */
+.gear-summary {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.gear-summary div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.gear-summary dt {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.gear-summary dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* En la pantalla: cómo van los enemigos, el último golpe y la escena. */
+.screen-harm {
+  margin-left: 8px;
+  font-size: 0.8em;
+  opacity: 0.8;
+}
+
+.screen-blow {
+  margin: 0;
+  font-weight: 600;
+}
+
+.screen-scene {
+  margin: 0;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8em;
+}

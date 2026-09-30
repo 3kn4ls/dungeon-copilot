@@ -314,6 +314,34 @@ describe('tiradas en la partida', () => {
     expect(mental.notes).toEqual([]);
   });
 
+  it('la armadura pesada da desventaja en Sigilo y Acrobacias, y lo explica', async () => {
+    const { master, ana, campaign, kael } = await table();
+    const { url } = await openGame(master, campaign.id);
+    await ana.patch(`/api/characters/${kael.id}`, {
+      gear: { melee: { name: 'Mandoble', weapon: 'heavy' }, armor: 'heavy', shield: false },
+    });
+
+    loadDice(6, 5, 2);
+    const sneaking = (
+      await ana.post(`${url}/rolls`, {
+        actor: { kind: 'character', characterId: kael.id, skill: 'stealth' },
+        target: { kind: 'difficulty', difficulty: 10 },
+      })
+    ).json().event.roll;
+    expect(sneaking.result.roller.dice).toMatchObject({ kept: [2, 5], edge: 'disadvantage' });
+    expect(sneaking.notes).toEqual(['Kael tira con desventaja por su armadura pesada']);
+
+    loadDice(3, 4);
+    const climbing = (
+      await ana.post(`${url}/rolls`, {
+        actor: { kind: 'character', characterId: kael.id, skill: 'athletics' },
+        target: { kind: 'difficulty', difficulty: 10 },
+      })
+    ).json().event.roll;
+    expect(climbing.result.roller.dice.edge).toBe('none');
+    expect(climbing.notes).toEqual([]);
+  });
+
   it('el máster tira por un PNJ contra la defensa de un personaje, también en secreto', async () => {
     const { master, ana, campaign, kael } = await table();
     const { url } = await openGame(master, campaign.id);

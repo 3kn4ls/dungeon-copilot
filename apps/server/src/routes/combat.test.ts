@@ -466,3 +466,73 @@ describe('las intervenciones en combate', () => {
     await created(bruno.post(`${url}/interventions`, { ...spell, characterId: mira.id }));
   });
 });
+
+describe('las tiradas de combate', () => {
+  it('dicen quién ataca a quién, también las que se piden al jugador', async () => {
+    const tableState = await table();
+    const { master, ana, kael, url } = tableState;
+    const order = await fight(tableState);
+    const banditsId = order[1]!.id;
+    const blow = { attackerId: banditsId, defenderId: kael.id };
+    const defense = {
+      actor: { kind: 'free', label: '3 bandidos', bonus: 2 },
+      target: {
+        kind: 'opposed',
+        opponent: { kind: 'character', characterId: kael.id, skill: 'melee-weapons' },
+      },
+      situation: 'melee',
+      blow,
+    };
+    const names = {
+      attacker: { id: banditsId, name: '3 bandidos' },
+      defender: { id: kael.id, name: 'Kael' },
+    };
+
+    loadDice(3, 3, 4, 4);
+    expect(await created(master.post(`${url}/rolls`, defense))).toMatchObject({
+      roll: { blow: names },
+    });
+
+    // Pedida al jugador: se sabe al pedirla y la tirada lo guarda.
+    const asked = await created(master.post(`${url}/roll-requests`, { roll: defense }));
+    expect(asked).toMatchObject({ kind: 'rollRequest', preview: { blow: names } });
+    loadDice(5, 5, 2, 2);
+    expect(await created(ana.post(`${url}/roll-requests/${asked.id}/roll`, {}))).toMatchObject({
+      roll: { blow: names, requested: asked.id },
+    });
+
+    const nobody = await master.post(`${url}/rolls`, {
+      ...defense,
+      blow: { attackerId: banditsId, defenderId: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d' },
+    });
+    expect(nobody.statusCode).toBe(404);
+    expect(nobody.json().error).toBe('Quien eliges no está en el combate');
+  });
+
+  it('sin combate, una tirada no puede decir quién ataca a quién', async () => {
+    const { master, kael, url } = await table();
+    const response = await master.post(`${url}/rolls`, {
+      actor: { kind: 'character', characterId: kael.id, skill: 'melee-weapons' },
+      target: { kind: 'difficulty', difficulty: 10 },
+      blow: { attackerId: kael.id, defenderId: kael.id },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe('No hay ningún combate en juego');
+  });
+
+  it('un grupo de enemigos dice cuántos son', async () => {
+    const { master, kael, url } = await table();
+    loadDice(3, 3, 3, 3);
+    const started = await created(
+      master.post(`${url}/combat`, {
+        combatants: [
+          character(kael.id),
+          { kind: 'npc', name: 'Matones', profile: 'minion', count: 3 },
+        ],
+      }),
+    );
+    expect(started).toMatchObject({
+      order: [{ name: 'Kael' }, { name: 'Matones', count: 3 }],
+    });
+  });
+});

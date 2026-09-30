@@ -6,7 +6,6 @@ import {
   recoverSeverity,
   scratchBoxes,
   validateNewCharacter,
-  type CharacterBuild,
 } from '@dungeon-copilot/rules';
 import {
   advanceSchema,
@@ -24,6 +23,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../context';
 import type { Database, Executor } from '../db';
 import { campaignMembers, characters, users } from '../db/schema';
+import { characterBuild, type CharacterRow } from '../games/events';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, memberRole, requireMember } from './access';
 import { requireUser } from './auth';
@@ -32,7 +32,6 @@ interface IdParams {
   id: string;
 }
 
-type CharacterRow = typeof characters.$inferSelect;
 type CharacterChanges = Partial<
   Pick<
     typeof characters.$inferInsert,
@@ -43,22 +42,13 @@ type CharacterChanges = Partial<
     | 'advancedSkills'
     | 'scratches'
     | 'severity'
+    | 'gear'
     | 'luck'
     | 'xp'
   >
 >;
 
 const CHARACTER_NOT_FOUND = 'Ese personaje no existe o no es de tus campañas';
-
-function toBuild(row: CharacterRow): CharacterBuild {
-  return {
-    name: row.name,
-    background: row.background,
-    attributes: row.attributes,
-    skills: row.skills,
-    advancedSkills: row.advancedSkills,
-  };
-}
 
 /** Fichas visibles para `viewer`: solo las de campañas en las que participa. */
 async function findCharacters(
@@ -97,8 +87,9 @@ async function findCharacters(
     wounds: {
       scratches: row.scratches,
       severity: row.severity,
-      scratchBoxes: scratchBoxes(toBuild(row)),
+      scratchBoxes: scratchBoxes(characterBuild(row)),
     },
+    gear: row.gear,
     luck: row.luck,
     xp: row.xp,
     createdAt: row.createdAt.toISOString(),
@@ -164,7 +155,7 @@ export function registerCharacterRoutes(app: FastifyInstance, { db }: AppContext
     const user = requireUser(request);
     const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
     await requireMember(db, campaignId, user);
-    const build = parseBody(createCharacterSchema, request.body, 'Revisa la ficha');
+    const { gear, ...build } = parseBody(createCharacterSchema, request.body, 'Revisa la ficha');
     const issues = validateNewCharacter(build);
     if (issues.length > 0) {
       throw new HttpError(400, 'La ficha no cumple las reglas de creación', issues);
@@ -172,7 +163,7 @@ export function registerCharacterRoutes(app: FastifyInstance, { db }: AppContext
 
     const [row] = await db
       .insert(characters)
-      .values({ ...build, campaignId, ownerId: user.id, luck: LUCK_PER_SESSION })
+      .values({ ...build, gear, campaignId, ownerId: user.id, luck: LUCK_PER_SESSION })
       .returning({ id: characters.id });
     if (!row) throw new Error('La base de datos no devolvió el personaje creado');
     return reply.status(201).send({ character: await findCharacter(db, user, row.id) });
@@ -202,7 +193,7 @@ export function registerCharacterRoutes(app: FastifyInstance, { db }: AppContext
   app.post<{ Params: IdParams }>('/api/characters/:id/damage', async (request) => {
     const { amount } = parseBody(damageSchema, request.body, 'Revisa el daño');
     const { character, result } = await changeCharacter(db, request, 'edit', (row) => {
-      const damage = applyDamage(row, amount, scratchBoxes(toBuild(row)));
+      const damage = applyDamage(row, amount, scratchBoxes(characterBuild(row)));
       return { changes: damage.state, result: damage.lethal };
     });
     return { character, lethal: result ?? false } satisfies DamageResponse;
@@ -230,7 +221,7 @@ export function registerCharacterRoutes(app: FastifyInstance, { db }: AppContext
   app.post<{ Params: IdParams }>('/api/characters/:id/advances', async (request) => {
     const advance = parseBody(advanceSchema, request.body, 'Revisa la mejora');
     const { character } = await changeCharacter(db, request, 'edit', (row) => {
-      const plan = planAdvance(toBuild(row), advance);
+      const plan = planAdvance(characterBuild(row), advance);
       if (!plan.ok) {
         throw new HttpError(
           400,

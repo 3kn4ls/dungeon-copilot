@@ -1,0 +1,1 @@
+ALTER TABLE "characters" ADD COLUMN "gear" jsonb DEFAULT '{"melee":{"name":"","weapon":"medium"},"ranged":null,"armor":"none","shield":false}'::jsonb NOT NULL;

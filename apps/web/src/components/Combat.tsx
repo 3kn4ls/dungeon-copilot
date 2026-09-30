@@ -2,9 +2,11 @@ import {
   NPC_PROFILES,
   NPC_PROFILE_IDS,
   SEVERITY_LABELS,
+  UNHARMED,
   type NpcProfile,
 } from '@dungeon-copilot/rules';
 import {
+  groupSize,
   nextTurn,
   turnOf,
   type CharacterView,
@@ -16,14 +18,37 @@ import {
   type InterventionEvent,
   type NpcCombatant,
   type NpcView,
+  type SpentAbilities,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { refreshCharacters, useStoreGameEvent } from '../queries';
+import { EnemyTactics } from './CombatIdeas';
+import { ManualDamage } from './Damage';
 import { AnsweringNote } from './Interventions';
 import { profileText } from './Npcs';
-import { ConfirmButton, ErrorNote } from './ui';
+import { ConfirmButton, ErrorNote, Stepper } from './ui';
+
+/** Si a unos PNJ les queda alguien en pie. */
+const standing = (combat: Combat, combatant: NpcCombatant) =>
+  (combat.harm[combatant.id]?.down ?? 0) < groupSize(combatant);
+
+/**
+ * Cómo van unos PNJ: cuántos quedan en pie si son un grupo y, si están heridos, cuánto llevan (el
+ * máster) o solo que lo están (la mesa). Vacío si no han recibido ningún golpe.
+ */
+export function harmText(combat: Combat, combatant: NpcCombatant, master: boolean): string {
+  const harm = combat.harm[combatant.id] ?? UNHARMED;
+  const count = groupSize(combatant);
+  const standing = count - harm.down;
+  if (standing <= 0) return count === 1 ? 'Ha caído' : 'Han caído todos';
+  const { toughness } = NPC_PROFILES[combatant.profile];
+  const hurt = harm.damage === 0 ? '' : master ? `lleva ${harm.damage} de ${toughness}` : 'herido';
+  if (count === 1) return hurt && hurt.charAt(0).toUpperCase() + hurt.slice(1);
+  const group = `${standing} de ${count} en pie`;
+  return hurt ? `${group} · el siguiente, ${hurt}` : group;
+}
 
 /**
  * El orden de iniciativa, con a quién le toca. El máster ve además el perfil de los PNJ y, con
@@ -60,6 +85,9 @@ export function CombatOrder({
             <span className="combatant-name">{combatant.name}</span>
             {master && combatant.kind === 'npc' && (
               <span className="muted">{NPC_PROFILES[combatant.profile].label}</span>
+            )}
+            {combatant.kind === 'npc' && harmText(combat, combatant, master) && (
+              <span className="badge">{harmText(combat, combatant, master)}</span>
             )}
             {sheet && sheet.wounds.severity !== 'none' && (
               <span className="badge">{SEVERITY_LABELS[sheet.wounds.severity]}</span>
@@ -136,16 +164,19 @@ interface EnemyDraft {
   key: number;
   name: string;
   profile: NpcProfile;
+  /** Cuántos son: cada uno aguanta lo de su perfil. */
+  count: number;
   npcId?: string | undefined;
 }
 
 let enemyCount = 0;
-const newEnemy = (): EnemyDraft => ({ key: enemyCount++, name: '', profile: 'soldier' });
+const newEnemy = (): EnemyDraft => ({ key: enemyCount++, name: '', profile: 'soldier', count: 1 });
 
-const enemyRequest = ({ name, profile, npcId }: EnemyDraft): CombatantRequest => ({
+const enemyRequest = ({ name, profile, count, npcId }: EnemyDraft): CombatantRequest => ({
   kind: 'npc',
   name,
   profile,
+  count,
   npcId,
 });
 
@@ -233,11 +264,20 @@ function CombatantsPicker(props: {
                       aria-label={`${label}: nombre`}
                       required
                       maxLength={80}
-                      placeholder="3 bandidos"
+                      placeholder="Bandidos"
                       value={enemy.name}
                       onChange={(event) => change(enemy.key, { name: event.target.value })}
                     />
                   )}
+                  <Stepper
+                    label={`${label}: cuántos`}
+                    hideLabel
+                    value={enemy.count}
+                    min={1}
+                    max={20}
+                    format={(count) => (count === 1 ? 'Uno' : `${count}`)}
+                    onChange={(count) => change(enemy.key, { count })}
+                  />
                   <div className="chips" role="group" aria-label={`${label}: perfil`}>
                     {NPC_PROFILE_IDS.map((profile) => (
                       <button
@@ -273,7 +313,8 @@ function CombatantsPicker(props: {
           </button>
         </div>
         <span className="hint">
-          Un grupo («3 bandidos») tira la iniciativa una vez, con la Destreza de su perfil.
+          Un grupo (tres bandidos) tira la iniciativa una vez, con la Destreza de su perfil, pero
+          cada uno aguanta lo suyo: cada golpe alcanza a uno.
         </span>
       </div>
     </>
@@ -360,16 +401,18 @@ export function StartCombat(props: {
 
 /**
  * El combate, para el máster: el orden y a quién le toca, sacar a quien cae o huye, atacar con
- * los PNJ en su turno y pasar el turno.
+ * los PNJ en su turno (con ideas de la IA, si la hay), aplicar daño a mano y pasar el turno.
  */
 export function CombatTracker(props: {
   game: GameDetail;
   combat: Combat;
   characters: CharacterView[];
+  spent: SpentAbilities;
+  ai: boolean;
   /** Los PNJ a los que les toca atacan a un personaje: se prepara la tirada. */
   onAttack: (enemy: NpcCombatant, target: CharacterView) => void;
 }) {
-  const { game, combat, characters, onAttack } = props;
+  const { game, combat, characters, spent, ai, onAttack } = props;
   const storeEvent = useStoreGameEvent(game.id);
   const pass = useEndTurn(game, combat);
   const leave = useMutation({
@@ -404,7 +447,7 @@ export function CombatTracker(props: {
           )
         }
       />
-      {current.kind === 'npc' && targets.length > 0 && (
+      {current.kind === 'npc' && standing(combat, current) && targets.length > 0 && (
         <div className="enemy-turn">
           <span className="field-label" id="enemy-turn-label">
             Le toca a {current.name}. Atacar a:
@@ -425,8 +468,12 @@ export function CombatTracker(props: {
             Se prepara en Tirar: {current.name} contra la defensa del personaje, que tira su
             jugador.
           </span>
+          {ai && (
+            <EnemyTactics key={`${combat.round}:${combat.turn}`} game={game} enemy={current} />
+          )}
         </div>
       )}
+      <ManualDamage game={game} combat={combat} characters={characters} spent={spent} />
       <div className="actions">
         <button
           type="button"

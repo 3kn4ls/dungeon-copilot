@@ -65,3 +65,46 @@ export function npcBonus(profile: NpcProfile, inSpecialty = true): number {
 export function npcIsDown(profile: NpcProfile, damageTaken: number): boolean {
   return damageTaken >= NPC_PROFILES[profile].toughness;
 }
+
+/**
+ * Cómo va un grupo de PNJ del mismo perfil (o uno solo): cuántos han caído y el daño que lleva el
+ * que sigue peleando.
+ */
+export interface NpcHarm {
+  down: number;
+  damage: number;
+}
+
+export const UNHARMED: NpcHarm = { down: 0, damage: 0 };
+
+/** Lo que pasa cuando unos PNJ reciben un golpe. */
+export interface NpcDamage {
+  harm: NpcHarm;
+  /** Cae uno con este golpe. */
+  fell: boolean;
+  /** Ya no queda ninguno en pie. */
+  out: boolean;
+}
+
+/**
+ * Un impacto a un grupo de PNJ alcanza a uno solo: cae al llegar a lo que aguanta su perfil, y el
+ * daño que sobra no pasa al siguiente. `count` es cuántos son.
+ */
+export function damageNpcs(
+  profile: NpcProfile,
+  count: number,
+  harm: NpcHarm,
+  amount: number,
+): NpcDamage {
+  if (!Number.isInteger(amount) || amount < 0) {
+    throw new Error(`El daño debe ser un entero no negativo, llegó ${amount}`);
+  }
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`Un grupo tiene al menos uno, llegó ${count}`);
+  }
+  if (harm.down >= count) throw new Error('No queda ninguno en pie');
+  const damage = harm.damage + amount;
+  const fell = npcIsDown(profile, damage);
+  const next = fell ? { down: harm.down + 1, damage: 0 } : { down: harm.down, damage };
+  return { harm: next, fell, out: next.down >= count };
+}

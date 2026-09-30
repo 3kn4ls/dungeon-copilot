@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { registerRequestSchema, usernameSchema } from './auth';
 import { joinCampaignSchema, updateCampaignSchema } from './campaigns';
-import { advanceSchema, awardXpSchema, updateCharacterSchema } from './characters';
+import {
+  advanceSchema,
+  awardXpSchema,
+  createCharacterSchema,
+  updateCharacterSchema,
+} from './characters';
 import {
   complicationsSchema,
   gameRollSchema,
   ideasSchema,
+  narrationSchema,
   openGameSchema,
   revealDraftSchema,
   revealSchema,
   speechSchema,
+  tacticsSchema,
 } from './games';
 import { TALK_MEMORY, generateNpcSchema, npcSchema, talkSchema, updateNpcSchema } from './npcs';
 
@@ -53,6 +60,24 @@ describe('fichas', () => {
     expect(updateCharacterSchema.safeParse({}).success).toBe(false);
   });
 
+  it('sin decir lo que lleva, un personaje lleva un arma media', () => {
+    const build = {
+      name: 'Kael',
+      attributes: { strength: 4, dexterity: 3, charisma: 1, intelligence: 2, endurance: 2 },
+    };
+    expect(createCharacterSchema.parse(build).gear).toEqual({
+      melee: { name: '', weapon: 'medium' },
+      ranged: null,
+      armor: 'none',
+      shield: false,
+    });
+    const gear = { melee: { name: 'Mandoble', weapon: 'heavy' }, armor: 'heavy', shield: true };
+    expect(updateCharacterSchema.parse({ gear })).toEqual({
+      gear: { ...gear, ranged: null },
+    });
+    expect(updateCharacterSchema.safeParse({ gear: { armor: 'light' } }).success).toBe(false);
+  });
+
   it('dar 0 PX no tiene sentido; quitar sí se puede', () => {
     expect(awardXpSchema.safeParse({ amount: 0 }).success).toBe(false);
     expect(awardXpSchema.parse({ amount: -2 })).toEqual({ amount: -2 });
@@ -90,6 +115,18 @@ describe('partidas', () => {
     expect(gameRollSchema.safeParse(opposed).success).toBe(false);
   });
 
+  it('en combate, una tirada puede decir quién ataca a quién', () => {
+    const actor = { kind: 'character', characterId: '5f0c3b7e-9a2d-4c1e-8b6f-0a3d2c1b4e5f' };
+    const target = { kind: 'difficulty', difficulty: 10 };
+    const blow = {
+      attackerId: '5f0c3b7e-9a2d-4c1e-8b6f-0a3d2c1b4e5f',
+      defenderId: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+    };
+    expect(gameRollSchema.parse({ actor, target, blow }).blow).toEqual(blow);
+    const half = gameRollSchema.safeParse({ actor, target, blow: { attackerId: blow.attackerId } });
+    expect(half.error?.issues.map((issue) => issue.message)).toEqual(['Di a quién ataca']);
+  });
+
   it('para describir una escena, la IA necesita unas notas o al menos el título', () => {
     expect(revealDraftSchema.parse({ notes: ' posada, de noche ' })).toEqual({
       title: '',
@@ -107,6 +144,13 @@ describe('partidas', () => {
   it('las complicaciones no necesitan saber qué se intentaba', () => {
     expect(complicationsSchema.parse({})).toEqual({ intent: '' });
     expect(complicationsSchema.safeParse({ intent: 'a'.repeat(301) }).success).toBe(false);
+  });
+
+  it('para narrar un golpe o qué hacen los PNJ, lo que busca el máster es opcional', () => {
+    expect(narrationSchema.parse({})).toEqual({ hint: '' });
+    const combatantId = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+    expect(tacticsSchema.parse({ combatantId })).toEqual({ combatantId, hint: '' });
+    expect(tacticsSchema.safeParse({ hint: 'huir' }).success).toBe(false);
   });
 
   it('las ideas para seguir no necesitan saber qué busca el máster', () => {

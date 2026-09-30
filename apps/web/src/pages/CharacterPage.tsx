@@ -15,12 +15,14 @@ import {
   type Advance,
   type Attribute,
   type CharacterBuild,
+  type Gear,
 } from '@dungeon-copilot/rules';
 import type { CharacterView, DamageResponse } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
+import { GearEditor, GearSummary } from '../components/Gear';
 import { ConfirmButton, ErrorNote, QueryState, Stepper, useDocumentTitle } from '../components/ui';
 import { keys, useCampaign, useCharacter, useStoreCharacter } from '../queries';
 import { requirementText, signed } from '../rules-text';
@@ -54,7 +56,7 @@ function rollLink(
   return `/tirador?${params}`;
 }
 
-type Panel = 'wounds' | 'luck' | 'xp' | 'advances' | 'identity';
+type Panel = 'wounds' | 'luck' | 'xp' | 'advances' | 'identity' | 'gear';
 
 /** Todas las acciones de la ficha comparten estado: una a la vez, y el error sale en su panel. */
 function useSheetActions() {
@@ -111,6 +113,7 @@ export function CharacterPage() {
         </div>
         <div className="side">
           <Wounds sheet={sheet} actions={actions} />
+          <Equipment sheet={sheet} actions={actions} />
           <Luck sheet={sheet} actions={actions} />
           <Experience sheet={sheet} actions={actions} />
         </div>
@@ -368,6 +371,49 @@ function Wounds({ sheet, actions }: { sheet: CharacterView; actions: SheetAction
           <ErrorNote error={actions.errorFor('wounds')} />
         </>
       )}
+    </section>
+  );
+}
+
+/** Lo que lleva para pelear: sale por defecto al atacar, parar y recibir un golpe. */
+function Equipment({ sheet, actions }: { sheet: CharacterView; actions: SheetActions }) {
+  const [draft, setDraft] = useState<Gear | null>(null);
+  return (
+    <section className="panel" aria-labelledby="gear-heading">
+      <h2 id="gear-heading">Equipo</h2>
+      {draft ? (
+        <form
+          className="stack tight"
+          onSubmit={(event) => {
+            event.preventDefault();
+            actions.run('gear', async () => {
+              const character = await api.updateCharacter(sheet.id, { gear: draft });
+              setDraft(null);
+              return character;
+            });
+          }}
+        >
+          <GearEditor value={draft} onChange={setDraft} />
+          <div className="actions">
+            <button type="submit" className="button primary small" disabled={actions.pending}>
+              Guardar
+            </button>
+            <button type="button" className="button small" onClick={() => setDraft(null)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <GearSummary gear={sheet.gear} />
+          {sheet.canEdit && (
+            <button type="button" className="link-button" onClick={() => setDraft(sheet.gear)}>
+              Cambiar el equipo
+            </button>
+          )}
+        </>
+      )}
+      <ErrorNote error={actions.errorFor('gear')} />
     </section>
   );
 }

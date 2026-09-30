@@ -1,17 +1,27 @@
 import {
+  ARMOR_CLASSES,
   NPC_PROFILES,
   NPC_PROFILE_IDS,
   OUTCOME_GUIDES,
   OUTCOME_LABELS,
+  SEVERITIES,
+  SEVERITY_LABELS,
   SITUATION_LABELS,
   needsComplication,
+  weaponLabel,
   type ComplicationOutcome,
+  type Gear,
+  type NpcHarm,
+  type NpcProfile,
+  type Severity,
 } from '@dungeon-copilot/rules';
 import {
   NPC_LIMITS,
   RECAP_MAX,
   REVEAL_MAX,
+  groupLabel,
   rerollerLabel,
+  type Combatant,
   type GameEventPayload,
   type GameRoll,
   type GameRollSide,
@@ -411,12 +421,45 @@ const listText = (names: string[]) =>
   new Intl.ListFormat('es', { style: 'long', type: 'conjunction' }).format(names);
 
 /** Quién empieza a pelear: los personajes contra los PNJ, o entre ellos si no hay PNJ. */
-function fightText(order: { kind: 'character' | 'npc'; name: string }[]): string {
+function fightText(order: Combatant[]): string {
   const side = (kind: 'character' | 'npc') =>
-    listText(order.filter((combatant) => combatant.kind === kind).map(({ name }) => name));
+    listText(order.filter((combatant) => combatant.kind === kind).map(groupLabel));
   return order.some((combatant) => combatant.kind === 'npc')
     ? `Empieza un combate: ${side('character')} contra ${side('npc')}.`
     : `Empieza un combate entre ${side('character')}.`;
+}
+
+const SEVERITY_TEXTS: Record<Exclude<Severity, 'none'>, string> = {
+  wounded: 'queda herido',
+  grave: 'queda malherido',
+  down: 'queda fuera de combate',
+};
+
+/**
+ * Un golpe contado en una frase, sin reglas: «Golpe de Kael a Garrick (4 de daño): cae», «Golpe
+ * de Garrick a Kael (2 de daño): queda herido».
+ */
+export function damageText(event: GameEventPayload & { kind: 'damage' }): string {
+  const { target, amount } = event;
+  const how = [`${amount} de daño`, event.dodged ? 'con Esquiva prodigiosa' : '']
+    .filter(Boolean)
+    .join(', ');
+  const hit = `Golpe${event.by ? ` de ${event.by.name}` : ''} a ${target.name} (${how})`;
+  if (target.kind === 'npc') {
+    if (!target.fell) return `${hit}.`;
+    if (target.count === 1) return `${hit}: cae.`;
+    const standing = target.count - target.harm.down;
+    return standing === 0
+      ? `${hit}: caen todos.`
+      : `${hit}: cae uno y ${standing === 1 ? 'queda 1' : `quedan ${standing}`}.`;
+  }
+  const worse =
+    SEVERITIES.indexOf(target.after.severity) > SEVERITIES.indexOf(target.before.severity);
+  const state =
+    worse && target.after.severity !== 'none' ? SEVERITY_TEXTS[target.after.severity] : '';
+  const lethal = target.lethal ? 'golpe mortal' : '';
+  const tail = [state, lethal].filter(Boolean).join(', ');
+  return tail ? `${hit}: ${tail}.` : `${hit}.`;
 }
 
 /** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
@@ -445,13 +488,21 @@ function logLine(event: GameEventPayload): { text: string; weight: number } | nu
       return { text: `- ${fightText(event.order)}`, weight: 1 };
     case 'combatJoined':
       return {
-        text: `- Se unen al combate: ${listText(event.joined.map(({ name }) => name))}.`,
+        text: `- Se unen al combate: ${listText(event.joined.map(groupLabel))}.`,
         weight: 1,
       };
     case 'combatLeft':
       return { text: `- Sale del combate: ${event.left.name}.`, weight: 1 };
     case 'combatEnded':
       return { text: '- Termina el combate.', weight: 1 };
+    case 'damage':
+      return { text: `- ${damageText(event)}`, weight: 1 };
+    case 'survived':
+      return { text: `- ${event.name} gasta un punto de Suerte y sigue con vida.`, weight: 1 };
+    case 'scene':
+      return { text: `- Empieza una escena: ${event.title}.`, weight: 2 };
+    case 'ability':
+      return { text: `- ${event.name} usa ${event.label}.`, weight: 1 };
     case 'reveal': {
       const title = event.title.trim();
       const body = fit(event.body, LOG_LINE_CHARS);
@@ -712,6 +763,157 @@ export function complicationMessages(prompt: ComplicationPrompt): AiMessage[] {
   ];
 }
 
+/** Lo que lleva un personaje para pelear: «Espada larga (media), armadura ligera». */
+function gearText(gear: Gear): string {
+  return [
+    weaponLabel(gear.melee),
+    gear.ranged ? weaponLabel(gear.ranged) : '',
+    gear.armor === 'none' ? '' : `armadura ${ARMOR_CLASSES[gear.armor].label.toLowerCase()}`,
+    gear.shield ? 'escudo' : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** Lo que lleva un personaje, en una línea: «- Kael: Espada larga (media), armadura ligera». */
+export const gearLine = (name: string, gear: Gear) => `- ${name}: ${gearText(gear)}`;
+
+export interface BlowPrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  /** Lo último que ha enseñado el máster, de lo más antiguo a lo más reciente. */
+  scenes: PromptScene[];
+  /** El título de la escena en juego, si el máster ha empezado alguna. */
+  scene?: string | undefined;
+  /** Una tirada de combate: cuerpo a cuerpo o a distancia. */
+  roll: GameRoll;
+  /** Lo que llevan los personajes que pelean en ella (ver gearLine). */
+  gear: string[];
+  /** Los golpes que ha dejado la tirada, ya aplicados, contados en una frase (ver damageText). */
+  blows: string[];
+  /** Lo que quiere destacar el máster, si lo dice. */
+  hint: string;
+}
+
+/** La escena en juego, si tiene título. */
+const sceneLine = (scene: string | undefined) =>
+  scene?.trim() ? `Escena en juego: ${scene.trim()}` : '';
+
+/** Mensajes para que el modelo proponga cómo contar el golpe de una tirada de combate. */
+export function blowMessages(prompt: BlowPrompt): AiMessage[] {
+  const { roll } = prompt;
+  const system = [
+    'Ayudas a un máster de rol a narrar un combate. Con una tirada de combate y lo que ha causado, propones tres maneras de contar lo que pasa, en español, para que el máster elija una y la lea a la mesa.',
+    [
+      '- Cada una en una o dos frases, en presente, viva y concreta: el movimiento, el arma, el sonido, la reacción.',
+      '- Respeta el resultado: si falla, no impacta; si impacta, cuenta el golpe; si alguien cae, cae; si queda malherido, que se note. Sin números, dados ni reglas.',
+      `- Lo que dice el reglamento de este resultado: ${OUTCOME_GUIDES[roll.situation][roll.result.outcome]}`,
+      '- Que sean distintas: por ejemplo, una centrada en el golpe, otra en quien lo recibe y otra en lo que pasa alrededor.',
+      '- No decidas lo que sienten, piensan o harán después los personajes de los jugadores.',
+      '- Responde solo con un JSON así: {"ideas": ["…", "…", "…"]}',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const party = partyLines(prompt.characters);
+  const hint = fit(prompt.hint, IDEA_HINT_CHARS);
+  const blow = roll.blow ? `${roll.blow.attacker.name} ataca a ${roll.blow.defender.name}.` : '';
+  const user = [
+    campaignBlock(prompt.campaign),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    scenesBlock(prompt.scenes),
+    sceneLine(prompt.scene),
+    [blow, `${rollName(roll)}: ${rollText(roll)}`].filter(Boolean).join('\n'),
+    prompt.gear.length > 0 ? `Con qué pelean:\n${prompt.gear.join('\n')}` : '',
+    prompt.blows.length > 0
+      ? `Lo que ha causado:\n${prompt.blows.map((line) => `- ${line}`).join('\n')}`
+      : '',
+    hint ? `Lo que quiere destacar el máster: ${hint}` : '',
+    'Propón tres maneras de contarlo.',
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
+/** Quien pelea, visto por la IA que lleva a los enemigos. */
+export type PromptFighter =
+  | { kind: 'character'; name: string; severity: Severity; gear: Gear }
+  | { kind: 'npc'; name: string; profile: NpcProfile; count: number; harm: NpcHarm };
+
+/** Cómo va quien pelea, en una línea: «Kael (PJ): herido; Espada larga (media)». */
+function fighterLine(fighter: PromptFighter): string {
+  if (fighter.kind === 'character') {
+    const state = SEVERITY_LABELS[fighter.severity].toLowerCase();
+    return `- ${fighter.name} (PJ): ${state}; lleva ${gearText(fighter.gear)}`;
+  }
+  const profile = NPC_PROFILES[fighter.profile].label.toLowerCase();
+  const standing = fighter.count - fighter.harm.down;
+  let state = fighter.harm.damage > 0 ? 'herido' : 'sin heridas';
+  if (fighter.count > 1) state = `quedan ${standing} de ${fighter.count} en pie`;
+  return `- ${fighter.name} (PNJ, ${profile}): ${state}`;
+}
+
+/** Los PNJ a los que les toca, y lo que sabe el máster de ellos si son de la campaña. */
+export interface PromptActingNpc {
+  fighter: PromptFighter & { kind: 'npc' };
+  concept?: string | undefined;
+  personality?: string | undefined;
+  goals?: string | undefined;
+}
+
+export interface TacticsPrompt {
+  campaign: PromptCampaign;
+  characters: PromptCharacter[];
+  scenes: PromptScene[];
+  scene?: string | undefined;
+  round: number;
+  /** Quien pelea, en el orden de iniciativa. */
+  fighters: PromptFighter[];
+  acting: PromptActingNpc;
+  hint: string;
+}
+
+/** Mensajes para que el modelo proponga qué hacen unos PNJ en su turno de combate. */
+export function tacticsMessages(prompt: TacticsPrompt): AiMessage[] {
+  const { acting } = prompt;
+  const name = acting.fighter.name;
+  const system = [
+    `Ayudas a un máster de rol a llevar a los enemigos en un combate. Le toca a ${name} y propones tres cosas distintas que puede hacer en su turno, en español.`,
+    [
+      '- Cada idea en una o dos frases: qué hace y contra quién, contado para el máster, que lo narra y tira.',
+      '- Que sean distintas: por ejemplo, atacar a alguien concreto (y por qué a él), algo astuto con la escena (el terreno, los objetos, la posición) y una salida si le va mal (retirarse, rendirse, pedir ayuda).',
+      '- Que encajen con lo que es: unos esbirros no pelean como un campeón, y quien está herido o solo piensa en salvarse.',
+      '- No decidas lo que hacen, dicen o sienten los personajes de los jugadores, ni el resultado de las tiradas.',
+      '- Responde solo con un JSON así: {"ideas": ["…", "…", "…"]}',
+    ].join('\n'),
+  ].join('\n\n');
+
+  const party = partyLines(prompt.characters);
+  const hint = fit(prompt.hint, IDEA_HINT_CHARS);
+  const known = describe([
+    ['Concepto', fit(acting.concept ?? '', NPC_CONCEPT_CHARS)],
+    ['Personalidad', fit(acting.personality ?? '', NPC_CONCEPT_CHARS)],
+    ['Objetivos', fit(acting.goals ?? '', NPC_CONCEPT_CHARS)],
+  ]);
+  const user = [
+    campaignBlock(prompt.campaign),
+    party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',
+    scenesBlock(prompt.scenes),
+    sceneLine(prompt.scene),
+    `Ronda ${prompt.round}. Quién pelea y cómo va:\n${prompt.fighters.map(fighterLine).join('\n')}`,
+    [`Le toca a:\n${fighterLine(acting.fighter)}`, ...known].join('\n'),
+    hint ? `Lo que busca el máster: ${hint}` : '',
+    `Propón tres cosas que puede hacer ${name}.`,
+  ].filter(Boolean);
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user.join('\n\n') },
+  ];
+}
+
 const IDEA_HINT_CHARS = 300;
 /** PNJ de la campaña que se le dan a la IA para que pueda sacarlos. */
 export const IDEA_NPCS = 12;
@@ -801,7 +1003,7 @@ export function partialIdeas(text: string): string[] {
 
 /** La etiqueta que a veces pone el modelo delante de una idea: «Encuentro:», «Giro:», «Idea 2:». */
 const IDEA_LABEL =
-  /^(?:encuentro|rumor|pista|giro|precio|peligro|complicaci[oó]n|idea|opci[oó]n)(?:\s+\d+)?\s*:\s*/i;
+  /^(?:encuentro|rumor|pista|giro|precio|peligro|complicaci[oó]n|idea|opci[oó]n|t[aá]ctica|narraci[oó]n|versi[oó]n)(?:\s+\d+)?\s*:\s*/i;
 
 /** Una idea en una línea, sin numeración, viñetas, etiquetas ni negritas. */
 function cleanIdea(idea: string): string {
