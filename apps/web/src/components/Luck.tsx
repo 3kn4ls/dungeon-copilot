@@ -5,9 +5,9 @@ import {
   type GameDetail,
   type GameEvent,
 } from '@dungeon-copilot/shared';
-import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import { keys, useCharacters, useMe, useStoreGameEvent } from '../queries';
+import { refreshCharacters, useCharacters, useMe, useStoreGameEvent } from '../queries';
 import { ConfirmButton, ErrorNote } from './ui';
 
 /** Resultados con los que un bando ya ha ganado la tirada: repetirla no le serviría. */
@@ -15,12 +15,6 @@ const WON: Record<OpposedSide, Outcome[]> = {
   actor: ['success', 'critical'],
   opponent: ['failure', 'fumble'],
 };
-
-/** La Suerte de algún personaje ha cambiado: sus fichas se vuelven a pedir. */
-export function refreshLuck(queryClient: QueryClient, campaignId: string) {
-  void queryClient.invalidateQueries({ queryKey: keys.characters(campaignId) });
-  void queryClient.invalidateQueries({ queryKey: ['characters'] });
-}
 
 /**
  * Repetir una tirada gastando Suerte, bajo la tirada en la sala. Lo ve quien juega con el
@@ -66,10 +60,10 @@ function RerollSide(props: {
     mutationFn: () => api.reroll(game.id, props.eventId, { side: props.side }),
     onSuccess: (event) => {
       storeEvent(event);
-      refreshLuck(queryClient, game.campaignId);
+      refreshCharacters(queryClient, game.campaignId);
     },
     // Otro se ha adelantado, o la Suerte ha cambiado en la ficha: se pide la de ahora.
-    onError: () => refreshLuck(queryClient, game.campaignId),
+    onError: () => refreshCharacters(queryClient, game.campaignId),
   });
   const { luck } = character;
 

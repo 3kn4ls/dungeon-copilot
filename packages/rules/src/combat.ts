@@ -1,6 +1,6 @@
 import type { Attribute } from './attributes';
 import type { CharacterBuild } from './character';
-import { roll2d6, sumDice, type DiceRoll, type Edge, type Random } from './dice';
+import { combineEdges, roll2d6, sumDice, type DiceRoll, type Edge, type Random } from './dice';
 import { isSuccess, type Outcome } from './resolution';
 import { hasPhysicalDisadvantage, type WoundState } from './wounds';
 
@@ -162,7 +162,10 @@ export interface InitiativeRoll {
   total: number;
 }
 
-/** Iniciativa: 2d6 + Destreza. El máster tira una vez por cada grupo de enemigos; los empates, para los PJ. */
+/**
+ * Iniciativa: 2d6 + Destreza, una vez por combate. Cada PJ tira la suya y el máster, una por
+ * cada grupo de enemigos, con la Destreza de su perfil.
+ */
 export function rollInitiative(
   dexterity: number,
   edge: Edge = 'none',
@@ -170,4 +173,38 @@ export function rollInitiative(
 ): InitiativeRoll {
   const dice = roll2d6(edge, random);
   return { dice, total: sumDice(dice.kept) + dexterity };
+}
+
+/**
+ * Cómo tira un PJ la iniciativa: con ventaja si alguien de su bando es Táctico, y con desventaja
+ * por una herida grave (salvo Imparable). Si se juntan las dos, se anulan.
+ */
+export function initiativeEdge(
+  build: CharacterBuild,
+  condition: Condition,
+  tacticianOnSide: boolean,
+): Edge {
+  return combineEdges(
+    tacticianOnSide ? 'advantage' : 'none',
+    ...conditionEdges(build, { attribute: 'dexterity' }, condition),
+  );
+}
+
+/** Lo que cuenta para ordenar a quien pelea. */
+export interface InitiativeEntry {
+  total: number;
+  /** Es un PJ: gana los empates. */
+  character: boolean;
+  /** Entre iguales, actúa antes quien tiene más. */
+  dexterity: number;
+}
+
+/**
+ * Para ordenar el combate: de mayor a menor iniciativa. Los empates, para los PJ; entre dos PJ o
+ * dos grupos empatados, primero el de más Destreza. Si aún empatan, se quedan como estaban.
+ */
+export function compareInitiative(a: InitiativeEntry, b: InitiativeEntry): number {
+  return (
+    b.total - a.total || Number(b.character) - Number(a.character) || b.dexterity - a.dexterity
+  );
 }

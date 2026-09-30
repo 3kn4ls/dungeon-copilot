@@ -31,6 +31,8 @@ export function RequestedRollCard({
 }) {
   const roll = useRollRequested(game, event);
   const odds = rollOdds(event.request, characters);
+  // En una defensa, el personaje se opone: le sale bien si quien ataca falla.
+  const defending = event.preview.actor.characterId !== event.characterId;
   return (
     <div className="requested-roll">
       <p className="requested-title">
@@ -42,7 +44,8 @@ export function RequestedRollCard({
         <p className="bonus">
           {odds ? (
             <>
-              <strong>{percent(successChance(odds))}</strong> de conseguirlo
+              <strong>{percent(defending ? 1 - successChance(odds) : successChance(odds))}</strong>{' '}
+              {defending ? 'de defenderse' : 'de conseguirlo'}
             </>
           ) : (
             ' '

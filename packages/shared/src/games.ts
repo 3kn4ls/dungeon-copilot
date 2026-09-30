@@ -1,6 +1,7 @@
 import { ATTRIBUTES, type OpposedSide, type Situation } from '@dungeon-copilot/rules';
 import { z } from 'zod';
 import type { MemberRole } from './campaigns';
+import type { Combatant, CombatantRef, CombatPosition } from './combat';
 import type { RollResponse } from './rolls';
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */
@@ -28,7 +29,7 @@ export interface CharacterRef {
  * La intervención de un jugador que el máster atiende con esto: deja de esperar. Es el id de
  * su evento.
  */
-const answersSchema = z.number().int().positive().optional();
+export const answersSchema = z.number().int().positive().optional();
 
 /** Solo para este personaje: lo ven el máster y su jugador, nadie más (ni la pantalla). */
 const recipientSchema = z.uuid('Elige un personaje').optional();
@@ -174,9 +175,18 @@ export type GiveFloorRequest = z.input<typeof giveFloorSchema>;
 
 /**
  * Lo que puede hacer un jugador con un botón: hablar en personaje, actuar en la escena,
- * preguntar al máster fuera del personaje («¿hay ventanas?») o atacar.
+ * preguntar al máster fuera del personaje («¿hay ventanas?») o atacar, que empieza una pelea. En
+ * combate, quien pelea ataca cuerpo a cuerpo o a distancia, o lanza un hechizo si sabe Hechicería.
  */
-export const INTERVENTION_INTENTS = ['speak', 'act', 'ask', 'attack'] as const;
+export const INTERVENTION_INTENTS = [
+  'speak',
+  'act',
+  'ask',
+  'attack',
+  'melee',
+  'ranged',
+  'spell',
+] as const;
 export type InterventionIntent = (typeof INTERVENTION_INTENTS)[number];
 
 export const INTERVENTION_LABELS: Record<InterventionIntent, string> = {
@@ -184,6 +194,9 @@ export const INTERVENTION_LABELS: Record<InterventionIntent, string> = {
   act: 'Actuar',
   ask: 'Preguntar',
   attack: 'Atacar',
+  melee: 'Cuerpo a cuerpo',
+  ranged: 'A distancia',
+  spell: 'Hechizo',
 };
 
 /** Tope de lo que escribe un jugador al intervenir. */
@@ -195,7 +208,7 @@ export const INTERVENTION_MAX = 1000;
  */
 export const interventionSchema = z.object({
   characterId: z.uuid('Elige un personaje'),
-  intent: z.enum(INTERVENTION_INTENTS, 'Elige si quieres hablar, actuar, preguntar o atacar'),
+  intent: z.enum(INTERVENTION_INTENTS, 'Elige qué quieres hacer'),
   /** Lo que dice o hace el personaje, si lo escribe; vacío si lo cuenta de palabra. */
   text: z
     .string()
@@ -204,6 +217,8 @@ export const interventionSchema = z.object({
     .default(''),
   /** En secreto: solo la ven el máster y quien la escribe, como pasarle una nota. */
   secret: z.boolean().default(false),
+  /** En combate, contra quién: alguien que pelea. */
+  targetId: z.uuid('Elige contra quién').optional(),
 });
 
 export type InterventionRequest = z.input<typeof interventionSchema>;
@@ -370,13 +385,17 @@ export type GameEventPayload =
     }
   /** El máster da la palabra; con `answers`, atiende así esa intervención. */
   | { kind: 'floor'; floor: Floor; answers?: number }
-  /** Un jugador interviene o pide la palabra con su personaje. Espera a que la atiendan. */
+  /**
+   * Un jugador interviene o pide la palabra con su personaje. Espera a que la atiendan. En
+   * combate, `target` es contra quién va.
+   */
   | {
       kind: 'intervention';
       characterId: string;
       name: string;
       intent: InterventionIntent;
       text: string;
+      target?: CombatantRef;
     }
   /**
    * El máster pide una tirada: la hace el jugador de `characterId`. `request` es la tirada
@@ -391,7 +410,17 @@ export type GameEventPayload =
       answers?: number;
     }
   /** Se cierra una intervención o una tirada pedida sin nada más. */
-  | { kind: 'settled'; of: number; how: SettledHow };
+  | { kind: 'settled'; of: number; how: SettledHow }
+  /** Empieza un combate: quien pelea, de mayor a menor iniciativa. Le toca al primero. */
+  | { kind: 'combatStarted'; order: Combatant[]; answers?: number }
+  /** Pasa el turno: le toca a `combatant`, que está en el sitio `turn` del orden. */
+  | { kind: 'turn'; round: number; turn: number; combatant: CombatantRef }
+  /** Se unen al combate con su iniciativa, y así queda. */
+  | ({ kind: 'combatJoined'; joined: Combatant[]; answers?: number } & CombatPosition)
+  /** Sale del combate alguien que cae o huye, y así queda. */
+  | ({ kind: 'combatLeft'; left: CombatantRef } & CombatPosition)
+  /** Termina el combate en la ronda `rounds`. `recovered`: quienes recuperan el aliento. */
+  | { kind: 'combatEnded'; rounds: number; recovered: CharacterRef[] };
 
 export type GameEventKind = GameEventPayload['kind'];
 
@@ -454,16 +483,11 @@ export function supersededRolls(events: readonly GameEvent[]): Set<number> {
 export type InterventionEvent = GameEvent & { kind: 'intervention' };
 export type RollRequestEvent = GameEvent & { kind: 'rollRequest' };
 
-/** Quién tiene la palabra tras estos eventos: a quien se la dio el máster la última vez. */
-export function currentFloor(events: readonly GameEvent[]): Floor {
-  const last = events.findLast((event) => event.kind === 'floor');
-  return last?.kind === 'floor' ? last.floor : { kind: 'master' };
-}
-
 /**
  * Lo que ya no espera y cómo acabó: las intervenciones que ha atendido el máster (dando la
- * palabra, pidiendo una tirada, con una frase, una descripción o sin más), a las que ha dicho
- * «ahora no» o que se han retirado, y las tiradas pedidas que ya se han hecho o retirado.
+ * palabra, pidiendo una tirada, con una frase, una descripción, con un combate o sin más), a las
+ * que ha dicho «ahora no» o que se han retirado, y las tiradas pedidas que ya se han hecho o
+ * retirado.
  */
 export function settledEvents(events: readonly GameEvent[]): Map<number, SettledHow> {
   const settled = new Map<number, SettledHow>();
@@ -482,6 +506,8 @@ export function settledEvents(events: readonly GameEvent[]): Map<number, Settled
       case 'reveal':
       case 'speech':
       case 'rollRequest':
+      case 'combatStarted':
+      case 'combatJoined':
         settle(event.answers, 'answered');
         break;
     }

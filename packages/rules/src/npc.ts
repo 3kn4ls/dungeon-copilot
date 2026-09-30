@@ -9,6 +9,11 @@ export interface NpcProfileInfo {
   label: string;
   /** Bonificador en su especialidad (combate, sigilo, magia...). */
   bonus: number;
+  /**
+   * Su Destreza: la mitad del bonificador. Con ella tira la iniciativa y es la que cuenta para
+   * dispararle.
+   */
+  dexterity: number;
   /** Casillas de daño que aguanta antes de caer. */
   toughness: number;
   /** Daño de su ataque habitual. */
@@ -20,6 +25,7 @@ export const NPC_PROFILES: Record<NpcProfile, NpcProfileInfo> = {
   minion: {
     label: 'Esbirro',
     bonus: 2,
+    dexterity: 1,
     toughness: 1,
     damage: 1,
     description: 'Matones, bandidos, bestias menores. Caen al primer impacto.',
@@ -27,6 +33,7 @@ export const NPC_PROFILES: Record<NpcProfile, NpcProfileInfo> = {
   soldier: {
     label: 'Soldado',
     bonus: 4,
+    dexterity: 2,
     toughness: 3,
     damage: 2,
     description: 'Guardias, mercenarios, lobos.',
@@ -34,6 +41,7 @@ export const NPC_PROFILES: Record<NpcProfile, NpcProfileInfo> = {
   veteran: {
     label: 'Veterano',
     bonus: 6,
+    dexterity: 3,
     toughness: 4,
     damage: 2,
     description: 'Capitanes, asesinos, bestias grandes.',
@@ -41,6 +49,7 @@ export const NPC_PROFILES: Record<NpcProfile, NpcProfileInfo> = {
   champion: {
     label: 'Campeón',
     bonus: 8,
+    dexterity: 4,
     toughness: 6,
     damage: 3,
     description: 'Un rival para todo el grupo: campeones, monstruos, hechiceros.',

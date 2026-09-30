@@ -11,20 +11,24 @@ import {
   defaultSkillCatalog,
   needsComplication,
   opposedOdds,
+  rangedDifficulty,
   successChance,
   testOdds,
   type DifficultyLevel,
   type Edge,
+  type Range,
   type Situation,
 } from '@dungeon-copilot/rules';
 import {
   GAME_STATUS_LABELS,
+  currentCombat,
   currentFloor,
   gameName,
   pendingInterventions,
   pendingRollRequests,
   settledEvents,
   supersededRolls,
+  turnOf,
   type AskRollRequest,
   type CharacterView,
   type GameDetail,
@@ -33,7 +37,6 @@ import {
   type GameState,
   type GameSummary,
   type InterventionEvent,
-  type InterventionIntent,
   type NpcView,
   type SettledHow,
 } from '@dungeon-copilot/shared';
@@ -42,6 +45,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
+import {
+  CombatOrder,
+  CombatTracker,
+  EndCombat,
+  EndTurn,
+  JoinCombat,
+  StartCombat,
+  TurnStatus,
+} from '../components/Combat';
 import { Complications } from '../components/Complications';
 import { FloorControl, FloorStatus, holdsFloor } from '../components/Floor';
 import { EventCard } from '../components/GameEvents';
@@ -50,9 +62,9 @@ import {
   AnsweringNote,
   InterventionPanel,
   InterventionQueue,
-  type Handoff,
+  type HandoffTarget,
 } from '../components/Interventions';
-import { LuckReroll, refreshLuck } from '../components/Luck';
+import { LuckReroll } from '../components/Luck';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
 import { RecapPanel } from '../components/Recap';
@@ -74,6 +86,7 @@ import {
 import { LIVE_STATUS_LABELS, useLiveEvents, type LiveStatus } from '../live';
 import {
   keys,
+  refreshCharacters,
   useAiStatus,
   useCharacters,
   useGame,
@@ -84,17 +97,27 @@ import {
   useStoreNpc,
 } from '../queries';
 import {
+  DEFAULT_SHOT,
   characterDraft,
+  enemyAttackPreset,
   freeDraft,
+  interventionPreset,
   npcDraft,
   percent,
   previewCheck,
   toSideRequest,
+  type RollPreset,
+  type Shot,
   type SideDraft,
 } from '../rolling';
 import { signed } from '../rules-text';
 
 const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
+const RANGES: [Range, string][] = [
+  ['short', 'Corta'],
+  ['medium', 'Media +2'],
+  ['long', 'Larga +4'],
+];
 /** Tiradas del final del registro que aún se pueden repetir o complicar. */
 const RECENT_ROLLS = 3;
 const SITUATIONS: Situation[] = ['test', 'melee', 'ranged'];
@@ -116,9 +139,10 @@ export function GamePage() {
       storeEvent(event);
       // Al cerrar se reparten PX: las fichas guardadas ya no están al día.
       if (event.kind === 'closed' && game) refreshCampaign(queryClient, game.campaignId);
-      // Alguien ha gastado Suerte para repetir una tirada.
-      if (event.kind === 'roll' && event.roll.reroll && game) {
-        refreshLuck(queryClient, game.campaignId);
+      // Alguien ha gastado Suerte para repetir una tirada, o han recuperado el aliento.
+      const recovered = event.kind === 'combatEnded' && event.recovered.length > 0;
+      if (((event.kind === 'roll' && event.roll.reroll) || recovered) && game) {
+        refreshCharacters(queryClient, game.campaignId);
       }
     },
     endsWith: (event) => event.kind === 'closed',
@@ -301,8 +325,9 @@ function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaig
 }
 
 /**
- * La sala del jugador: quién tiene la palabra, las tiradas que le pide el máster y sus botones
- * para intervenir. Debajo, por si hace falta, su formulario para tirar por su cuenta.
+ * La sala del jugador: quién tiene la palabra (en combate, el orden y de quién es el turno), las
+ * tiradas que le pide el máster y sus botones para intervenir. Debajo, por si hace falta, su
+ * formulario para tirar por su cuenta.
  */
 function PlayerDesk({
   state,
@@ -318,27 +343,40 @@ function PlayerDesk({
   const mine = all.filter((character) => character.ownerId === me?.user?.id);
   const ids = mine.map((character) => character.id);
   const floor = currentFloor(events);
+  const combat = currentCombat(events);
+  const current = combat ? turnOf(combat) : undefined;
   const asked = pendingRollRequests(events).filter((event) => ids.includes(event.characterId));
 
   return (
     <>
-      {mine.length > 0 && (
+      {(mine.length > 0 || combat) && (
         <section
           className={holdsFloor(floor, ids) || asked.length > 0 ? 'panel your-turn' : 'panel'}
           aria-labelledby="floor-heading"
         >
-          <h2 id="floor-heading">La palabra</h2>
-          <FloorStatus floor={floor} characterIds={ids} />
+          <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+          {combat ? (
+            <>
+              <CombatOrder combat={combat} characters={all} />
+              <TurnStatus combat={combat} floor={floor} characterIds={ids} />
+            </>
+          ) : (
+            <FloorStatus floor={floor} characterIds={ids} />
+          )}
           {asked.map((event) => (
             <RequestedRollCard key={event.id} game={game} event={event} characters={all} />
           ))}
           <InterventionPanel
             game={game}
             floor={floor}
+            combat={combat}
             characters={mine}
             events={events}
             settled={settled}
           />
+          {combat && current?.kind === 'character' && ids.includes(current.id) && (
+            <EndTurn game={game} combat={combat} />
+          )}
         </section>
       )}
       <RollForm game={game} />
@@ -348,10 +386,22 @@ function PlayerDesk({
 
 type Action = 'roll' | 'reveal' | 'talk' | 'note';
 
+/** Lo que el máster lleva a sus acciones desde la cola o desde el turno de unos PNJ. */
+interface Handoff {
+  to: HandoffTarget;
+  /** Distinto cada vez: lo que se abre empieza de cero con cada una. */
+  key: number;
+  /** La intervención a la que responde, si responde a una. */
+  intervention?: InterventionEvent | undefined;
+  /** La tirada ya preparada, si va a Tirar. */
+  roll?: RollPreset | undefined;
+}
+
 /**
- * La mesa del máster: a quién da la palabra, las intervenciones que esperan y las tiradas que
- * ha pedido; y sus acciones (enseñar, hablar por un PNJ, tirar, anotar). Lo que elige hacer con
- * una intervención abre la acción que toca, lista para atenderla.
+ * La mesa del máster: a quién da la palabra o, en combate, el orden y los turnos; las
+ * intervenciones que esperan y las tiradas que ha pedido; y sus acciones (enseñar, hablar por un
+ * PNJ, tirar, anotar). Lo que elige hacer con una intervención, o con el turno de unos PNJ, abre
+ * la acción que toca, lista para usarla.
  */
 function MasterDesk({ state }: { state: GameState }) {
   const { game, events } = state;
@@ -359,33 +409,73 @@ function MasterDesk({ state }: { state: GameState }) {
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const desk = useRef<HTMLElement>(null);
   const characters = useCharacters(game.campaignId).data ?? [];
+  const npcs = useNpcs(game.campaignId).data ?? [];
   const floor = currentFloor(events);
+  const combat = currentCombat(events);
   const waiting = pendingInterventions(events);
   // En cuanto la intervención deja de esperar (atendida o retirada), ya no se responde a ella.
-  const answering =
-    handoff && waiting.some((intervention) => intervention.id === handoff.intervention.id)
+  const active =
+    handoff &&
+    (!handoff.intervention ||
+      waiting.some((intervention) => intervention.id === handoff.intervention?.id))
       ? handoff
       : null;
-  const answeringFor = (to: Handoff['to']) =>
-    answering?.to === to ? answering.intervention : undefined;
+  const handedTo = (to: HandoffTarget) => (active?.to === to ? active : undefined);
   const stopAnswering = () => setHandoff(null);
 
+  function hand(to: HandoffTarget, from: Omit<Handoff, 'to' | 'key'>) {
+    setHandoff((previous) => ({ to, key: (previous?.key ?? 0) + 1, ...from }));
+    // Empezar un combate se hace aquí arriba; lo demás, en las acciones.
+    if (to === 'combat') return;
+    setAction(to);
+    desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  const rolling = handedTo('roll');
+  const starting = handedTo('combat');
   return (
     <>
       <section className="panel" aria-labelledby="floor-heading">
-        <h2 id="floor-heading">La palabra</h2>
-        <FloorControl game={game} floor={floor} characters={characters} />
+        <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+        {combat ? (
+          <CombatTracker
+            game={game}
+            combat={combat}
+            characters={characters}
+            onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
+          />
+        ) : (
+          <FloorControl game={game} floor={floor} characters={characters} />
+        )}
         <InterventionQueue
           game={game}
           floor={floor}
+          combat={combat}
           pending={waiting}
-          onHandoff={(next) => {
-            setHandoff(next);
-            setAction(next.to);
-            desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          }}
+          onHandoff={(to, intervention) =>
+            hand(to, {
+              intervention,
+              roll:
+                to === 'roll' ? interventionPreset(intervention, characters, combat) : undefined,
+            })
+          }
         />
         <PendingRollRequests game={game} pending={pendingRollRequests(events)} />
+        {combat ? (
+          <>
+            <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
+            <EndCombat game={game} />
+          </>
+        ) : (
+          <StartCombat
+            key={starting?.key ?? 0}
+            game={game}
+            characters={characters}
+            npcs={npcs}
+            answering={starting?.intervention}
+            onStopAnswering={stopAnswering}
+          />
+        )}
       </section>
 
       {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
@@ -407,7 +497,7 @@ function MasterDesk({ state }: { state: GameState }) {
             game={game}
             characters={characters}
             starting={!events.some((event) => event.kind === 'reveal')}
-            answering={answeringFor('reveal')}
+            answering={handedTo('reveal')?.intervention}
             onStopAnswering={stopAnswering}
           />
         </div>
@@ -415,18 +505,21 @@ function MasterDesk({ state }: { state: GameState }) {
           <TalkPanel
             game={game}
             characters={characters}
-            answering={answeringFor('talk')}
+            answering={handedTo('talk')?.intervention}
             onStopAnswering={stopAnswering}
           />
         </div>
         <div hidden={action !== 'roll'}>
-          {/* Cada intervención que se atiende empieza la tirada de cero, ya preparada. */}
+          {/* Cada tirada que se prepara (para una intervención o para unos PNJ) empieza de
+              cero; al hacerla o pedirla, Tirar vuelve a quedar libre. */}
           <RollForm
-            key={answeringFor('roll')?.id ?? 'libre'}
+            key={rolling?.key ?? 0}
             game={game}
             embedded
-            answering={answeringFor('roll')}
+            preset={rolling?.roll}
+            answering={rolling?.intervention}
             onStopAnswering={stopAnswering}
+            onDone={rolling ? stopAnswering : undefined}
           />
         </div>
         <div hidden={action !== 'note'}>
@@ -883,27 +976,21 @@ function SpeechForm(props: {
   );
 }
 
-/** Con qué tira, de entrada, quien ha intervenido: lo más probable según lo que quiere hacer. */
-const INTENT_CHECKS: Record<InterventionIntent, string | undefined> = {
-  speak: 'skill:persuasion',
-  // Su mejor habilidad.
-  act: undefined,
-  ask: 'skill:perception',
-  attack: 'skill:melee-weapons',
-};
-
 /**
  * Tirar en la partida. El máster tira con cualquiera, también en secreto, o pide la tirada al
- * jugador del personaje que tira (o que se defiende). Con `answering`, la tirada se prepara para
- * atender esa intervención: se monta de nuevo con cada una.
+ * jugador del personaje que tira (o que se defiende). Con `preset`, la tirada llega preparada
+ * (para atender la intervención `answering` o para el turno de unos PNJ): se monta de nuevo con
+ * cada una, y al hacerla o pedirla se avisa con `onDone`.
  */
 function RollForm(props: {
   game: GameDetail;
   embedded?: boolean;
+  preset?: RollPreset | undefined;
   answering?: InterventionEvent | undefined;
   onStopAnswering?: () => void;
+  onDone?: (() => void) | undefined;
 }) {
-  const { game, embedded = false, answering, onStopAnswering } = props;
+  const { game, embedded = false, preset, answering, onStopAnswering, onDone } = props;
   const { data: me } = useMe();
   const characters = useCharacters(game.campaignId);
   const storeEvent = useStoreGameEvent(game.id);
@@ -914,41 +1001,34 @@ function RollForm(props: {
     (character) => isMaster || character.ownerId === me?.user?.id,
   );
 
-  const attack = answering?.intent === 'attack';
-  const [actor, setActor] = useState<SideDraft | null>(null);
-  const [against, setAgainst] = useState<'difficulty' | 'opposed'>(
-    attack ? 'opposed' : 'difficulty',
-  );
-  const [difficulty, setDifficulty] = useState<DifficultyLevel>('normal');
-  const [opponent, setOpponent] = useState<SideDraft>(() => freeDraft('Rival'));
-  const [situation, setSituation] = useState<Situation>(attack ? 'melee' : 'test');
-  const [secret, setSecret] = useState(answering?.visibility === 'private');
+  const [actor, setActor] = useState<SideDraft | null>(preset?.actor ?? null);
+  const [against, setAgainst] = useState<'difficulty' | 'opposed'>(preset?.against ?? 'difficulty');
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>(preset?.difficulty ?? 'normal');
+  const [opponent, setOpponent] = useState<SideDraft>(() => preset?.opponent ?? freeDraft('Rival'));
+  const [situation, setSituation] = useState<Situation>(preset?.situation ?? 'test');
+  const [shot, setShot] = useState<Shot>(preset?.shot ?? DEFAULT_SHOT);
+  const [secret, setSecret] = useState(preset?.secret ?? answering?.visibility === 'private');
   /** El máster no tira: pide la tirada al jugador, que la hace con un botón. */
-  const [ask, setAsk] = useState(answering !== undefined);
+  const [ask, setAsk] = useState(preset?.ask ?? answering !== undefined);
 
-  // Hasta que no se elige, tira quien ha intervenido, o el primer personaje disponible (o un
-  // PNJ si no hay ninguno).
-  const answerer = answering
-    ? available.find((character) => character.id === answering.characterId)
-    : undefined;
+  // Hasta que no se elige, tira el primer personaje disponible (o un PNJ si no hay ninguno).
   const first = available[0];
-  const actorDraft =
-    actor ??
-    (answerer && answering
-      ? characterDraft(answerer, INTENT_CHECKS[answering.intent])
-      : first
-        ? characterDraft(first)
-        : isMaster
-          ? freeDraft('PNJ')
-          : null);
+  const actorDraft = actor ?? (first ? characterDraft(first) : isMaster ? freeDraft('PNJ') : null);
+  const done = () => onDone?.();
 
   const roll = useMutation({
     mutationFn: (request: GameRollRequest) => api.gameRoll(game.id, request),
-    onSuccess: storeEvent,
+    onSuccess: (event) => {
+      storeEvent(event);
+      done();
+    },
   });
   const askRoll = useMutation({
     mutationFn: (request: AskRollRequest) => api.askRoll(game.id, request),
-    onSuccess: storeEvent,
+    onSuccess: (event) => {
+      storeEvent(event);
+      done();
+    },
   });
 
   if (!characters.data) return <QueryState error={characters.error} />;
@@ -964,12 +1044,27 @@ function RollForm(props: {
     );
   }
 
+  // A distancia, la dificultad sale del objetivo, la distancia y la cobertura.
+  const shooting = against === 'difficulty' && situation === 'ranged';
+  const shooter =
+    actorDraft.kind === 'character'
+      ? available.find((character) => character.id === actorDraft.characterId)
+      : undefined;
+  const target = shooting
+    ? rangedDifficulty({
+        targetDexterity: shot.dexterity,
+        range: shot.range,
+        cover: shot.cover ? 'partial' : 'none',
+        targetShield: shot.shield,
+        deadeye: shooter?.advancedSkills.includes('deadeye') ?? false,
+      })
+    : DIFFICULTIES[difficulty];
   const actorCheck = previewCheck(actorDraft, available);
   const opponentCheck = against === 'opposed' ? previewCheck(opponent, characters.data) : null;
   const odds =
     actorCheck &&
     (against === 'difficulty'
-      ? testOdds(actorCheck, DIFFICULTIES[difficulty])
+      ? testOdds(actorCheck, target)
       : opponentCheck && opposedOdds(actorCheck, opponentCheck));
   // Una tirada pedida la hace quien actúa o, si es un PNJ, el personaje que se defiende.
   const roller = [actorDraft, ...(against === 'opposed' ? [opponent] : [])].find(
@@ -988,7 +1083,7 @@ function RollForm(props: {
       actor: toSideRequest(actorDraft),
       target:
         against === 'difficulty'
-          ? { kind: 'difficulty' as const, difficulty: DIFFICULTIES[difficulty] }
+          ? { kind: 'difficulty' as const, difficulty: target }
           : { kind: 'opposed' as const, opponent: toSideRequest(opponent) },
       situation,
     };
@@ -1030,7 +1125,48 @@ function RollForm(props: {
           }}
         />
       )}
-      {against === 'difficulty' ? (
+      {shooting ? (
+        <fieldset className="side-editor">
+          <legend className="field-label">Dificultad a distancia</legend>
+          <div className="steppers">
+            <Stepper
+              label="Destreza del objetivo"
+              value={shot.dexterity}
+              min={0}
+              max={6}
+              onChange={(dexterity) => setShot({ ...shot, dexterity })}
+              hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
+            />
+          </div>
+          <Segmented
+            label="Distancia"
+            value={shot.range}
+            options={RANGES}
+            onChange={(range) => setShot({ ...shot, range })}
+          />
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={shot.cover}
+              onChange={(event) => setShot({ ...shot, cover: event.target.checked })}
+            />
+            Cobertura parcial (+2)
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={shot.shield}
+              onChange={(event) => setShot({ ...shot, shield: event.target.checked })}
+            />
+            Lleva escudo (+1)
+          </label>
+          <p className="side-summary">
+            Dificultad <strong>{target}</strong>
+            {shooter?.advancedSkills.includes('deadeye') &&
+              ` · con Disparo certero, ${shooter.name} no cuenta la distancia media ni la cobertura`}
+          </p>
+        </fieldset>
+      ) : against === 'difficulty' ? (
         <label className="field">
           <span className="field-label">Dificultad</span>
           <select
@@ -1059,7 +1195,12 @@ function RollForm(props: {
         <span className="field-label">Situación</span>
         <select
           value={situation}
-          onChange={(event) => setSituation(event.target.value as Situation)}
+          onChange={(event) => {
+            const next = event.target.value as Situation;
+            setSituation(next);
+            // A distancia se tira contra una dificultad, que sale del objetivo.
+            if (next === 'ranged') setAgainst('difficulty');
+          }}
         >
           {SITUATIONS.map((s) => (
             <option key={s} value={s}>

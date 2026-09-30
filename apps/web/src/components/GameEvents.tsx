@@ -2,9 +2,12 @@ import { OUTCOME_GUIDES, OUTCOME_LABELS, doublesShift } from '@dungeon-copilot/r
 import {
   INTERVENTION_LABELS,
   rerollerLabel,
+  type Combatant,
+  type CombatantRef,
   type Floor,
   type GameEvent,
   type GameRoll,
+  type InterventionIntent,
   type RollRequestEvent,
   type SettledHow,
 } from '@dungeon-copilot/shared';
@@ -14,6 +17,14 @@ import { Dice } from './Dice';
 
 export const eventTime = (event: GameEvent) =>
   new Date(event.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+/** "Kael, Mira y Tor". */
+export const listText = (names: string[]) =>
+  new Intl.ListFormat('es', { style: 'long', type: 'conjunction' }).format(names);
+
+/** «Cuerpo a cuerpo contra 3 bandidos»: lo que pide un jugador, en la cola y en el registro. */
+export const intentLabel = (intent: InterventionIntent, target?: CombatantRef) =>
+  target ? `${INTERVENTION_LABELS[intent]} contra ${target.name}` : INTERVENTION_LABELS[intent];
 
 /** "Normal (10)" o "Guardia veterano" / "Kael (Acrobacias)". */
 export function targetText({ target }: Pick<GameRoll, 'target'>): string {
@@ -72,6 +83,27 @@ function secretWith(event: GameEvent): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** Quien entra en un combate, con lo que sacó en la iniciativa: «Mira 15 (6 + 6 + 3)». */
+function InitiativeList({ combatants }: { combatants: Combatant[] }) {
+  return (
+    <ol className="initiative-list">
+      {combatants.map(({ id, name, initiative }) => (
+        <li key={id}>
+          <strong>{name}</strong> {initiative.total}{' '}
+          <span className="muted">
+            ({initiative.dice.kept.join(' + ')} + {initiative.bonus})
+          </span>
+          {initiative.notes.map((note) => (
+            <span key={note} className="roll-note">
+              {note}
+            </span>
+          ))}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */
@@ -238,12 +270,12 @@ export function EventCard({
         <article className="feed-item feed-intervention">
           {meta}
           <h3>
-            {event.name} · {INTERVENTION_LABELS[event.intent]}
+            {event.name} · {intentLabel(event.intent, event.target)}
           </h3>
           {event.text ? (
             <p className="prewrap">{event.text}</p>
           ) : (
-            <p className="muted">Pide la palabra sin escribir nada.</p>
+            <p className="muted">Sin texto: lo cuenta de palabra.</p>
           )}
           <p className={`feed-status status-${settled ?? 'pending'}`}>
             {INTERVENTION_STATUS[settled ?? 'pending']}
@@ -265,5 +297,53 @@ export function EventCard({
     case 'settled':
       // Solo cambia cómo se ven la intervención o la tirada pedida que cierra.
       return null;
+    case 'combatStarted':
+      return (
+        <article className="feed-item feed-combat">
+          {meta}
+          <h3>¡Combate!</h3>
+          <p className="muted">Orden de iniciativa:</p>
+          <InitiativeList combatants={event.order} />
+          {event.order[0] && <p>Empieza {event.order[0].name}.</p>}
+        </article>
+      );
+    case 'turn':
+      return (
+        <article className="feed-item feed-floor">
+          {meta}
+          <p>
+            Ronda {event.round} · Le toca a {event.combatant.name}.
+          </p>
+        </article>
+      );
+    case 'combatJoined':
+      return (
+        <article className="feed-item feed-combat">
+          {meta}
+          <h3>Se unen al combate</h3>
+          <InitiativeList combatants={event.joined} />
+        </article>
+      );
+    case 'combatLeft':
+      return (
+        <article className="feed-item feed-floor">
+          {meta}
+          <p>Sale del combate: {event.left.name}.</p>
+        </article>
+      );
+    case 'combatEnded': {
+      const recovered = event.recovered.map(({ name }) => name);
+      return (
+        <article className="feed-item feed-milestone">
+          {meta}
+          <h3>Fin del combate</h3>
+          <p className="muted">
+            {event.rounds === 1 ? 'Ha durado una ronda.' : `Ha durado ${event.rounds} rondas.`}
+            {recovered.length > 0 &&
+              ` ${listText(recovered)} ${recovered.length === 1 ? 'recupera' : 'recuperan'} el aliento: se borran sus rasguños.`}
+          </p>
+        </article>
+      );
+    }
   }
 }

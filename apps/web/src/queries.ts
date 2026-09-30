@@ -62,6 +62,12 @@ export const useCharacters = (campaignId: string) =>
 export const useCharacter = (id: string) =>
   useQuery({ queryKey: keys.character(id), queryFn: () => api.character(id), enabled: id !== '' });
 
+/** Algo ha cambiado en las fichas de una campaña (la Suerte, los rasguños): se vuelven a pedir. */
+export function refreshCharacters(queryClient: QueryClient, campaignId: string) {
+  void queryClient.invalidateQueries({ queryKey: keys.characters(campaignId) });
+  void queryClient.invalidateQueries({ queryKey: ['characters'] });
+}
+
 /** Guarda la ficha que devuelve el servidor y marca como viejas las listas donde aparece. */
 export function useStoreCharacter() {
   const queryClient = useQueryClient();

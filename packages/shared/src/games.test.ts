@@ -1,10 +1,10 @@
 import { resolveOpposed, resolveTest } from '@dungeon-copilot/rules';
 import { fixedDice } from '@dungeon-copilot/rules/testing';
 import { describe, expect, it } from 'vitest';
+import { currentFloor } from './combat';
 import {
   askRollSchema,
   characterSides,
-  currentFloor,
   giveFloorSchema,
   interventionSchema,
   pendingInterventions,
@@ -107,9 +107,7 @@ describe('la palabra y las intervenciones', () => {
       secret: false,
     });
     const wrong = interventionSchema.safeParse({ characterId: KAEL, intent: 'bailar' });
-    expect(wrong.error?.issues.map((issue) => issue.message)).toEqual([
-      'Elige si quieres hablar, actuar, preguntar o atacar',
-    ]);
+    expect(wrong.error?.issues.map((issue) => issue.message)).toEqual(['Elige qué quieres hacer']);
     const long = interventionSchema.safeParse({
       characterId: KAEL,
       intent: 'act',
@@ -118,6 +116,18 @@ describe('la palabra y las intervenciones', () => {
     expect(long.error?.issues.map((issue) => issue.message)).toEqual([
       'No puede pasar de 1000 caracteres',
     ]);
+  });
+
+  it('en combate, una intervención puede ir contra alguien que pelea', () => {
+    expect(
+      interventionSchema.parse({ characterId: KAEL, intent: 'melee', targetId: KAEL }),
+    ).toMatchObject({ intent: 'melee', targetId: KAEL });
+    const nobody = interventionSchema.safeParse({
+      characterId: KAEL,
+      intent: 'ranged',
+      targetId: 'bandidos',
+    });
+    expect(nobody.error?.issues.map((issue) => issue.message)).toEqual(['Elige contra quién']);
   });
 
   it('la palabra se da al máster, a la mesa o a un personaje', () => {

@@ -17,6 +17,7 @@ import type {
   CreateCharacterRequest,
   DamageRequest,
   DamageResponse,
+  EndCombatRequest,
   GameDetail,
   GameEvent,
   GameRollRequest,
@@ -27,8 +28,11 @@ import type {
   IdeasRequest,
   InterventionRequest,
   JoinCampaignRequest,
+  JoinCombatRequest,
+  LeaveCombatRequest,
   LoginRequest,
   MeResponse,
+  NextTurnRequest,
   NoteRequest,
   NpcDraft,
   NpcRequest,
@@ -45,6 +49,7 @@ import type {
   RollResponse,
   ScreenState,
   SpeechRequest,
+  StartCombatRequest,
   TalkRequest,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
@@ -242,6 +247,18 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/roll-requests/${eventId}/roll`).then((r) => r.event),
   withdrawRollRequest: (id: string, eventId: number) =>
     post<EventResponse>(`/api/games/${id}/roll-requests/${eventId}/withdraw`).then((r) => r.event),
+  /** El máster empieza un combate: el servidor tira la iniciativa de quien pelea. */
+  startCombat: (id: string, body: StartCombatRequest) =>
+    post<EventResponse>(`/api/games/${id}/combat`, body).then((r) => r.event),
+  /** Termina el turno de quien lo tiene y le toca al siguiente. */
+  nextTurn: (id: string, body: NextTurnRequest) =>
+    post<EventResponse>(`/api/games/${id}/combat/turn`, body).then((r) => r.event),
+  joinCombat: (id: string, body: JoinCombatRequest) =>
+    post<EventResponse>(`/api/games/${id}/combat/join`, body).then((r) => r.event),
+  leaveCombat: (id: string, body: LeaveCombatRequest) =>
+    post<EventResponse>(`/api/games/${id}/combat/leave`, body).then((r) => r.event),
+  endCombat: (id: string, body: EndCombatRequest) =>
+    post<EventResponse>(`/api/games/${id}/combat/end`, body).then((r) => r.event),
   saveRecap: (id: string, body: RecapRequest) =>
     put<{ game: GameDetail }>(`/api/games/${id}/recap`, body).then((r) => r.game),
   /** La IA propone un resumen de la partida, sin guardarlo. */
