@@ -444,6 +444,66 @@ describe('resumen de una partida', () => {
     expect(hasLog([events[2]!])).toBe(false);
   });
 
+  it('cuenta quién pelea, quién llega o se va y cuándo acaba, pero no los turnos', () => {
+    const initiative = {
+      dice: { rolled: [3, 4], kept: [3, 4] as const, edge: 'none' as const },
+      bonus: 2,
+      total: 9,
+      notes: [],
+    };
+    const fighter = (kind: 'character' | 'npc', name: string) =>
+      kind === 'character'
+        ? { kind, id: name, name, initiative }
+        : { kind, id: name, name, profile: 'minion' as const, initiative };
+    const order = [fighter('character', 'Kael'), fighter('npc', '3 bandidos')];
+    const wolves = fighter('npc', 'Lobos');
+    const events: GameEventPayload[] = [
+      { kind: 'combatStarted', order: [...order, fighter('character', 'Mira')] },
+      { kind: 'turn', round: 1, turn: 1, combatant: { id: '3 bandidos', name: '3 bandidos' } },
+      {
+        kind: 'intervention',
+        characterId: 'kael',
+        name: 'Kael',
+        intent: 'melee',
+        text: 'Le corto el paso al jefe',
+        target: { id: '3 bandidos', name: '3 bandidos' },
+      },
+      { kind: 'combatJoined', joined: [wolves], order: [...order, wolves], round: 1, turn: 1 },
+      {
+        kind: 'combatLeft',
+        left: { id: '3 bandidos', name: '3 bandidos' },
+        order,
+        round: 1,
+        turn: 1,
+      },
+      { kind: 'combatEnded', rounds: 2, recovered: [] },
+      {
+        kind: 'combatStarted',
+        order: [fighter('character', 'Kael'), fighter('character', 'Mira')],
+      },
+    ];
+    const [, user] = recapMessages({
+      campaign,
+      characters: [],
+      game: { number: 1, title: '' },
+      events,
+      hint: '',
+    });
+    expect(user?.content).toContain(
+      [
+        'lo más antiguo a lo más reciente:',
+        '- Empieza un combate: Kael y Mira contra 3 bandidos.',
+        '- Kael (PJ) ataca cuerpo a cuerpo (contra 3 bandidos), según su jugador: Le corto el paso al jefe',
+        '- Se unen al combate: Lobos.',
+        '- Sale del combate: 3 bandidos.',
+        '- Termina el combate.',
+        '- Empieza un combate entre Kael y Mira.',
+        '',
+      ].join('\n'),
+    );
+    expect(hasLog([events[1]!])).toBe(false);
+  });
+
   it('dice quién ha repetido una tirada con Suerte', () => {
     const first = test('Mira', 12, [1, 2]);
     if (first.kind !== 'roll') throw new Error('Se esperaba una tirada');

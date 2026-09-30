@@ -169,9 +169,7 @@ describe('intervenciones', () => {
     }
     const wrong = await ana.post(`${url}/interventions`, { ...body, intent: 'bailar' });
     expect(wrong.statusCode).toBe(400);
-    expect(wrong.json().issues).toEqual([
-      { path: 'intent', message: 'Elige si quieres hablar, actuar, preguntar o atacar' },
-    ]);
+    expect(wrong.json().issues).toEqual([{ path: 'intent', message: 'Elige qué quieres hacer' }]);
     const stranger = await t.register('intrusa');
     expect((await stranger.post(`${url}/interventions`, body)).statusCode).toBe(404);
     expect(kinds(await events(master, url))).toEqual(['opened']);

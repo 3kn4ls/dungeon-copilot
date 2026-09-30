@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   characterAttackDamage,
+  compareInitiative,
   conditionEdges,
   damageOnHit,
+  initiativeEdge,
   meleeAttack,
   meleeDefense,
   rangedDifficulty,
@@ -130,5 +132,66 @@ describe('conditionEdges', () => {
 describe('rollInitiative', () => {
   it('es 2d6 + Destreza', () => {
     expect(rollInitiative(3, 'none', fixedDice(4, 2)).total).toBe(9);
+  });
+
+  it('con ventaja cuentan los dos mejores de tres dados', () => {
+    const initiative = rollInitiative(3, 'advantage', fixedDice(1, 6, 5));
+    expect(initiative.dice.kept).toEqual([5, 6]);
+    expect(initiative.total).toBe(14);
+  });
+});
+
+describe('initiativeEdge', () => {
+  const grave = { wounds: { scratches: 2, severity: 'grave' } } as const;
+
+  it('Táctico da ventaja a todo su bando', () => {
+    expect(initiativeEdge(kael(), {}, true)).toBe('advantage');
+    expect(initiativeEdge(kael(), {}, false)).toBe('none');
+  });
+
+  it('una herida grave da desventaja, salvo Imparable', () => {
+    expect(initiativeEdge(kael(), grave, false)).toBe('disadvantage');
+    expect(initiativeEdge(kael({ advancedSkills: ['unstoppable'] }), grave, false)).toBe('none');
+  });
+
+  it('la ventaja de Táctico y la desventaja de una herida grave se anulan', () => {
+    expect(initiativeEdge(kael(), grave, true)).toBe('none');
+  });
+});
+
+describe('compareInitiative', () => {
+  const entry = (name: string, total: number, character: boolean, dexterity: number) => ({
+    name,
+    total,
+    character,
+    dexterity,
+  });
+  const order = (...entries: ReturnType<typeof entry>[]) =>
+    entries.sort(compareInitiative).map((e) => e.name);
+
+  it('actúa antes quien saca más', () => {
+    expect(order(entry('Kael', 8, true, 3), entry('Bandidos', 11, false, 1))).toEqual([
+      'Bandidos',
+      'Kael',
+    ]);
+  });
+
+  it('los empates, para los PJ', () => {
+    expect(order(entry('Lobos', 9, false, 2), entry('Kael', 9, true, 1))).toEqual([
+      'Kael',
+      'Lobos',
+    ]);
+  });
+
+  it('entre dos PJ o dos grupos empatados, primero el de más Destreza', () => {
+    expect(order(entry('Kael', 9, true, 2), entry('Mira', 9, true, 4))).toEqual(['Mira', 'Kael']);
+    expect(order(entry('Bandidos', 7, false, 1), entry('Capitán', 7, false, 3))).toEqual([
+      'Capitán',
+      'Bandidos',
+    ]);
+  });
+
+  it('si aún empatan, se quedan como estaban', () => {
+    expect(order(entry('Kael', 9, true, 3), entry('Mira', 9, true, 3))).toEqual(['Kael', 'Mira']);
   });
 });

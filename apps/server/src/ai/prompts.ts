@@ -401,27 +401,57 @@ const INTERVENTION_VERBS: Record<Exclude<InterventionIntent, 'ask'>, string> = {
   speak: 'habla',
   act: 'actúa',
   attack: 'ataca',
+  melee: 'ataca cuerpo a cuerpo',
+  ranged: 'ataca a distancia',
+  spell: 'lanza un hechizo',
 };
+
+/** "Kael, Mira y Tor". */
+const listText = (names: string[]) =>
+  new Intl.ListFormat('es', { style: 'long', type: 'conjunction' }).format(names);
+
+/** Quién empieza a pelear: los personajes contra los PNJ, o entre ellos si no hay PNJ. */
+function fightText(order: { kind: 'character' | 'npc'; name: string }[]): string {
+  const side = (kind: 'character' | 'npc') =>
+    listText(order.filter((combatant) => combatant.kind === kind).map(({ name }) => name));
+  return order.some((combatant) => combatant.kind === 'npc')
+    ? `Empieza un combate: ${side('character')} contra ${side('npc')}.`
+    : `Empieza un combate entre ${side('character')}.`;
+}
 
 /** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
 function logLine(event: GameEventPayload): { text: string; weight: number } | null {
   switch (event.kind) {
-    // Quién tiene la palabra o qué tirada se pide no es la historia: lo es lo que pasa después.
+    // Quién tiene la palabra, qué tirada se pide o de quién es el turno no es la historia: lo es
+    // lo que pasa después.
     case 'opened':
     case 'closed':
     case 'floor':
     case 'rollRequest':
     case 'settled':
+    case 'turn':
       return null;
     case 'intervention': {
       const text = fit(event.text, LOG_LINE_CHARS);
       // Lo que se pregunta al máster es fuera del personaje: no es parte de la historia.
       if (!text || event.intent === 'ask') return null;
+      const target = event.target ? ` (contra ${event.target.name})` : '';
       return {
-        text: `- ${event.name} (PJ) ${INTERVENTION_VERBS[event.intent]}, según su jugador: ${text}`,
+        text: `- ${event.name} (PJ) ${INTERVENTION_VERBS[event.intent]}${target}, según su jugador: ${text}`,
         weight: 1,
       };
     }
+    case 'combatStarted':
+      return { text: `- ${fightText(event.order)}`, weight: 1 };
+    case 'combatJoined':
+      return {
+        text: `- Se unen al combate: ${listText(event.joined.map(({ name }) => name))}.`,
+        weight: 1,
+      };
+    case 'combatLeft':
+      return { text: `- Sale del combate: ${event.left.name}.`, weight: 1 };
+    case 'combatEnded':
+      return { text: '- Termina el combate.', weight: 1 };
     case 'reveal': {
       const title = event.title.trim();
       const body = fit(event.body, LOG_LINE_CHARS);

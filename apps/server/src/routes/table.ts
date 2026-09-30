@@ -8,6 +8,7 @@ import {
 } from '@dungeon-copilot/shared';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context';
+import { findCombatTarget } from '../games/combat';
 import {
   CHARACTER_NOT_HERE,
   GAME_NOT_FOUND,
@@ -76,7 +77,8 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
 
   /**
    * Un jugador interviene con su personaje: pide la palabra o, si la tiene, interviene. Espera a
-   * que el máster la atienda, y cada personaje tiene como mucho una esperando.
+   * que el máster la atienda, y cada personaje tiene como mucho una esperando. En combate puede
+   * ir contra alguien que pelea.
    */
   app.post<{ Params: IdParams }>('/api/games/:id/interventions', async (request, reply) => {
     const user = requireUser(request);
@@ -86,6 +88,15 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
       const character = await findCampaignCharacter(tx, found, body.characterId);
       if (character.ownerId !== user.id) {
         throw forbidden('Solo puedes intervenir con tus personajes');
+      }
+      if (body.intent === 'spell') {
+        const sheet = await findRollingCharacters(tx, found.game.campaignId, [body.characterId]);
+        if (!sheet.get(body.characterId)?.build.advancedSkills.includes('sorcery')) {
+          throw new HttpError(
+            400,
+            `${character.name} no puede lanzar hechizos: le falta Hechicería`,
+          );
+        }
       }
       if (await findPendingInterventionOf(tx, gameId, character.characterId)) {
         throw new HttpError(
@@ -103,6 +114,10 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
           name: character.name,
           intent: body.intent,
           text: body.text,
+          target:
+            body.targetId === undefined
+              ? undefined
+              : await findCombatTarget(tx, gameId, body.targetId),
         },
       };
     });

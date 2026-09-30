@@ -87,13 +87,17 @@ export function ErrorNote({ error }: { error: unknown }) {
   );
 }
 
-/** Botón para acciones que no se pueden deshacer: el primer clic pide confirmación. */
+/**
+ * Botón para acciones que no se pueden deshacer: el primer clic pide confirmación. `quiet`, como
+ * un enlace hasta que se pulsa, para lo que se usa poco y no debe llamar la atención.
+ */
 export function ConfirmButton(props: {
   children: ReactNode;
   confirmLabel: string;
   onConfirm: () => void;
   disabled?: boolean;
   small?: boolean;
+  quiet?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
 
@@ -106,7 +110,13 @@ export function ConfirmButton(props: {
   return (
     <button
       type="button"
-      className={['button', props.small && 'small', armed && 'danger'].filter(Boolean).join(' ')}
+      className={
+        props.quiet && !armed
+          ? 'link-button'
+          : ['button', (props.small || props.quiet) && 'small', armed && 'danger']
+              .filter(Boolean)
+              .join(' ')
+      }
       disabled={props.disabled}
       onClick={() => {
         if (armed) {

@@ -2057,3 +2057,139 @@ h1 .badge {
 .screen-speech.earlier blockquote {
   font-size: clamp(18px, 2vw, 32px);
 }
+
+/* El combate: el orden de iniciativa, a quién le toca y cómo se prepara. */
+
+.combat-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.combatant {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.combatant.current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.combatant-initiative {
+  min-width: 2ch;
+  font-family: var(--mono);
+  font-weight: 700;
+  text-align: right;
+  color: var(--muted);
+}
+
+.combatant-name {
+  font-weight: 700;
+}
+
+.combatant .button {
+  margin-left: auto;
+}
+
+/* El turno de los PNJ: el máster elige a quién atacan. */
+.enemy-turn {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--failure);
+  border-radius: 6px;
+}
+
+.combat-form {
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.combat-form h3 {
+  margin: 0;
+}
+
+.combat-end {
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.enemy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.enemy-row {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.enemy-row select,
+.enemy-row input {
+  width: 100%;
+}
+
+.feed-combat {
+  border-left: 4px solid var(--failure);
+}
+
+.initiative-list {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 4px;
+}
+
+.initiative-list .roll-note {
+  display: block;
+}
+
+/* En la pantalla: el orden de iniciativa, con quien tiene el turno destacado. */
+.screen-combat {
+  display: grid;
+  gap: 8px;
+  flex-basis: 100%;
+}
+
+.screen-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.screen-order li {
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.screen-order li.current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.screen-initiative {
+  font-family: var(--mono);
+  opacity: 0.7;
+}

@@ -1,11 +1,13 @@
 import {
   GAME_STATUS_LABELS,
   INTERVENTION_LABELS,
+  currentCombat,
   currentFloor,
   gameName,
   pendingInterventions,
   pendingRollRequests,
   supersededRolls,
+  type CombatantRef,
   type GameEvent,
   type InterventionIntent,
   type ScreenState,
@@ -22,15 +24,31 @@ import { keys } from '../queries';
 /** Frases que se ven bajo la escena: lo último que dicen los PNJ y los personajes. */
 const DIALOGUE_LINES = 3;
 
-/** Lo que dice o hace un personaje en la escena, cuando no es solo hablar. */
-const DOING: Partial<Record<InterventionIntent, string>> = { act: 'actúa', attack: 'ataca' };
+/** Lo que hace un personaje en la escena, cuando no es solo hablar: «ataca a 3 bandidos». */
+function doing(intent: InterventionIntent, target?: CombatantRef): string | undefined {
+  const to = target ? ` a ${target.name}` : '';
+  switch (intent) {
+    case 'act':
+      return 'actúa';
+    case 'attack':
+    case 'melee':
+      return `ataca${to}`;
+    case 'ranged':
+      return `dispara${to}`;
+    case 'spell':
+      return target ? `lanza un hechizo contra ${target.name}` : 'lanza un hechizo';
+    default:
+      return undefined;
+  }
+}
 
 type DialogueLine = GameEvent & { kind: 'speech' | 'intervention' };
 
 /**
  * Pantalla de la mesa: para una tele o una tablet que todos ven. No necesita sesión; el enlace
  * secreto de la campaña basta. Enseña lo último que ha revelado el máster, lo que se dice en la
- * escena, quién tiene la palabra y las últimas tiradas.
+ * escena, quién tiene la palabra (en combate, el orden de iniciativa y de quién es el turno) y
+ * las últimas tiradas.
  */
 export function ScreenPage() {
   const { token = '' } = useParams();
@@ -89,6 +107,7 @@ export function ScreenPage() {
   // Quién tiene la palabra, quién la pide y qué tiradas faltan, mientras se juega.
   const playing = game?.status === 'open';
   const floor = currentFloor(events);
+  const combat = playing ? currentCombat(events) : null;
   const hands = playing ? pendingInterventions(events) : [];
   const asked = playing ? pendingRollRequests(events) : [];
   // Una tirada repetida con Suerte ya no cuenta: solo se ve la repetición.
@@ -115,33 +134,52 @@ export function ScreenPage() {
         <p className="screen-waiting">Esperando a que empiece la partida…</p>
       ) : (
         <main className="screen-main">
-          {playing && (floor.kind !== 'master' || hands.length > 0 || asked.length > 0) && (
-            <section className="screen-table" aria-live="polite">
-              {floor.kind === 'table' && (
-                <p className="screen-floor">¿Qué hacéis? La palabra es de la mesa</p>
-              )}
-              {floor.kind === 'character' && (
-                <p className="screen-floor">
-                  Tiene la palabra <strong>{floor.name}</strong>
-                </p>
-              )}
-              {hands.length > 0 && (
-                <p>
-                  Piden la palabra:{' '}
-                  {hands
-                    .map(
-                      (hand) => `${hand.name} (${INTERVENTION_LABELS[hand.intent].toLowerCase()})`,
-                    )
-                    .join(' · ')}
-                </p>
-              )}
-              {asked.map((request) => (
-                <p key={request.id}>
-                  Tira <strong>{request.name}</strong> · {requestedText(request)}
-                </p>
-              ))}
-            </section>
-          )}
+          {playing &&
+            (combat || floor.kind !== 'master' || hands.length > 0 || asked.length > 0) && (
+              <section className="screen-table" aria-live="polite">
+                {combat && (
+                  <div className="screen-combat">
+                    <p className="screen-floor">Combate · Ronda {combat.round}</p>
+                    <ol className="screen-order" aria-label="Orden de iniciativa">
+                      {combat.order.map((combatant, index) => (
+                        <li
+                          key={combatant.id}
+                          className={index === combat.turn ? 'current' : undefined}
+                          aria-current={index === combat.turn ? 'step' : undefined}
+                        >
+                          {combatant.name}{' '}
+                          <span className="screen-initiative">{combatant.initiative.total}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {floor.kind === 'table' && (
+                  <p className="screen-floor">¿Qué hacéis? La palabra es de la mesa</p>
+                )}
+                {!combat && floor.kind === 'character' && (
+                  <p className="screen-floor">
+                    Tiene la palabra <strong>{floor.name}</strong>
+                  </p>
+                )}
+                {hands.length > 0 && (
+                  <p>
+                    Piden la palabra:{' '}
+                    {hands
+                      .map(
+                        (hand) =>
+                          `${hand.name} (${INTERVENTION_LABELS[hand.intent].toLowerCase()})`,
+                      )
+                      .join(' · ')}
+                  </p>
+                )}
+                {asked.map((request) => (
+                  <p key={request.id}>
+                    Tira <strong>{request.name}</strong> · {requestedText(request)}
+                  </p>
+                ))}
+              </section>
+            )}
           <section className="screen-reveal" aria-live="polite">
             {reveal?.kind === 'reveal' && (
               <>
@@ -162,8 +200,8 @@ export function ScreenPage() {
               >
                 <figcaption>
                   {line.name}
-                  {line.kind === 'intervention' && DOING[line.intent] && (
-                    <span className="screen-doing"> · {DOING[line.intent]}</span>
+                  {line.kind === 'intervention' && doing(line.intent, line.target) && (
+                    <span className="screen-doing"> · {doing(line.intent, line.target)}</span>
                   )}
                 </figcaption>
                 <blockquote className="prewrap">{line.text}</blockquote>

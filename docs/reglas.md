@@ -127,7 +127,12 @@ Con la espada tira 2d6 + 6. Contra un soldado (+4) impacta en tres de cada cuatr
 
 ### Iniciativa
 
-Al empezar el combate, cada PJ tira **2d6 + Destreza** y el máster tira una vez por cada grupo de enemigos. Se actúa de mayor a menor; los empates, para los PJ.
+Al empezar el combate, cada PJ tira **2d6 + Destreza** y el máster tira una vez por cada grupo de enemigos: **2d6 + la Destreza de su perfil** (ver [PNJ](#pnj)). Es una tirada de Destreza: una herida grave da desventaja, y Táctico da ventaja a todo su bando.
+
+Se actúa de mayor a menor, y el orden dura todo el combate:
+
+- Los empates, para los PJ. Entre dos PJ o dos grupos empatados, primero el de más Destreza.
+- Quien se une a mitad de combate, como unos refuerzos, tira al llegar y ocupa su sitio en el orden. Si ese sitio ya ha pasado en la ronda, empieza a actuar en la siguiente.
 
 ### Cuerpo a cuerpo
 
@@ -156,7 +161,7 @@ Es una tirada contra dificultad: **Destreza + Puntería** contra **6 + Destreza 
 | Cobertura parcial        | +2    |
 | El objetivo lleva escudo | +1    |
 
-Un objetivo con Destreza 2 a distancia media está a dificultad 10.
+Un objetivo con Destreza 2 a distancia media está a dificultad 10. Un PNJ de perfil usa la Destreza de su perfil.
 
 | Resultado       | Qué pasa                                                                                            |
 | --------------- | --------------------------------------------------------------------------------------------------- |
@@ -190,14 +195,14 @@ No hay puntos de vida. Cada personaje tiene tantas **casillas de rasguño** como
 
 Los PNJ importantes llevan ficha completa. Los secundarios usan un perfil: el máster tira **2d6 + el bonificador del perfil** en lo que el PNJ sabe hacer, y 2 menos en lo demás.
 
-| Perfil   | Bonificador | Aguanta | Daño | Ejemplos                                                       |
-| -------- | ----------- | ------- | ---- | -------------------------------------------------------------- |
-| Esbirro  | +2          | 1       | 1    | Matones, bandidos, bestias menores.                            |
-| Soldado  | +4          | 3       | 2    | Guardias, mercenarios, lobos.                                  |
-| Veterano | +6          | 4       | 2    | Capitanes, asesinos, bestias grandes.                          |
-| Campeón  | +8          | 6       | 3    | Un rival para todo el grupo: campeones, monstruos, hechiceros. |
+| Perfil   | Bonificador | Destreza | Aguanta | Daño | Ejemplos                                                       |
+| -------- | ----------- | -------- | ------- | ---- | -------------------------------------------------------------- |
+| Esbirro  | +2          | 1        | 1       | 1    | Matones, bandidos, bestias menores.                            |
+| Soldado  | +4          | 2        | 3       | 2    | Guardias, mercenarios, lobos.                                  |
+| Veterano | +6          | 3        | 4       | 2    | Capitanes, asesinos, bestias grandes.                          |
+| Campeón  | +8          | 4        | 6       | 3    | Un rival para todo el grupo: campeones, monstruos, hechiceros. |
 
-"Aguanta" es el daño total que soporta antes de caer.
+"Aguanta" es el daño total que soporta antes de caer. La **Destreza** es la mitad del bonificador: con ella tira la iniciativa y es la que cuenta para dispararle.
 
 ## Magia
 
