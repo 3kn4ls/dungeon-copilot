@@ -1,8 +1,15 @@
-import { TALK_MEMORY, type NpcView, type TalkLine } from '@dungeon-copilot/shared';
+import {
+  TALK_MEMORY,
+  type CharacterView,
+  type InterventionEvent,
+  type NpcView,
+  type TalkLine,
+} from '@dungeon-copilot/shared';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStoreGameEvent } from '../queries';
+import { RecipientSelect, useRecipient } from './Recipient';
 import { ConfirmButton, ErrorNote, LineEditor, useSessionState } from './ui';
 
 interface ChatLine extends TalkLine {
@@ -17,10 +24,22 @@ const newLineId = () => `${Date.now().toString(36)}-${(lineCount++).toString(36)
 /**
  * Conversación con un PNJ: el máster cuenta lo que dicen o hacen los personajes y la IA
  * responde como el PNJ. En la sala (con `gameId`), cada respuesta se puede retocar y enseñar a
- * la mesa, y el máster puede escribirla él si prefiere, o si Ollama falla. Se monta con `key`
- * por PNJ: la charla guardada es de uno solo.
+ * la mesa (o en secreto a uno de los `characters`), y el máster puede escribirla él si
+ * prefiere, o si Ollama falla. Con `answering`, lo que dijo un jugador al intervenir pasa a la
+ * charla con un botón, y lo primero que se enseñe lo atiende. Se monta con `key` por PNJ: la
+ * charla guardada es de uno solo.
  */
-export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
+export function NpcChat({
+  npc,
+  gameId,
+  characters = [],
+  answering,
+}: {
+  npc: NpcView;
+  gameId?: string;
+  characters?: CharacterView[];
+  answering?: InterventionEvent | undefined;
+}) {
   const [lines, setLines] = useSessionState<ChatLine[]>(
     `dc:charla:${gameId ?? 'prueba'}:${npc.id}`,
     () => [],
@@ -34,11 +53,20 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   const request = useRef<AbortController | null>(null);
   const log = useRef<HTMLOListElement>(null);
   const storeEvent = useStoreGameEvent(gameId ?? '');
+  const [to, setTo] = useRecipient(answering);
+  /** La intervención que ya ha pasado a la charla, para no pasarla dos veces. */
+  const [heard, setHeard] = useState<number | null>(null);
+  const recipient = characters.find((character) => character.id === to);
 
   const reveal = useMutation({
     mutationFn: (line: ChatLine) => {
       if (!gameId) throw new Error('Solo se enseña a la mesa desde la sala');
-      return api.speech(gameId, { npcId: npc.id, text: line.text });
+      return api.speech(gameId, {
+        npcId: npc.id,
+        text: line.text,
+        to: recipient?.id,
+        answers: answering?.id,
+      });
     },
     onSuccess: (event, line) => {
       storeEvent(event);
@@ -107,6 +135,17 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
   function send() {
     if (pending !== null || writing !== null) return;
     const said = takeInput();
+    void ask(lines, said);
+  }
+
+  /** Lo que dijo el jugador al intervenir pasa a la charla y el PNJ le responde. */
+  function hear(intervention: InterventionEvent) {
+    if (pending !== null || writing !== null) return;
+    const said = intervention.text
+      ? `${intervention.name}: ${intervention.text}`
+      : `[${intervention.name} se dirige a ${npc.name}]`;
+    setHeard(intervention.id);
+    setLines((old) => [...old, { id: newLineId(), role: 'table', text: said }]);
     void ask(lines, said);
   }
 
@@ -189,7 +228,7 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
                           disabled={reveal.isPending}
                           onClick={() => reveal.mutate(line)}
                         >
-                          Enseñar a la mesa
+                          {recipient ? `Enseñar solo a ${recipient.name}` : 'Enseñar a la mesa'}
                         </button>
                       )}
                       <button
@@ -232,6 +271,19 @@ export function NpcChat({ npc, gameId }: { npc: NpcView; gameId?: string }) {
         </ol>
       )}
 
+      {answering && heard !== answering.id && (
+        <div className="actions">
+          <button
+            type="button"
+            className="button primary"
+            disabled={pending !== null || writing !== null}
+            onClick={() => hear(answering)}
+          >
+            Que {npc.name} responda a {answering.name}
+          </button>
+        </div>
+      )}
+      {gameId && <RecipientSelect characters={characters} value={to} onChange={setTo} />}
       <ErrorNote error={error ?? reveal.error} />
       {Boolean(error) && last?.role === 'table' && (
         <div className="actions">

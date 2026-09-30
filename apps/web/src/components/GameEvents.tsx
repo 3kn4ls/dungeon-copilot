@@ -1,5 +1,13 @@
 import { OUTCOME_GUIDES, OUTCOME_LABELS, doublesShift } from '@dungeon-copilot/rules';
-import { rerollerLabel, type GameEvent, type GameRoll } from '@dungeon-copilot/shared';
+import {
+  INTERVENTION_LABELS,
+  rerollerLabel,
+  type Floor,
+  type GameEvent,
+  type GameRoll,
+  type RollRequestEvent,
+  type SettledHow,
+} from '@dungeon-copilot/shared';
 import type { ReactNode } from 'react';
 import { signed } from '../rules-text';
 import { Dice } from './Dice';
@@ -8,10 +16,62 @@ export const eventTime = (event: GameEvent) =>
   new Date(event.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
 /** "Normal (10)" o "Guardia veterano" / "Kael (Acrobacias)". */
-export function targetText(roll: GameRoll): string {
-  const { target } = roll;
+export function targetText({ target }: Pick<GameRoll, 'target'>): string {
   if (target.kind === 'difficulty') return target.label;
   return target.check ? `${target.label} (${target.check})` : target.label;
+}
+
+/**
+ * Qué tiene que tirar el personaje al que el máster pide una tirada: "Atletismo contra Difícil
+ * (12)" o, si se defiende, "Defensa contra Orco (Acrobacias)".
+ */
+export function requestedText(event: RollRequestEvent): string {
+  const { actor, target } = event.preview;
+  if (actor.characterId === event.characterId) {
+    return `${actor.check ?? actor.label} contra ${targetText(event.preview)}`;
+  }
+  const check = target.kind === 'opposed' ? target.check : undefined;
+  return check ? `Defensa contra ${actor.label} (${check})` : `Defensa contra ${actor.label}`;
+}
+
+/** Quién tiene la palabra, como se cuenta en el registro. */
+export function floorLine(floor: Floor): string {
+  switch (floor.kind) {
+    case 'master':
+      return 'El máster retoma la palabra.';
+    case 'table':
+      return 'La palabra es de la mesa: ¿qué hacéis?';
+    case 'character':
+      return `Tiene la palabra ${floor.name}.`;
+  }
+}
+
+const INTERVENTION_STATUS: Record<SettledHow | 'pending', string> = {
+  pending: 'Esperando al máster',
+  answered: 'Atendida',
+  dismissed: 'Ahora no',
+  withdrawn: 'Retirada',
+};
+
+const REQUEST_STATUS: Record<SettledHow | 'pending', string> = {
+  pending: 'Pendiente',
+  answered: 'Hecha',
+  dismissed: 'Retirada',
+  withdrawn: 'Retirada',
+};
+
+/** Con quién es un evento en secreto, si se sabe: para que el máster lo tenga claro. */
+function secretWith(event: GameEvent): string | undefined {
+  switch (event.kind) {
+    case 'intervention':
+    case 'rollRequest':
+      return event.name;
+    case 'reveal':
+    case 'speech':
+      return event.to?.name;
+    default:
+      return undefined;
+  }
 }
 
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */
@@ -82,22 +142,33 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
 /**
  * Un evento del registro de la partida, tal como se ve en la sala. `children` va debajo de
  * una tirada, como las complicaciones que propone la IA al máster. Una tirada `superseded`
- * se ha repetido con Suerte y ya no cuenta.
+ * se ha repetido con Suerte y ya no cuenta; `settled` dice cómo acabó una intervención o una
+ * tirada pedida que ya no espera. `master`: quien mira es el máster.
  */
 export function EventCard({
   event,
   superseded = false,
+  settled,
+  master = false,
   children,
 }: {
   event: GameEvent;
   superseded?: boolean;
+  settled?: SettledHow | undefined;
+  master?: boolean;
   children?: ReactNode;
 }) {
+  const partner = secretWith(event);
   const meta = (
     <p className="feed-meta">
       {eventTime(event)}
       {event.authorName && <> · {event.authorName}</>}
       {event.visibility === 'master' && <span className="badge secret">Solo tú lo ves</span>}
+      {event.visibility === 'private' && (
+        <span className="badge secret">
+          {master ? `En secreto${partner ? ` con ${partner}` : ''}` : 'En secreto: el máster y tú'}
+        </span>
+      )}
     </p>
   );
 
@@ -155,5 +226,44 @@ export function EventCard({
           <p className="prewrap">{event.text}</p>
         </article>
       );
+    case 'floor':
+      return (
+        <article className="feed-item feed-floor">
+          {meta}
+          <p>{floorLine(event.floor)}</p>
+        </article>
+      );
+    case 'intervention':
+      return (
+        <article className="feed-item feed-intervention">
+          {meta}
+          <h3>
+            {event.name} · {INTERVENTION_LABELS[event.intent]}
+          </h3>
+          {event.text ? (
+            <p className="prewrap">{event.text}</p>
+          ) : (
+            <p className="muted">Pide la palabra sin escribir nada.</p>
+          )}
+          <p className={`feed-status status-${settled ?? 'pending'}`}>
+            {INTERVENTION_STATUS[settled ?? 'pending']}
+          </p>
+        </article>
+      );
+    case 'rollRequest':
+      return (
+        <article className="feed-item feed-request">
+          {meta}
+          <h3>El máster pide una tirada a {event.name}</h3>
+          <p>{requestedText(event)}</p>
+          <p className={`feed-status status-${settled ?? 'pending'}`}>
+            {REQUEST_STATUS[settled ?? 'pending']}
+          </p>
+          {children}
+        </article>
+      );
+    case 'settled':
+      // Solo cambia cómo se ven la intervención o la tirada pedida que cierra.
+      return null;
   }
 }

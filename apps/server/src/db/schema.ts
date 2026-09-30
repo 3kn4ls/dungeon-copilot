@@ -165,6 +165,11 @@ export const gameEvents = pgTable(
       .references(() => games.id, { onDelete: 'cascade' }),
     visibility: text('visibility').$type<GameEventVisibility>().notNull(),
     authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * En un evento en secreto ("private"), el jugador que lo ve además del máster. Si se borra
+     * su cuenta, solo lo ve el máster.
+     */
+    playerId: uuid('player_id').references(() => users.id, { onDelete: 'set null' }),
     payload: jsonb('payload').$type<GameEventPayload>().notNull(),
     createdAt: createdAt(),
   },

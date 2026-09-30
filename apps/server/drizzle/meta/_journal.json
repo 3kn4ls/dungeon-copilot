@@ -29,6 +29,13 @@
       "when": 1790521082938,
       "tag": "0003_resumen-de-partida",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790787890673,
+      "tag": "0004_eventos-en-secreto",
+      "breakpoints": true
     }
   ]
 }

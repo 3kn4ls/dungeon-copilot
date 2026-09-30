@@ -14,6 +14,7 @@ import { registerCharacterRoutes } from './routes/characters';
 import { registerGameRoutes } from './routes/games';
 import { registerNpcRoutes } from './routes/npcs';
 import { registerRollRoutes } from './routes/rolls';
+import { registerTableRoutes } from './routes/table';
 import { registerWeb } from './web';
 
 export interface AppOptions {
@@ -70,6 +71,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerCampaignRoutes(app, ctx);
   registerCharacterRoutes(app, ctx);
   registerGameRoutes(app, ctx);
+  registerTableRoutes(app, ctx);
   registerNpcRoutes(app, ctx);
   registerAiRoutes(app, ctx);
   registerRollRoutes(app, ctx.random);

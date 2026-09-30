@@ -13,17 +13,12 @@ import {
   revealDraftSchema,
   revealSchema,
   speechSchema,
-  type GameDetail,
-  type GameEvent,
-  type GameEventPayload,
-  type GameEventVisibility,
+  type CharacterRef,
   type GameState,
-  type GameSummary,
-  type MemberRole,
   type PublicUser,
   type ScreenState,
 } from '@dungeon-copilot/shared';
-import { and, asc, desc, eq, gt, inArray, max, sql } from 'drizzle-orm';
+import { and, desc, eq, max, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   IDEAS_FORMAT,
@@ -42,20 +37,33 @@ import {
 } from '../ai/prompts';
 import { requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
-import type { Executor, Transaction } from '../db';
+import type { Transaction } from '../db';
 import { isUniqueViolation } from '../db/errors';
+import { campaigns, characters, gameEvents, games, npcs } from '../db/schema';
 import {
-  campaignMembers,
-  campaigns,
-  characters,
-  gameEvents,
-  games,
-  npcs,
-  users,
-} from '../db/schema';
+  CHARACTER_NOT_HERE,
+  GAME_CLOSED,
+  GAME_NOT_FOUND,
+  SCREEN_VIEWER,
+  createAddEvent,
+  findCampaignCharacter,
+  findEvents,
+  findGame,
+  findRollingCharacters,
+  findVisibleEvent,
+  isEventId,
+  requireMasterOf,
+  toDetail,
+  toEvent,
+  toSummary,
+  viewerOf,
+  type EventRow,
+  type FoundGame,
+  type GameRow,
+} from '../games/events';
+import { answeredIntervention } from '../games/pending';
 import { findCampaignContext, findNpcLines, findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
-import type { RollingCharacter } from '../games/rolls';
 import { rerollGameRoll, resolveGameRoll } from '../games/rolls';
 import { lastEventId, openEventStream } from '../games/stream';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
@@ -74,184 +82,38 @@ interface StreamQuery {
   after?: string;
 }
 
-const GAME_NOT_FOUND = 'Esa partida no existe o no es de tus campañas';
 const SCREEN_NOT_FOUND = 'Esta pantalla no existe o el máster ha cambiado su enlace';
-const GAME_CLOSED = 'La partida ya ha terminado';
 const GAME_STILL_OPEN = 'La partida sigue en juego: el resumen se escribe al terminarla';
 /**
  * El resumen lee la partida entera: sin GPU, el modelo puede tardar minutos solo en leerla.
  * El máster ya ha terminado de jugar y puede esperar más que a un PNJ.
  */
 const RECAP_TIMEOUT_MS = 300_000;
-const MASTER_ONLY = 'Solo el máster de la campaña puede hacer eso';
 const ROLL_NOT_FOUND = 'Esa tirada no existe en esta partida';
 const ROLL_WENT_WELL =
   'Esa tirada salió bien: las complicaciones son para los éxitos con coste, los fallos y las pifias';
 const ROLL_REPEATED = 'Esa tirada ya se ha repetido: cuenta la segunda';
 
-/** Los ids de los eventos son un integer de PostgreSQL: fuera de rango, no existen. */
-const isEventId = (id: number) => Number.isInteger(id) && id > 0 && id <= 2 ** 31 - 1;
-
 /** Los enlaces de pantalla son 32 caracteres hexadecimales (ver el esquema de campaigns). */
 const SCREEN_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
 
-type GameRow = typeof games.$inferSelect;
-type EventRow = typeof gameEvents.$inferSelect;
-
-interface FoundGame {
-  game: GameRow;
-  campaignName: string;
-  screenToken: string;
-  role: MemberRole;
-}
-
-function toSummary(row: GameRow): GameSummary {
-  return {
-    id: row.id,
-    number: row.number,
-    title: row.title,
-    status: row.status,
-    openedAt: row.openedAt.toISOString(),
-    closedAt: row.closedAt?.toISOString() ?? null,
-    recap: row.recap,
-  };
-}
-
-function toDetail({ game, campaignName, screenToken, role }: FoundGame): GameDetail {
-  const detail: GameDetail = {
-    ...toSummary(game),
-    campaignId: game.campaignId,
-    campaignName,
-    role,
-  };
-  if (role === 'master') detail.screenToken = screenToken;
-  return detail;
-}
-
-function toEvent(row: EventRow, authorName: string | null): GameEvent {
-  return {
-    ...row.payload,
-    id: row.id,
-    gameId: row.gameId,
-    visibility: row.visibility,
-    authorName,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-/** Eventos de una partida posteriores a `after`, del más antiguo al más reciente. */
-async function findEvents(
-  db: Executor,
-  gameId: string,
-  options: { after?: number; includeMaster: boolean },
-): Promise<GameEvent[]> {
-  const rows = await db
-    .select({ event: gameEvents, authorName: users.displayName })
-    .from(gameEvents)
-    .leftJoin(users, eq(users.id, gameEvents.authorId))
-    .where(
-      and(
-        eq(gameEvents.gameId, gameId),
-        gt(gameEvents.id, options.after ?? 0),
-        options.includeMaster ? undefined : eq(gameEvents.visibility, 'public'),
-      ),
-    )
-    .orderBy(asc(gameEvents.id));
-  return rows.map(({ event, authorName }) => toEvent(event, authorName));
-}
-
-/** Partida vista por `user`: 404 si no existe o si no es miembro de su campaña. */
-async function findGame(
-  db: Executor,
-  user: PublicUser,
-  gameId: string,
-  lock = false,
-): Promise<FoundGame> {
-  const query = db
-    .select({
-      game: games,
-      campaignName: campaigns.name,
-      screenToken: campaigns.screenToken,
-      role: campaignMembers.role,
-    })
-    .from(games)
-    .innerJoin(campaigns, eq(campaigns.id, games.campaignId))
-    .innerJoin(
-      campaignMembers,
-      and(eq(campaignMembers.campaignId, games.campaignId), eq(campaignMembers.userId, user.id)),
-    )
-    .where(eq(games.id, gameId));
-  const [found] = lock ? await query.for('update', { of: games }) : await query;
-  if (!found) throw notFound(GAME_NOT_FOUND);
-  return found;
-}
-
-async function findRollingCharacters(
+/**
+ * A quién va algo que enseña el máster: a toda la mesa o, con `to`, en secreto a un personaje
+ * (lo ven el máster y su jugador).
+ */
+async function recipient(
   tx: Transaction,
-  campaignId: string,
-  ids: string[],
-): Promise<Map<string, RollingCharacter & { ownerId: string }>> {
-  if (ids.length === 0) return new Map();
-  const rows = await tx
-    .select()
-    .from(characters)
-    .where(and(eq(characters.campaignId, campaignId), inArray(characters.id, ids)));
-  return new Map(
-    rows.map((row) => [
-      row.id,
-      {
-        id: row.id,
-        name: row.name,
-        ownerId: row.ownerId,
-        build: {
-          name: row.name,
-          background: row.background,
-          attributes: row.attributes,
-          skills: row.skills,
-          advancedSkills: row.advancedSkills,
-        },
-        wounds: { scratches: row.scratches, severity: row.severity },
-      },
-    ]),
-  );
+  found: FoundGame,
+  to: string | undefined,
+): Promise<{ ref?: CharacterRef; playerId: string | null }> {
+  if (to === undefined) return { playerId: null };
+  const { ownerId, ...ref } = await findCampaignCharacter(tx, found, to);
+  return { ref, playerId: ownerId };
 }
 
-export function registerGameRoutes(
-  app: FastifyInstance,
-  { db, hub, random, ai }: AppContext,
-): void {
-  /**
-   * Añade un evento a una partida en juego y lo reparte en vivo. La fila de la partida queda
-   * bloqueada durante la transacción: así los eventos de una partida se guardan en orden y
-   * nadie añade nada a una partida que se está cerrando.
-   */
-  async function addEvent(
-    user: PublicUser,
-    gameId: string,
-    action: (
-      tx: Transaction,
-      found: FoundGame,
-    ) => Promise<{ visibility: GameEventVisibility; payload: GameEventPayload }>,
-  ): Promise<{ event: GameEvent; found: FoundGame }> {
-    const { row, found } = await db.transaction(async (tx) => {
-      const found = await findGame(tx, user, gameId, true);
-      if (found.game.status !== 'open') throw new HttpError(409, GAME_CLOSED);
-      const { visibility, payload } = await action(tx, found);
-      const [row] = await tx
-        .insert(gameEvents)
-        .values({ gameId, visibility, authorId: user.id, payload })
-        .returning();
-      if (!row) throw new Error('La base de datos no devolvió el evento creado');
-      return { row, found };
-    });
-    const event = toEvent(row, user.displayName);
-    hub.publish(found.game.campaignId, event);
-    return { event, found };
-  }
-
-  const requireMasterOf = (found: FoundGame) => {
-    if (found.role !== 'master') throw forbidden(MASTER_ONLY);
-  };
+export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void {
+  const { db, hub, random, ai } = ctx;
+  const addEvent = createAddEvent(ctx);
 
   app.get<{ Params: IdParams }>('/api/campaigns/:id/games', async (request) => {
     const user = requireUser(request);
@@ -330,7 +192,7 @@ export function registerGameRoutes(
   app.get<{ Params: IdParams }>('/api/games/:id', async (request): Promise<GameState> => {
     const user = requireUser(request);
     const found = await findGame(db, user, parseId(request.params.id, GAME_NOT_FOUND));
-    const events = await findEvents(db, found.game.id, { includeMaster: found.role === 'master' });
+    const events = await findEvents(db, found.game.id, { viewer: viewerOf(found, user) });
     return { game: toDetail(found), events };
   });
 
@@ -339,9 +201,9 @@ export function registerGameRoutes(
     async (request, reply) => {
       const user = requireUser(request);
       const found = await findGame(db, user, parseId(request.params.id, GAME_NOT_FOUND));
-      const includeMaster = found.role === 'master';
+      const viewer = viewerOf(found, user);
       const after = lastEventId(request);
-      let catchUp = (from: number) => findEvents(db, found.game.id, { after: from, includeMaster });
+      let catchUp = (from: number) => findEvents(db, found.game.id, { after: from, viewer });
 
       if (found.game.status === 'closed') {
         // Una partida terminada ya no cambia: sin nada pendiente, 204 le dice al navegador
@@ -356,7 +218,7 @@ export function registerGameRoutes(
           campaignId: found.game.campaignId,
           gameId: found.game.id,
           userId: user.id,
-          seesMasterEvents: includeMaster,
+          seesMasterEvents: viewer.master,
         },
         after,
         catchUp,
@@ -370,9 +232,21 @@ export function registerGameRoutes(
     const user = requireUser(request);
     const gameId = parseId(request.params.id, GAME_NOT_FOUND);
     const body = parseBody(revealSchema, request.body, 'Revisa lo que quieres enseñar');
-    const { event } = await addEvent(user, gameId, async (_tx, found) => {
+    const { event } = await addEvent(user, gameId, async (tx, found) => {
       requireMasterOf(found);
-      return { visibility: 'public', payload: { kind: 'reveal', ...body } };
+      await answeredIntervention(tx, gameId, body.answers);
+      const { ref, playerId } = await recipient(tx, found, body.to);
+      return {
+        visibility: ref ? 'private' : 'public',
+        playerId,
+        payload: {
+          kind: 'reveal',
+          title: body.title,
+          body: body.body,
+          to: ref,
+          answers: body.answers,
+        },
+      };
     });
     return reply.status(201).send({ event });
   });
@@ -399,9 +273,19 @@ export function registerGameRoutes(
         .from(npcs)
         .where(and(eq(npcs.id, body.npcId), eq(npcs.campaignId, found.game.campaignId)));
       if (!npc) throw notFound('Ese PNJ no está en esta campaña');
+      await answeredIntervention(tx, gameId, body.answers);
+      const { ref, playerId } = await recipient(tx, found, body.to);
       return {
-        visibility: 'public',
-        payload: { kind: 'speech', npcId: npc.id, name: npc.name, text: body.text },
+        visibility: ref ? 'private' : 'public',
+        playerId,
+        payload: {
+          kind: 'speech',
+          npcId: npc.id,
+          name: npc.name,
+          text: body.text,
+          to: ref,
+          answers: body.answers,
+        },
       };
     });
     return reply.status(201).send({ event });
@@ -425,7 +309,7 @@ export function registerGameRoutes(
       const rolling = await findRollingCharacters(tx, found.game.campaignId, ids);
       for (const id of ids) {
         const character = rolling.get(id);
-        if (!character) throw notFound('Ese personaje no está en esta campaña');
+        if (!character) throw notFound(CHARACTER_NOT_HERE);
         if (!isMaster && character.ownerId !== user.id) {
           throw forbidden('Solo puedes tirar con tus personajes');
         }
@@ -439,7 +323,8 @@ export function registerGameRoutes(
 
   /**
    * Un personaje gasta un punto de Suerte para repetir su tirada: vuelve a tirar sus dados y
-   * cuenta el segundo resultado. La gastan su jugador o el máster, en las tiradas que ve la mesa.
+   * cuenta el segundo resultado. La gastan su jugador o el máster, en las tiradas que ve el
+   * jugador: las de toda la mesa y las que son en secreto para él.
    */
   app.post<{ Params: IdParams & { eventId: string } }>(
     '/api/games/:id/rolls/:eventId/reroll',
@@ -451,17 +336,10 @@ export function registerGameRoutes(
 
       const { event } = await addEvent(user, gameId, async (tx, found) => {
         const isMaster = found.role === 'master';
-        const [row] = isEventId(eventId)
-          ? await tx
-              .select({ visibility: gameEvents.visibility, payload: gameEvents.payload })
-              .from(gameEvents)
-              .where(and(eq(gameEvents.id, eventId), eq(gameEvents.gameId, gameId)))
-          : [];
-        // Una tirada secreta no existe para los jugadores.
-        if (row?.payload.kind !== 'roll' || (row.visibility !== 'public' && !isMaster)) {
-          throw notFound(ROLL_NOT_FOUND);
-        }
-        if (row.visibility !== 'public') {
+        // Una tirada secreta no existe para los jugadores; una en secreto, solo para el suyo.
+        const row = await findVisibleEvent(tx, gameId, eventId, viewerOf(found, user));
+        if (row?.payload.kind !== 'roll') throw notFound(ROLL_NOT_FOUND);
+        if (row.visibility === 'master') {
           throw new HttpError(409, 'Las tiradas secretas no se repiten con Suerte');
         }
         const { roll } = row.payload;
@@ -513,8 +391,10 @@ export function registerGameRoutes(
           .update(characters)
           .set({ luck: character.luck - 1, updatedAt: new Date() })
           .where(eq(characters.id, character.id));
+        // La repetición la ven los mismos que la tirada.
         return {
-          visibility: 'public',
+          visibility: row.visibility,
+          playerId: row.playerId,
           payload: { kind: 'roll', roll: rerollGameRoll(roll, eventId, body.side, random) },
         };
       });
@@ -567,8 +447,8 @@ export function registerGameRoutes(
     if (found.game.status === 'open') throw new HttpError(409, GAME_STILL_OPEN);
     const model = requireAi(ai);
 
-    // Las tiradas secretas se quedan fuera; las notas, si el máster lo prefiere.
-    const events = (await findEvents(db, gameId, { includeMaster: true })).filter(
+    // Lo secreto se queda fuera; las notas, si el máster lo prefiere.
+    const events = (await findEvents(db, gameId, { viewer: { master: true } })).filter(
       (event) => event.visibility === 'public' || (body.useNotes && event.kind === 'note'),
     );
     if (!hasLog(events) && !body.hint) {
@@ -734,7 +614,7 @@ export function registerGameRoutes(
     return {
       campaignName: campaign.name,
       game: game ? toSummary(game) : null,
-      events: game ? await findEvents(db, game.id, { includeMaster: false }) : [],
+      events: game ? await findEvents(db, game.id, { viewer: SCREEN_VIEWER }) : [],
     };
   });
 
@@ -749,7 +629,7 @@ export function registerGameRoutes(
         after: lastEventId(request),
         async catchUp(after) {
           const game = await latestGame(campaignId);
-          return game ? findEvents(db, game.id, { after, includeMaster: false }) : [];
+          return game ? findEvents(db, game.id, { after, viewer: SCREEN_VIEWER }) : [];
         },
       });
       return reply;

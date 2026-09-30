@@ -1845,3 +1845,215 @@ h1 .badge {
 .idea .badge {
   margin-left: 8px;
 }
+
+/* La palabra: quién la tiene, lo que piden los jugadores y las tiradas que pide el máster. */
+
+.floor-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.floor-status.yours {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Cuando le toca al jugador, su panel se nota desde lejos. */
+.panel.your-turn {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.intents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.intent-button {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 12px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intent-button:hover {
+  border-color: var(--accent);
+}
+
+.intent-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+}
+
+.waiting p {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
+.queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.queue-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.queue-item p {
+  margin: 0;
+}
+
+.queue-who .badge,
+.waiting .badge,
+.answering .badge,
+.requested-title .badge {
+  margin-left: 8px;
+}
+
+/* En las acciones del máster, la intervención a la que responde. */
+.answering {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.answering p {
+  margin: 0;
+}
+
+.requested-roll {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.requested-roll p {
+  margin: 0;
+}
+
+.requested-title {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.requested-roll .roll-bar {
+  padding-top: 10px;
+}
+
+.feed-floor {
+  padding: 8px 16px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.feed-intervention {
+  border-left: 4px solid var(--accent);
+}
+
+.feed-request {
+  border-left: 4px dashed var(--accent);
+}
+
+.feed-status {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.feed-status.status-pending {
+  color: var(--partial);
+}
+
+.feed-status.status-answered {
+  color: var(--success);
+}
+
+/* En la pantalla: quién tiene la palabra, quién la pide y qué tiradas faltan. */
+
+.screen-table {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 32px;
+  padding: 12px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: clamp(16px, 1.6vw, 26px);
+}
+
+.screen-table p {
+  margin: 0;
+}
+
+.screen-table strong,
+.screen-floor {
+  color: var(--accent);
+}
+
+.screen-floor {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(20px, 2.2vw, 36px);
+}
+
+/* Lo que dicen los personajes, en el color de la mesa; lo de los PNJ sigue en el suyo. */
+.screen-character {
+  border-left-color: var(--accent);
+}
+
+.screen-character figcaption {
+  color: var(--accent);
+}
+
+.screen-doing {
+  font-family: var(--body);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Las frases anteriores, más pequeñas: la última es la que se lee. */
+.screen-speech.earlier {
+  opacity: 0.7;
+}
+
+.screen-speech.earlier blockquote {
+  font-size: clamp(18px, 2vw, 32px);
+}

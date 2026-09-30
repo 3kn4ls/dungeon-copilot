@@ -412,6 +412,38 @@ describe('resumen de una partida', () => {
     expect(cleanRecap('a'.repeat(5000))).toHaveLength(4000);
   });
 
+  it('cuenta lo que dicen y hacen los personajes según sus jugadores, sin sus preguntas', () => {
+    const kael = { characterId: 'kael', name: 'Kael' };
+    const events: GameEventPayload[] = [
+      { kind: 'floor', floor: { kind: 'table' } },
+      { kind: 'intervention', ...kael, intent: 'speak', text: '¿Quién es el encapuchado?' },
+      { kind: 'intervention', ...kael, intent: 'ask', text: '¿Hay ventanas?' },
+      { kind: 'intervention', ...kael, intent: 'act', text: '' },
+      { kind: 'settled', of: 4, how: 'answered' },
+      { kind: 'intervention', ...kael, intent: 'attack', text: 'Le tiro la jarra' },
+    ];
+    const [, user] = recapMessages({
+      campaign,
+      characters: [],
+      game: { number: 1, title: '' },
+      events,
+      hint: '',
+    });
+    expect(user?.content).toContain(
+      [
+        'lo más antiguo a lo más reciente:',
+        '- Kael (PJ) habla, según su jugador: ¿Quién es el encapuchado?',
+        '- Kael (PJ) ataca, según su jugador: Le tiro la jarra',
+        '',
+      ].join('\n'),
+    );
+    // Dar la palabra, preguntar al máster o levantar la mano sin decir nada no cuentan.
+    expect(hasLog(events.filter((event) => event.kind !== 'intervention' || !event.text))).toBe(
+      false,
+    );
+    expect(hasLog([events[2]!])).toBe(false);
+  });
+
   it('dice quién ha repetido una tirada con Suerte', () => {
     const first = test('Mira', 12, [1, 2]);
     if (first.kind !== 'roll') throw new Error('Se esperaba una tirada');

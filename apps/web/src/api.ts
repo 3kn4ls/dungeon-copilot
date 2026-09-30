@@ -2,8 +2,10 @@ import type {
   AdvanceRequest,
   AiStatus,
   AiTextChunk,
+  AnswerInterventionRequest,
   ApiErrorBody,
   ApiIssue,
+  AskRollRequest,
   AuthResponse,
   AwardXpRequest,
   CampaignDetail,
@@ -21,7 +23,9 @@ import type {
   GameState,
   GameSummary,
   GenerateNpcRequest,
+  GiveFloorRequest,
   IdeasRequest,
+  InterventionRequest,
   JoinCampaignRequest,
   LoginRequest,
   MeResponse,
@@ -219,6 +223,25 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/rolls/${eventId}/reroll`, body).then((r) => r.event),
   speech: (id: string, body: SpeechRequest) =>
     post<EventResponse>(`/api/games/${id}/speeches`, body).then((r) => r.event),
+  /** El máster da la palabra: se la queda, a toda la mesa o a un personaje. */
+  giveFloor: (id: string, body: GiveFloorRequest) =>
+    post<EventResponse>(`/api/games/${id}/floor`, body).then((r) => r.event),
+  /** Un jugador interviene o pide la palabra con su personaje. */
+  intervene: (id: string, body: InterventionRequest) =>
+    post<EventResponse>(`/api/games/${id}/interventions`, body).then((r) => r.event),
+  answerIntervention: (id: string, eventId: number, body: AnswerInterventionRequest) =>
+    post<EventResponse>(`/api/games/${id}/interventions/${eventId}/answer`, body).then(
+      (r) => r.event,
+    ),
+  withdrawIntervention: (id: string, eventId: number) =>
+    post<EventResponse>(`/api/games/${id}/interventions/${eventId}/withdraw`).then((r) => r.event),
+  /** El máster pide una tirada a un personaje; la hace su jugador. */
+  askRoll: (id: string, body: AskRollRequest) =>
+    post<EventResponse>(`/api/games/${id}/roll-requests`, body).then((r) => r.event),
+  rollRequested: (id: string, eventId: number) =>
+    post<EventResponse>(`/api/games/${id}/roll-requests/${eventId}/roll`).then((r) => r.event),
+  withdrawRollRequest: (id: string, eventId: number) =>
+    post<EventResponse>(`/api/games/${id}/roll-requests/${eventId}/withdraw`).then((r) => r.event),
   saveRecap: (id: string, body: RecapRequest) =>
     put<{ game: GameDetail }>(`/api/games/${id}/recap`, body).then((r) => r.game),
   /** La IA propone un resumen de la partida, sin guardarlo. */
