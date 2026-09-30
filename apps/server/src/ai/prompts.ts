@@ -15,6 +15,7 @@ import {
   type GameEventPayload,
   type GameRoll,
   type GameRollSide,
+  type InterventionIntent,
   type NpcDraft,
   type TalkLine,
 } from '@dungeon-copilot/shared';
@@ -395,12 +396,32 @@ function rollName(roll: GameRoll): string {
   return who ? `La tirada, repetida con Suerte por ${who}` : 'La tirada';
 }
 
+/** Lo que hace un personaje al intervenir, dicho para el registro. */
+const INTERVENTION_VERBS: Record<Exclude<InterventionIntent, 'ask'>, string> = {
+  speak: 'habla',
+  act: 'actúa',
+  attack: 'ataca',
+};
+
 /** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
 function logLine(event: GameEventPayload): { text: string; weight: number } | null {
   switch (event.kind) {
+    // Quién tiene la palabra o qué tirada se pide no es la historia: lo es lo que pasa después.
     case 'opened':
     case 'closed':
+    case 'floor':
+    case 'rollRequest':
+    case 'settled':
       return null;
+    case 'intervention': {
+      const text = fit(event.text, LOG_LINE_CHARS);
+      // Lo que se pregunta al máster es fuera del personaje: no es parte de la historia.
+      if (!text || event.intent === 'ask') return null;
+      return {
+        text: `- ${event.name} (PJ) ${INTERVENTION_VERBS[event.intent]}, según su jugador: ${text}`,
+        weight: 1,
+      };
+    }
     case 'reveal': {
       const title = event.title.trim();
       const body = fit(event.body, LOG_LINE_CHARS);

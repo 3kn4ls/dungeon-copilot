@@ -1,22 +1,36 @@
 import {
   GAME_STATUS_LABELS,
+  INTERVENTION_LABELS,
+  currentFloor,
   gameName,
+  pendingInterventions,
+  pendingRollRequests,
   supersededRolls,
   type GameEvent,
+  type InterventionIntent,
   type ScreenState,
 } from '@dungeon-copilot/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { ApiError, api } from '../api';
-import { RollView } from '../components/GameEvents';
+import { RollView, requestedText } from '../components/GameEvents';
 import { useDocumentTitle } from '../components/ui';
 import { LIVE_STATUS_LABELS, useLiveEvents } from '../live';
 import { keys } from '../queries';
 
+/** Frases que se ven bajo la escena: lo último que dicen los PNJ y los personajes. */
+const DIALOGUE_LINES = 3;
+
+/** Lo que dice o hace un personaje en la escena, cuando no es solo hablar. */
+const DOING: Partial<Record<InterventionIntent, string>> = { act: 'actúa', attack: 'ataca' };
+
+type DialogueLine = GameEvent & { kind: 'speech' | 'intervention' };
+
 /**
  * Pantalla de la mesa: para una tele o una tablet que todos ven. No necesita sesión; el enlace
- * secreto de la campaña basta. Enseña lo último que ha revelado el máster y las últimas tiradas.
+ * secreto de la campaña basta. Enseña lo último que ha revelado el máster, lo que se dice en la
+ * escena, quién tiene la palabra y las últimas tiradas.
  */
 export function ScreenPage() {
   const { token = '' } = useParams();
@@ -62,9 +76,21 @@ export function ScreenPage() {
 
   const { campaignName, game, events } = screen.data;
   const reveal = events.findLast((event) => event.kind === 'reveal');
-  // Lo que dice un PNJ se ve bajo la escena en la que lo dijo, hasta que el máster enseñe otra.
-  const lastSpeech = events.findLast((event) => event.kind === 'speech');
-  const speech = lastSpeech && (!reveal || lastSpeech.id > reveal.id) ? lastSpeech : undefined;
+  // Lo que dicen los PNJ y los personajes (si lo escriben) se ve bajo la escena en la que lo
+  // dijeron, hasta que el máster enseñe otra. Las preguntas al máster no son de la escena.
+  const dialogue = events
+    .filter(
+      (event): event is DialogueLine =>
+        event.id > (reveal?.id ?? 0) &&
+        (event.kind === 'speech' ||
+          (event.kind === 'intervention' && event.intent !== 'ask' && event.text !== '')),
+    )
+    .slice(-DIALOGUE_LINES);
+  // Quién tiene la palabra, quién la pide y qué tiradas faltan, mientras se juega.
+  const playing = game?.status === 'open';
+  const floor = currentFloor(events);
+  const hands = playing ? pendingInterventions(events) : [];
+  const asked = playing ? pendingRollRequests(events) : [];
   // Una tirada repetida con Suerte ya no cuenta: solo se ve la repetición.
   const superseded = supersededRolls(events);
   const rolls = events
@@ -89,6 +115,33 @@ export function ScreenPage() {
         <p className="screen-waiting">Esperando a que empiece la partida…</p>
       ) : (
         <main className="screen-main">
+          {playing && (floor.kind !== 'master' || hands.length > 0 || asked.length > 0) && (
+            <section className="screen-table" aria-live="polite">
+              {floor.kind === 'table' && (
+                <p className="screen-floor">¿Qué hacéis? La palabra es de la mesa</p>
+              )}
+              {floor.kind === 'character' && (
+                <p className="screen-floor">
+                  Tiene la palabra <strong>{floor.name}</strong>
+                </p>
+              )}
+              {hands.length > 0 && (
+                <p>
+                  Piden la palabra:{' '}
+                  {hands
+                    .map(
+                      (hand) => `${hand.name} (${INTERVENTION_LABELS[hand.intent].toLowerCase()})`,
+                    )
+                    .join(' · ')}
+                </p>
+              )}
+              {asked.map((request) => (
+                <p key={request.id}>
+                  Tira <strong>{request.name}</strong> · {requestedText(request)}
+                </p>
+              ))}
+            </section>
+          )}
           <section className="screen-reveal" aria-live="polite">
             {reveal?.kind === 'reveal' && (
               <>
@@ -96,13 +149,27 @@ export function ScreenPage() {
                 <p className="prewrap">{reveal.body}</p>
               </>
             )}
-            {speech?.kind === 'speech' && (
-              <figure className="screen-speech">
-                <figcaption>{speech.name}</figcaption>
-                <blockquote className="prewrap">{speech.text}</blockquote>
+            {dialogue.map((line, index) => (
+              <figure
+                key={line.id}
+                className={[
+                  'screen-speech',
+                  line.kind === 'intervention' && 'screen-character',
+                  index < dialogue.length - 1 && 'earlier',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <figcaption>
+                  {line.name}
+                  {line.kind === 'intervention' && DOING[line.intent] && (
+                    <span className="screen-doing"> · {DOING[line.intent]}</span>
+                  )}
+                </figcaption>
+                <blockquote className="prewrap">{line.text}</blockquote>
               </figure>
-            )}
-            {!reveal && !speech && (
+            ))}
+            {!reveal && dialogue.length === 0 && (
               <p className="screen-waiting">Aquí aparecerá lo que enseñe el máster.</p>
             )}
             {game.status === 'closed' && <p className="screen-banner">La partida ha terminado</p>}

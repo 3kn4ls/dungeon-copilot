@@ -8,43 +8,60 @@ import {
   SEVERITY_LABELS,
   SITUATION_LABELS,
   XP_AWARDS,
-  checkBonus,
-  combineEdges,
-  conditionEdges,
   defaultSkillCatalog,
   needsComplication,
   opposedOdds,
   successChance,
   testOdds,
-  type Attribute,
   type DifficultyLevel,
   type Edge,
   type Situation,
 } from '@dungeon-copilot/rules';
 import {
   GAME_STATUS_LABELS,
+  currentFloor,
   gameName,
+  pendingInterventions,
+  pendingRollRequests,
+  settledEvents,
   supersededRolls,
+  type AskRollRequest,
   type CharacterView,
   type GameDetail,
+  type GameEvent,
   type GameRollRequest,
   type GameState,
   type GameSummary,
+  type InterventionEvent,
+  type InterventionIntent,
   type NpcView,
-  type RollSideRequest,
+  type SettledHow,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
 import { Complications } from '../components/Complications';
+import { FloorControl, FloorStatus, holdsFloor } from '../components/Floor';
 import { EventCard } from '../components/GameEvents';
 import { AiIdeas } from '../components/Ideas';
+import {
+  AnsweringNote,
+  InterventionPanel,
+  InterventionQueue,
+  type Handoff,
+} from '../components/Interventions';
 import { LuckReroll, refreshLuck } from '../components/Luck';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
 import { RecapPanel } from '../components/Recap';
+import { RecipientSelect, useRecipient } from '../components/Recipient';
+import {
+  PendingRollRequests,
+  RequestedRollCard,
+  RollRequestAction,
+} from '../components/RollRequests';
 import { ScreenLink } from '../components/ScreenLink';
 import {
   ConfirmButton,
@@ -66,6 +83,15 @@ import {
   useStoreGameEvent,
   useStoreNpc,
 } from '../queries';
+import {
+  characterDraft,
+  freeDraft,
+  npcDraft,
+  percent,
+  previewCheck,
+  toSideRequest,
+  type SideDraft,
+} from '../rolling';
 import { signed } from '../rules-text';
 
 const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
@@ -79,7 +105,9 @@ export function GamePage() {
   const storeEvent = useStoreGameEvent(gameId);
   const queryClient = useQueryClient();
   const ai = useAiStatus();
+  const { data: me } = useMe();
   const game = state.data?.game;
+  const characters = useCharacters(game?.campaignId ?? '');
 
   const live = useLiveEvents({
     url: game?.status === 'open' ? `/api/games/${gameId}/stream` : null,
@@ -97,7 +125,24 @@ export function GamePage() {
     // Ya no deja conectar (por ejemplo, han echado a quien mira): se vuelve a pedir la partida.
     onRefused: () => void queryClient.invalidateQueries({ queryKey: keys.game(gameId) }),
   });
-  useDocumentTitle(game ? gameName(game) : undefined);
+
+  // Lo que espera a quien mira: al máster, las intervenciones de la mesa; a un jugador, la
+  // palabra o una tirada que le han pedido. Se ve en el título de la pestaña.
+  const events = state.data?.events ?? [];
+  const inPlay = game?.status === 'open';
+  const mine = (characters.data ?? [])
+    .filter((character) => character.ownerId === me?.user?.id)
+    .map((character) => character.id);
+  const forMaster = inPlay && game?.role === 'master' ? pendingInterventions(events).length : 0;
+  const yourTurn =
+    inPlay &&
+    game?.role === 'player' &&
+    mine.length > 0 &&
+    (holdsFloor(currentFloor(events), mine) ||
+      pendingRollRequests(events).some((asked) => mine.includes(asked.characterId)));
+  useYourTurn(yourTurn);
+  const waiting = yourTurn ? '¡Te toca! · ' : forMaster > 0 ? `(${forMaster}) ` : '';
+  useDocumentTitle(game ? `${waiting}${gameName(game)}` : undefined);
 
   // Si deja de tener acceso (le echan de la campaña), la partida guardada ya no vale.
   const lost = state.error instanceof ApiError && state.error.status === 404;
@@ -106,6 +151,8 @@ export function GamePage() {
   const isOpen = game.status === 'open';
   // Una tirada repetida con Suerte ya no cuenta: cuenta la repetición.
   const superseded = supersededRolls(state.data.events);
+  // Cómo acabaron las intervenciones y las tiradas pedidas que ya no esperan.
+  const settled = settledEvents(state.data.events);
   // Repetir y complicar se hace al momento: solo en las últimas tiradas que cuentan.
   const recent = isOpen
     ? state.data.events
@@ -119,10 +166,11 @@ export function GamePage() {
           .map((event) => event.id)
       : [],
   );
-  // La Suerte se gasta en lo que ve la mesa: las tiradas secretas no se repiten.
+  // La Suerte se gasta en lo que ve quien tira: las tiradas secretas del máster no se repiten.
   const rerollable = new Set(
-    recent.filter((event) => event.visibility === 'public').map((event) => event.id),
+    recent.filter((event) => event.visibility !== 'master').map((event) => event.id),
   );
+  const intents = rollIntents(state.data.events);
 
   return (
     <>
@@ -146,7 +194,11 @@ export function GamePage() {
       <div className="room">
         <div className="room-actions">
           {isOpen ? (
-            <Actions state={state.data} />
+            isMaster ? (
+              <MasterDesk state={state.data} />
+            ) : (
+              <PlayerDesk state={state.data} settled={settled} />
+            )
           ) : (
             <>
               <section className="panel">
@@ -168,18 +220,29 @@ export function GamePage() {
         <section className="room-feed panel" aria-labelledby="feed-heading">
           <h2 id="feed-heading">Registro</h2>
           <ol className="feed" aria-live="polite">
-            {[...state.data.events].reverse().map((event) => (
-              <li key={event.id}>
-                <EventCard event={event} superseded={superseded.has(event.id)}>
-                  {event.kind === 'roll' && rerollable.has(event.id) && (
-                    <LuckReroll game={game} event={event} />
-                  )}
-                  {event.kind === 'roll' && complicated.has(event.id) && (
-                    <Complications game={game} event={event} />
-                  )}
-                </EventCard>
-              </li>
-            ))}
+            {[...state.data.events]
+              .reverse()
+              .filter((event) => event.kind !== 'settled')
+              .map((event) => (
+                <li key={event.id}>
+                  <EventCard
+                    event={event}
+                    superseded={superseded.has(event.id)}
+                    settled={settled.get(event.id)}
+                    master={isMaster}
+                  >
+                    {event.kind === 'roll' && rerollable.has(event.id) && (
+                      <LuckReroll game={game} event={event} />
+                    )}
+                    {event.kind === 'roll' && complicated.has(event.id) && (
+                      <Complications game={game} event={event} intent={intents.get(event.id)} />
+                    )}
+                    {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
+                      <RollRequestAction game={game} event={event} />
+                    )}
+                  </EventCard>
+                </li>
+              ))}
           </ol>
         </section>
 
@@ -199,6 +262,37 @@ function LiveBadge({ status }: { status: LiveStatus }) {
   return <span className={`live-status live-${status}`}>{LIVE_STATUS_LABELS[status]}</span>;
 }
 
+/** Cuando le toca a un jugador (la palabra o una tirada), su móvil vibra, si puede. */
+function useYourTurn(active: boolean) {
+  const was = useRef(active);
+  useEffect(() => {
+    if (active && !was.current && 'vibrate' in navigator) navigator.vibrate(200);
+    was.current = active;
+  }, [active]);
+}
+
+/**
+ * Lo que intentaba quien tira, si el máster pidió la tirada para atender una intervención con
+ * texto: la IA lo tiene en cuenta al proponer complicaciones.
+ */
+function rollIntents(events: readonly GameEvent[]): Map<number, string> {
+  const texts = new Map<number, string>();
+  const answered = new Map<number, number>();
+  const intents = new Map<number, string>();
+  for (const event of events) {
+    if (event.kind === 'intervention' && event.text) texts.set(event.id, event.text);
+    if (event.kind === 'rollRequest' && event.answers !== undefined) {
+      answered.set(event.id, event.answers);
+    }
+    if (event.kind === 'roll' && event.roll.requested !== undefined) {
+      const intervention = answered.get(event.roll.requested);
+      const text = intervention === undefined ? undefined : texts.get(intervention);
+      if (text) intents.set(event.id, text);
+    }
+  }
+  return intents;
+}
+
 /** Suerte y PX cambian al abrir y cerrar partidas: fichas y listas se vuelven a pedir. */
 function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaignId: string) {
   void queryClient.invalidateQueries({ queryKey: keys.campaign(campaignId) });
@@ -206,42 +300,140 @@ function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaig
   void queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
 }
 
+/**
+ * La sala del jugador: quién tiene la palabra, las tiradas que le pide el máster y sus botones
+ * para intervenir. Debajo, por si hace falta, su formulario para tirar por su cuenta.
+ */
+function PlayerDesk({
+  state,
+  settled,
+}: {
+  state: GameState;
+  settled: ReadonlyMap<number, SettledHow>;
+}) {
+  const { game, events } = state;
+  const { data: me } = useMe();
+  const characters = useCharacters(game.campaignId);
+  const all = characters.data ?? [];
+  const mine = all.filter((character) => character.ownerId === me?.user?.id);
+  const ids = mine.map((character) => character.id);
+  const floor = currentFloor(events);
+  const asked = pendingRollRequests(events).filter((event) => ids.includes(event.characterId));
+
+  return (
+    <>
+      {mine.length > 0 && (
+        <section
+          className={holdsFloor(floor, ids) || asked.length > 0 ? 'panel your-turn' : 'panel'}
+          aria-labelledby="floor-heading"
+        >
+          <h2 id="floor-heading">La palabra</h2>
+          <FloorStatus floor={floor} characterIds={ids} />
+          {asked.map((event) => (
+            <RequestedRollCard key={event.id} game={game} event={event} characters={all} />
+          ))}
+          <InterventionPanel
+            game={game}
+            floor={floor}
+            characters={mine}
+            events={events}
+            settled={settled}
+          />
+        </section>
+      )}
+      <RollForm game={game} />
+    </>
+  );
+}
+
 type Action = 'roll' | 'reveal' | 'talk' | 'note';
 
-function Actions({ state }: { state: GameState }) {
+/**
+ * La mesa del máster: a quién da la palabra, las intervenciones que esperan y las tiradas que
+ * ha pedido; y sus acciones (enseñar, hablar por un PNJ, tirar, anotar). Lo que elige hacer con
+ * una intervención abre la acción que toca, lista para atenderla.
+ */
+function MasterDesk({ state }: { state: GameState }) {
+  const { game, events } = state;
   const [action, setAction] = useState<Action>('reveal');
-  if (state.game.role !== 'master') return <RollForm game={state.game} />;
-  // Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo que se
-  // estaba escribiendo ni las ideas de la IA.
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const desk = useRef<HTMLElement>(null);
+  const characters = useCharacters(game.campaignId).data ?? [];
+  const floor = currentFloor(events);
+  const waiting = pendingInterventions(events);
+  // En cuanto la intervención deja de esperar (atendida o retirada), ya no se responde a ella.
+  const answering =
+    handoff && waiting.some((intervention) => intervention.id === handoff.intervention.id)
+      ? handoff
+      : null;
+  const answeringFor = (to: Handoff['to']) =>
+    answering?.to === to ? answering.intervention : undefined;
+  const stopAnswering = () => setHandoff(null);
+
   return (
-    <section className="panel" aria-label="Acciones del máster">
-      <Segmented
-        label="Qué quieres hacer"
-        value={action}
-        options={[
-          ['reveal', 'Enseñar'],
-          ['talk', 'Hablar'],
-          ['roll', 'Tirar'],
-          ['note', 'Anotar'],
-        ]}
-        onChange={setAction}
-      />
-      <div hidden={action !== 'reveal'}>
-        <RevealForm
-          game={state.game}
-          starting={!state.events.some((event) => event.kind === 'reveal')}
+    <>
+      <section className="panel" aria-labelledby="floor-heading">
+        <h2 id="floor-heading">La palabra</h2>
+        <FloorControl game={game} floor={floor} characters={characters} />
+        <InterventionQueue
+          game={game}
+          floor={floor}
+          pending={waiting}
+          onHandoff={(next) => {
+            setHandoff(next);
+            setAction(next.to);
+            desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          }}
         />
-      </div>
-      <div hidden={action !== 'talk'}>
-        <TalkPanel game={state.game} />
-      </div>
-      <div hidden={action !== 'roll'}>
-        <RollForm game={state.game} embedded />
-      </div>
-      <div hidden={action !== 'note'}>
-        <NoteForm gameId={state.game.id} />
-      </div>
-    </section>
+        <PendingRollRequests game={game} pending={pendingRollRequests(events)} />
+      </section>
+
+      {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
+          que se estaba escribiendo ni las ideas de la IA. */}
+      <section className="panel" aria-label="Acciones del máster" ref={desk}>
+        <Segmented
+          label="Qué quieres hacer"
+          value={action}
+          options={[
+            ['reveal', 'Enseñar'],
+            ['talk', 'Hablar'],
+            ['roll', 'Tirar'],
+            ['note', 'Anotar'],
+          ]}
+          onChange={setAction}
+        />
+        <div hidden={action !== 'reveal'}>
+          <RevealForm
+            game={game}
+            characters={characters}
+            starting={!events.some((event) => event.kind === 'reveal')}
+            answering={answeringFor('reveal')}
+            onStopAnswering={stopAnswering}
+          />
+        </div>
+        <div hidden={action !== 'talk'}>
+          <TalkPanel
+            game={game}
+            characters={characters}
+            answering={answeringFor('talk')}
+            onStopAnswering={stopAnswering}
+          />
+        </div>
+        <div hidden={action !== 'roll'}>
+          {/* Cada intervención que se atiende empieza la tirada de cero, ya preparada. */}
+          <RollForm
+            key={answeringFor('roll')?.id ?? 'libre'}
+            game={game}
+            embedded
+            answering={answeringFor('roll')}
+            onStopAnswering={stopAnswering}
+          />
+        </div>
+        <div hidden={action !== 'note'}>
+          <NoteForm gameId={game.id} />
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -260,12 +452,26 @@ function recallTitle(previous: GameSummary, game: GameDetail): string {
     : `Lo que pasó en la partida ${previous.number}`;
 }
 
+/** "Enseñar a la mesa", o "Enseñar solo a Kael" si va en secreto. */
+function showLabel(characters: CharacterView[], to: string): string {
+  const name = characters.find((character) => character.id === to)?.name;
+  return name ? `Enseñar solo a ${name}` : 'Enseñar a la mesa';
+}
+
 /**
- * Lo que el máster enseña a la mesa. Con IA, puede escribir solo unas notas y pedir que las
- * convierta en una descripción, o pedir ideas de lo que puede pasar si la mesa se atasca.
- * Con `starting`, aún no se ha enseñado nada: se ofrece recordar la partida anterior.
+ * Lo que el máster enseña a la mesa, o en secreto a un personaje. Con IA, puede escribir solo
+ * unas notas y pedir que las convierta en una descripción, o pedir ideas de lo que puede pasar
+ * si la mesa se atasca. Con `starting`, aún no se ha enseñado nada: se ofrece recordar la
+ * partida anterior. Con `answering`, lo que enseñe responde a esa intervención.
  */
-function RevealForm({ game, starting }: { game: GameDetail; starting: boolean }) {
+function RevealForm(props: {
+  game: GameDetail;
+  characters: CharacterView[];
+  starting: boolean;
+  answering: InterventionEvent | undefined;
+  onStopAnswering: () => void;
+}) {
+  const { game, characters, starting, answering, onStopAnswering } = props;
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const bodyField = useRef<HTMLTextAreaElement>(null);
@@ -273,17 +479,21 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
   const [notes, setNotes] = useState<string | null>(null);
   /** La última descripción de la IA, para saber si el máster la ha retocado. */
   const [described, setDescribed] = useState('');
+  const [to, setTo, toEveryone] = useRecipient(answering);
   const ai = useAiStatus();
   const writer = useAiText();
   const previous = usePreviousRecap(game);
   const storeEvent = useStoreGameEvent(game.id);
   const reveal = useMutation({
-    mutationFn: () => api.reveal(game.id, { title, body }),
+    mutationFn: () =>
+      api.reveal(game.id, { title, body, to: to || undefined, answers: answering?.id }),
     onSuccess: (event) => {
       storeEvent(event);
       setTitle('');
       setBody('');
       setNotes(null);
+      // Lo siguiente vuelve a ser para toda la mesa: nada se susurra sin querer.
+      toEveryone();
     },
   });
   const recall = starting && !title && !body ? previous : undefined;
@@ -313,6 +523,7 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
           reveal.mutate();
         }}
       >
+        {answering && <AnsweringNote intervention={answering} onCancel={onStopAnswering} />}
         <p className="muted">Lo que escribas aparece al momento en la sala y en la pantalla.</p>
         {recall && (
           <div className="recall">
@@ -408,13 +619,14 @@ function RevealForm({ game, starting }: { game: GameDetail; starting: boolean })
             )}
           </div>
         )}
+        <RecipientSelect characters={characters} value={to} onChange={setTo} />
         <ErrorNote error={reveal.error ?? writer.error} />
         <button
           type="submit"
           className="button primary"
           disabled={reveal.isPending || writer.writing}
         >
-          Enseñar a la mesa
+          {showLabel(characters, to)}
         </button>
       </form>
       {aiEnabled && (
@@ -485,9 +697,16 @@ function NoteForm({ gameId }: { gameId: string }) {
 
 /**
  * Hablar por boca de un PNJ. Con IA, el máster cuenta lo que dice la mesa y la IA responde;
- * sin ella, escribe él lo que dice el PNJ. En los dos casos, la frase se enseña a la mesa.
+ * sin ella, escribe él lo que dice el PNJ. En los dos casos, la frase se enseña a la mesa (o en
+ * secreto a un personaje). Con `answering`, responde a esa intervención.
  */
-function TalkPanel({ game }: { game: GameDetail }) {
+function TalkPanel(props: {
+  game: GameDetail;
+  characters: CharacterView[];
+  answering: InterventionEvent | undefined;
+  onStopAnswering: () => void;
+}) {
+  const { game, characters, answering, onStopAnswering } = props;
   const npcs = useNpcs(game.campaignId);
   const ai = useAiStatus();
   const [chosen, setChosen] = useState<string | null>(null);
@@ -500,6 +719,7 @@ function TalkPanel({ game }: { game: GameDetail }) {
 
   return (
     <div className="stack tight">
+      {answering && <AnsweringNote intervention={answering} onCancel={onStopAnswering} />}
       {list.length > 0 && (
         <label className="field">
           <span className="field-label">PNJ</span>
@@ -531,9 +751,21 @@ function TalkPanel({ game }: { game: GameDetail }) {
             <Link to={`/pnj/${npc.id}`}>Editar la ficha</Link>
           </details>
           {aiEnabled ? (
-            <NpcChat key={npc.id} npc={npc} gameId={game.id} />
+            <NpcChat
+              key={npc.id}
+              npc={npc}
+              gameId={game.id}
+              characters={characters}
+              answering={answering}
+            />
           ) : (
-            <SpeechForm key={npc.id} gameId={game.id} npc={npc} />
+            <SpeechForm
+              key={npc.id}
+              gameId={game.id}
+              npc={npc}
+              characters={characters}
+              answering={answering}
+            />
           )}
         </>
       ) : (
@@ -600,15 +832,24 @@ function ImproviseNpc(props: {
   );
 }
 
-/** Sin IA: el máster escribe lo que dice el PNJ y lo enseña a la mesa. */
-function SpeechForm({ gameId, npc }: { gameId: string; npc: NpcView }) {
+/** Sin IA: el máster escribe lo que dice el PNJ y lo enseña a la mesa o a un personaje. */
+function SpeechForm(props: {
+  gameId: string;
+  npc: NpcView;
+  characters: CharacterView[];
+  answering: InterventionEvent | undefined;
+}) {
+  const { gameId, npc, characters, answering } = props;
   const [text, setText] = useState('');
+  const [to, setTo, toEveryone] = useRecipient(answering);
   const storeEvent = useStoreGameEvent(gameId);
   const speak = useMutation({
-    mutationFn: () => api.speech(gameId, { npcId: npc.id, text }),
+    mutationFn: () =>
+      api.speech(gameId, { npcId: npc.id, text, to: to || undefined, answers: answering?.id }),
     onSuccess: (event) => {
       storeEvent(event);
       setText('');
+      toEveryone();
     },
   });
 
@@ -633,102 +874,36 @@ function SpeechForm({ gameId, npc }: { gameId: string; npc: NpcView }) {
       <p className="hint">
         Con Ollama configurado en el servidor, la IA te propondría qué responde {npc.name}.
       </p>
+      <RecipientSelect characters={characters} value={to} onChange={setTo} />
       <ErrorNote error={speak.error} />
       <button type="submit" className="button primary" disabled={speak.isPending}>
-        Enseñar a la mesa
+        {showLabel(characters, to)}
       </button>
     </form>
   );
 }
 
-/** Lado de una tirada mientras se prepara: un personaje o algo que describe el máster. */
-type SideDraft =
-  | { kind: 'character'; characterId: string; check: string; modifier: number; edge: Edge }
-  | { kind: 'free'; label: string; bonus: number; edge: Edge; npcId?: string };
+/** Con qué tira, de entrada, quien ha intervenido: lo más probable según lo que quiere hacer. */
+const INTENT_CHECKS: Record<InterventionIntent, string | undefined> = {
+  speak: 'skill:persuasion',
+  // Su mejor habilidad.
+  act: undefined,
+  ask: 'skill:perception',
+  attack: 'skill:melee-weapons',
+};
 
-/** "skill:athletics" o "attribute:strength": con qué tira el personaje. */
-function parseCheck(check: string): { skill?: string; attribute?: Attribute } {
-  const [type, id = ''] = check.split(':');
-  return type === 'skill' ? { skill: id } : { attribute: id as Attribute };
-}
-
-/** Por defecto, la habilidad en la que el personaje tiene más rango. */
-function defaultCheck(character: CharacterView): string {
-  const best = Object.entries(character.skills).sort((a, b) => b[1] - a[1])[0];
-  return best ? `skill:${best[0]}` : 'attribute:strength';
-}
-
-function characterDraft(character: CharacterView): SideDraft {
-  return {
-    kind: 'character',
-    characterId: character.id,
-    check: defaultCheck(character),
-    modifier: 0,
-    edge: 'none',
-  };
-}
-
-const freeDraft = (label: string): SideDraft => ({
-  kind: 'free',
-  label,
-  bonus: NPC_PROFILES.soldier.bonus,
-  edge: 'none',
-});
-
-/** Un PNJ de la campaña tira con el bonificador de su perfil (o el de soldado, si no pelea). */
-const npcDraft = (npc: NpcView): SideDraft => ({
-  kind: 'free',
-  label: npc.name,
-  bonus: NPC_PROFILES[npc.profile ?? 'soldier'].bonus,
-  edge: 'none',
-  npcId: npc.id,
-});
-
-function toSideRequest(draft: SideDraft): RollSideRequest {
-  if (draft.kind === 'free') {
-    return { kind: 'free', label: draft.label, bonus: draft.bonus, edge: draft.edge };
-  }
-  return {
-    kind: 'character',
-    characterId: draft.characterId,
-    ...parseCheck(draft.check),
-    modifier: draft.modifier,
-    edge: draft.edge,
-  };
-}
-
-/** Bonificador y ventaja con los que tiraría el lado, como los calculará el servidor. */
-function previewCheck(
-  draft: SideDraft,
-  characters: CharacterView[],
-): { bonus: number; edge: Edge; wounded: boolean } | null {
-  if (draft.kind === 'free') return { bonus: draft.bonus, edge: draft.edge, wounded: false };
-  const character = characters.find((c) => c.id === draft.characterId);
-  if (!character) return null;
-  const { skill, attribute } = parseCheck(draft.check);
-  const build = {
-    name: character.name,
-    background: character.background,
-    attributes: character.attributes,
-    skills: character.skills,
-    advancedSkills: character.advancedSkills,
-  };
-  const breakdown = checkBonus(build, { skill, attribute, modifier: draft.modifier });
-  const imposed = conditionEdges(
-    build,
-    { attribute: breakdown.attribute, skill },
-    { wounds: character.wounds },
-  );
-  return {
-    bonus: breakdown.bonus,
-    edge: combineEdges(draft.edge, ...imposed),
-    wounded: imposed.includes('disadvantage'),
-  };
-}
-
-const percent = (value: number) => `${Math.round(value * 100)}%`;
-
-function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boolean }) {
+/**
+ * Tirar en la partida. El máster tira con cualquiera, también en secreto, o pide la tirada al
+ * jugador del personaje que tira (o que se defiende). Con `answering`, la tirada se prepara para
+ * atender esa intervención: se monta de nuevo con cada una.
+ */
+function RollForm(props: {
+  game: GameDetail;
+  embedded?: boolean;
+  answering?: InterventionEvent | undefined;
+  onStopAnswering?: () => void;
+}) {
+  const { game, embedded = false, answering, onStopAnswering } = props;
   const { data: me } = useMe();
   const characters = useCharacters(game.campaignId);
   const storeEvent = useStoreGameEvent(game.id);
@@ -739,19 +914,40 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
     (character) => isMaster || character.ownerId === me?.user?.id,
   );
 
+  const attack = answering?.intent === 'attack';
   const [actor, setActor] = useState<SideDraft | null>(null);
-  const [against, setAgainst] = useState<'difficulty' | 'opposed'>('difficulty');
+  const [against, setAgainst] = useState<'difficulty' | 'opposed'>(
+    attack ? 'opposed' : 'difficulty',
+  );
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('normal');
   const [opponent, setOpponent] = useState<SideDraft>(() => freeDraft('Rival'));
-  const [situation, setSituation] = useState<Situation>('test');
-  const [secret, setSecret] = useState(false);
+  const [situation, setSituation] = useState<Situation>(attack ? 'melee' : 'test');
+  const [secret, setSecret] = useState(answering?.visibility === 'private');
+  /** El máster no tira: pide la tirada al jugador, que la hace con un botón. */
+  const [ask, setAsk] = useState(answering !== undefined);
 
-  // Hasta que no se elige, tira el primer personaje disponible (o un PNJ si no hay ninguno).
+  // Hasta que no se elige, tira quien ha intervenido, o el primer personaje disponible (o un
+  // PNJ si no hay ninguno).
+  const answerer = answering
+    ? available.find((character) => character.id === answering.characterId)
+    : undefined;
   const first = available[0];
-  const actorDraft = actor ?? (first ? characterDraft(first) : isMaster ? freeDraft('PNJ') : null);
+  const actorDraft =
+    actor ??
+    (answerer && answering
+      ? characterDraft(answerer, INTENT_CHECKS[answering.intent])
+      : first
+        ? characterDraft(first)
+        : isMaster
+          ? freeDraft('PNJ')
+          : null);
 
   const roll = useMutation({
     mutationFn: (request: GameRollRequest) => api.gameRoll(game.id, request),
+    onSuccess: storeEvent,
+  });
+  const askRoll = useMutation({
+    mutationFn: (request: AskRollRequest) => api.askRoll(game.id, request),
     onSuccess: storeEvent,
   });
 
@@ -775,18 +971,29 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
     (against === 'difficulty'
       ? testOdds(actorCheck, DIFFICULTIES[difficulty])
       : opponentCheck && opposedOdds(actorCheck, opponentCheck));
+  // Una tirada pedida la hace quien actúa o, si es un PNJ, el personaje que se defiende.
+  const roller = [actorDraft, ...(against === 'opposed' ? [opponent] : [])].find(
+    (side) => side.kind === 'character',
+  );
+  const rollerName =
+    roller?.kind === 'character'
+      ? characters.data.find((character) => character.id === roller.characterId)?.name
+      : undefined;
+  const asking = isMaster && ask && rollerName !== undefined;
+  const pending = roll.isPending || askRoll.isPending;
 
   function submit() {
     if (!actorDraft) return;
-    roll.mutate({
+    const request = {
       actor: toSideRequest(actorDraft),
       target:
         against === 'difficulty'
-          ? { kind: 'difficulty', difficulty: DIFFICULTIES[difficulty] }
-          : { kind: 'opposed', opponent: toSideRequest(opponent) },
+          ? { kind: 'difficulty' as const, difficulty: DIFFICULTIES[difficulty] }
+          : { kind: 'opposed' as const, opponent: toSideRequest(opponent) },
       situation,
-      secret: isMaster && secret,
-    });
+    };
+    if (asking) askRoll.mutate({ roll: request, secret, answers: answering?.id });
+    else roll.mutate({ ...request, secret: isMaster && secret });
   }
 
   const content = (
@@ -797,6 +1004,9 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
         submit();
       }}
     >
+      {answering && onStopAnswering && (
+        <AnsweringNote intervention={answering} onCancel={onStopAnswering} />
+      )}
       <SideEditor
         title="Quién tira"
         draft={actorDraft}
@@ -860,10 +1070,25 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
       </label>
 
       {isMaster && (
-        <label className="check">
-          <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
-          Tirada secreta: solo la ves tú
-        </label>
+        <>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={ask && rollerName !== undefined}
+              disabled={rollerName === undefined}
+              onChange={(e) => setAsk(e.target.checked)}
+            />
+            {rollerName
+              ? `Que tire su jugador: se la pides a ${rollerName}`
+              : 'Que tire su jugador (tiene que tirar o defenderse un personaje)'}
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
+            {asking
+              ? `En secreto: solo lo veis tú y quien juega con ${rollerName}`
+              : 'Tirada secreta: solo la ves tú'}
+          </label>
+        </>
       )}
 
       <div className="roll-bar">
@@ -876,11 +1101,11 @@ function RollForm({ game, embedded = false }: { game: GameDetail; embedded?: boo
             ' '
           )}
         </p>
-        <button type="submit" className="roll-button" disabled={roll.isPending}>
-          {roll.isPending ? 'Tirando…' : 'Tirar'}
+        <button type="submit" className="roll-button" disabled={pending}>
+          {asking ? (pending ? 'Pidiendo…' : 'Pedir la tirada') : pending ? 'Tirando…' : 'Tirar'}
         </button>
       </div>
-      <ErrorNote error={roll.error} />
+      <ErrorNote error={asking ? askRoll.error : roll.error} />
     </form>
   );
 

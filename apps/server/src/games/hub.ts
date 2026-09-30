@@ -7,11 +7,17 @@ export interface Subscriber {
   gameId: string | null;
   /** null para la pantalla de la mesa, que no tiene sesión iniciada. */
   userId: string | null;
-  /** El máster ve también sus notas y las tiradas secretas. */
+  /** El máster ve también sus notas, las tiradas secretas y todo lo que es en secreto. */
   seesMasterEvents: boolean;
   send(event: GameEvent): void;
   /** Corta la conexión; el navegador volverá a intentarlo y el servidor decidirá si puede. */
   close(): void;
+}
+
+/** Si quien está conectado puede ver el evento; `playerId`, el jugador de un evento en secreto. */
+function canSee(subscriber: Subscriber, event: GameEvent, playerId: string | null): boolean {
+  if (event.visibility === 'public' || subscriber.seesMasterEvents) return true;
+  return event.visibility === 'private' && playerId !== null && subscriber.userId === playerId;
 }
 
 /**
@@ -36,11 +42,14 @@ export class GameHub {
     };
   }
 
-  /** Envía el evento a quien siga su partida y pueda verlo. */
-  publish(campaignId: string, event: GameEvent): void {
+  /**
+   * Envía el evento a quien siga su partida y pueda verlo. Uno en secreto ("private") llega al
+   * máster y al jugador `playerId`.
+   */
+  publish(campaignId: string, event: GameEvent, playerId: string | null = null): void {
     for (const subscriber of this.#campaigns.get(campaignId) ?? []) {
       if (subscriber.gameId !== null && subscriber.gameId !== event.gameId) continue;
-      if (event.visibility === 'master' && !subscriber.seesMasterEvents) continue;
+      if (!canSee(subscriber, event, playerId)) continue;
       subscriber.send(event);
     }
   }

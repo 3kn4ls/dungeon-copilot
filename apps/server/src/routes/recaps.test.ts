@@ -175,6 +175,34 @@ describe('la IA propone el resumen', () => {
     expect((await master.get(url)).json().game.recap).toBe('');
   });
 
+  it('cuenta lo que dicen los personajes en la mesa, pero no lo que es en secreto', async () => {
+    const { master, ana, campaign, kael: sheet } = await table();
+    const url = await openGame(master, campaign.id);
+    const spoken = (
+      await ana.post(`${url}/interventions`, {
+        characterId: sheet.id,
+        intent: 'speak',
+        text: '¿Quién manda aquí?',
+      })
+    ).json().event;
+    await master.post(`${url}/interventions/${spoken.id}/answer`, {});
+    await ana.post(`${url}/interventions`, {
+      characterId: sheet.id,
+      intent: 'act',
+      text: 'Me guardo la llave sin que nadie lo vea',
+      secret: true,
+    });
+    await master.post(`${url}/reveals`, { body: 'Nadie te ha visto', to: sheet.id });
+    await master.post(`${url}/close`, {});
+
+    ollama.queue({ kind: 'chunks', chunks: ['Kael preguntó quién mandaba.'] });
+    expect((await master.post(`${url}/recap/draft`, {})).statusCode).toBe(200);
+    const { user } = lastPrompt();
+    expect(user).toContain('- Kael (PJ) habla, según su jugador: ¿Quién manda aquí?');
+    expect(user).not.toContain('llave');
+    expect(user).not.toContain('Nadie te ha visto');
+  });
+
   it('puede dejar fuera las notas y sigue el hilo de la partida anterior', async () => {
     const { master, campaign } = await table();
     await playedGame(master, campaign.id, 'Kael encontró el mapa de la cripta.');

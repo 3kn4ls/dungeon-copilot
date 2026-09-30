@@ -1,22 +1,17 @@
 import type { Random } from '@dungeon-copilot/rules';
 import { fixedDice, kael as kaelBuild } from '@dungeon-copilot/rules/testing';
 import type { GameEvent } from '@dungeon-copilot/shared';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { useTestApp, type TestClient } from '../testing';
+import { describe, expect, it } from 'vitest';
+import { useLiveStreams, useTestApp, type TestClient } from '../testing';
 
 let dice: Random = () => {
   throw new Error('Esta prueba no esperaba ninguna tirada');
 };
 const t = useTestApp({ random: () => dice() });
+const connect = useLiveStreams(t);
 const loadDice = (...faces: number[]) => {
   dice = fixedDice(...faces);
 };
-
-let baseUrl = '';
-beforeAll(async () => {
-  // El directo necesita un servidor de verdad: inject espera a que la respuesta termine.
-  baseUrl = await t.app.listen({ port: 0, host: '127.0.0.1' });
-});
 
 /** Máster, dos jugadores y la ficha de Kael, que es de Ana. */
 async function table() {
@@ -401,59 +396,6 @@ describe('tiradas en la partida', () => {
     expect(foreign.json().error).toBe('Ese personaje no está en esta campaña');
   });
 });
-
-interface Stream {
-  status: number;
-  /** Siguiente evento, o "end" si el servidor cerró el directo. */
-  next(): Promise<GameEvent | 'end'>;
-  close(): void;
-}
-
-const streams: Stream[] = [];
-afterEach(() => {
-  for (const stream of streams.splice(0)) stream.close();
-});
-
-async function connect(
-  path: string,
-  client?: TestClient,
-  headers: Record<string, string> = {},
-): Promise<Stream> {
-  const controller = new AbortController();
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: { ...headers, ...(client?.cookie ? { cookie: client.cookie } : {}) },
-    signal: controller.signal,
-  });
-  const reader = response.body?.pipeThrough(new TextDecoderStream()).getReader();
-  let buffer = '';
-  const stream: Stream = {
-    status: response.status,
-    async next() {
-      if (!reader) return 'end';
-      for (;;) {
-        const boundary = buffer.indexOf('\n\n');
-        if (boundary >= 0) {
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const data = block
-            .split('\n')
-            .filter((line) => line.startsWith('data: '))
-            .map((line) => line.slice('data: '.length))
-            .join('\n');
-          // Los bloques sin datos son el "retry" inicial o los comentarios de latido.
-          if (data) return JSON.parse(data) as GameEvent;
-          continue;
-        }
-        const { value, done } = await reader.read();
-        if (done) return 'end';
-        buffer += value;
-      }
-    },
-    close: () => controller.abort(),
-  };
-  streams.push(stream);
-  return stream;
-}
 
 describe('directo de la partida', () => {
   it('cada uno recibe en vivo solo lo que puede ver', async () => {

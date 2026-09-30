@@ -12,8 +12,26 @@ export const GAME_STATUS_LABELS: Record<GameStatus, string> = {
   closed: 'Terminada',
 };
 
-/** "public" lo ve toda la mesa y la pantalla; "master", solo el máster. */
-export type GameEventVisibility = 'public' | 'master';
+/**
+ * "public" lo ve toda la mesa y la pantalla; "master", solo el máster; "private", el máster y
+ * un jugador: lo que se dicen en secreto.
+ */
+export type GameEventVisibility = 'public' | 'master' | 'private';
+
+/** Un personaje de la campaña, con el nombre que tenía entonces: puede cambiarlo después. */
+export interface CharacterRef {
+  characterId: string;
+  name: string;
+}
+
+/**
+ * La intervención de un jugador que el máster atiende con esto: deja de esperar. Es el id de
+ * su evento.
+ */
+const answersSchema = z.number().int().positive().optional();
+
+/** Solo para este personaje: lo ven el máster y su jugador, nadie más (ni la pantalla). */
+const recipientSchema = z.uuid('Elige un personaje').optional();
 
 export const openGameSchema = z.object({
   title: z.string().trim().max(100, 'El título no puede pasar de 100 caracteres').default(''),
@@ -70,6 +88,8 @@ export const revealSchema = z.object({
     .trim()
     .min(1, 'Escribe lo que quieres enseñar a la mesa')
     .max(REVEAL_MAX, `El texto no puede pasar de ${REVEAL_MAX} caracteres`),
+  to: recipientSchema,
+  answers: answersSchema,
 });
 
 export type RevealRequest = z.input<typeof revealSchema>;
@@ -120,7 +140,7 @@ export const noteSchema = z.object({
 
 export type NoteRequest = z.input<typeof noteSchema>;
 
-/** Lo que dice un PNJ, para que lo vea toda la mesa. */
+/** Lo que dice un PNJ, para que lo vea toda la mesa (o, con `to`, un solo personaje). */
 export const speechSchema = z.object({
   npcId: z.uuid('Elige un PNJ'),
   text: z
@@ -128,9 +148,78 @@ export const speechSchema = z.object({
     .trim()
     .min(1, 'La frase está vacía')
     .max(2000, 'La frase no puede pasar de 2000 caracteres'),
+  to: recipientSchema,
+  answers: answersSchema,
 });
 
 export type SpeechRequest = z.input<typeof speechSchema>;
+
+/**
+ * Quién tiene la palabra: el máster, que narra; toda la mesa («¿Qué hacéis?»); o un personaje
+ * («Kael, ¿qué le respondes?»). Quien no la tiene puede pedirla.
+ */
+export type Floor =
+  { kind: 'master' } | { kind: 'table' } | { kind: 'character'; characterId: string; name: string };
+
+export const giveFloorSchema = z.object({
+  to: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('master') }),
+    z.object({ kind: z.literal('table') }),
+    z.object({ kind: z.literal('character'), characterId: z.uuid('Elige un personaje') }),
+  ]),
+  answers: answersSchema,
+});
+
+export type GiveFloorRequest = z.input<typeof giveFloorSchema>;
+
+/**
+ * Lo que puede hacer un jugador con un botón: hablar en personaje, actuar en la escena,
+ * preguntar al máster fuera del personaje («¿hay ventanas?») o atacar.
+ */
+export const INTERVENTION_INTENTS = ['speak', 'act', 'ask', 'attack'] as const;
+export type InterventionIntent = (typeof INTERVENTION_INTENTS)[number];
+
+export const INTERVENTION_LABELS: Record<InterventionIntent, string> = {
+  speak: 'Hablar',
+  act: 'Actuar',
+  ask: 'Preguntar',
+  attack: 'Atacar',
+};
+
+/** Tope de lo que escribe un jugador al intervenir. */
+export const INTERVENTION_MAX = 1000;
+
+/**
+ * Un jugador interviene con su personaje: sin la palabra, es pedirla (levantar la mano); con
+ * ella, intervenir. En los dos casos espera a que el máster la atienda.
+ */
+export const interventionSchema = z.object({
+  characterId: z.uuid('Elige un personaje'),
+  intent: z.enum(INTERVENTION_INTENTS, 'Elige si quieres hablar, actuar, preguntar o atacar'),
+  /** Lo que dice o hace el personaje, si lo escribe; vacío si lo cuenta de palabra. */
+  text: z
+    .string()
+    .trim()
+    .max(INTERVENTION_MAX, `No puede pasar de ${INTERVENTION_MAX} caracteres`)
+    .default(''),
+  /** En secreto: solo la ven el máster y quien la escribe, como pasarle una nota. */
+  secret: z.boolean().default(false),
+});
+
+export type InterventionRequest = z.input<typeof interventionSchema>;
+
+/** El máster atiende una intervención sin más: la resuelve de palabra o le dice que ahora no. */
+export const answerInterventionSchema = z.object({
+  how: z.enum(['answered', 'dismissed']).default('answered'),
+});
+
+export type AnswerInterventionRequest = z.input<typeof answerInterventionSchema>;
+
+/**
+ * Cómo se cierra lo que esperaba al máster o a un jugador: atendido (o hecha, si es una tirada
+ * pedida), «ahora no», o retirado por quien lo pidió.
+ */
+export type SettledHow = 'answered' | 'dismissed' | 'withdrawn';
 
 const edgeSchema = z.enum(['none', 'advantage', 'disadvantage']).default('none');
 
@@ -171,6 +260,22 @@ export const gameRollSchema = z.object({
 
 export type GameRollRequest = z.input<typeof gameRollSchema>;
 
+/**
+ * El máster pide una tirada a un personaje y su jugador la hace con un botón. La hace quien
+ * actúa o, si es un PNJ, quien se opone (una defensa). El bonificador sale de la ficha al tirar.
+ */
+export const askRollSchema = z.object({
+  roll: gameRollSchema.omit({ secret: true }),
+  /** En secreto: la petición y la tirada solo las ven el máster y el jugador del personaje. */
+  secret: z.boolean().default(false),
+  answers: answersSchema,
+});
+
+export type AskRollRequest = z.input<typeof askRollSchema>;
+
+/** Una tirada pedida, tal como se hará cuando la tiren. */
+export type RequestedRoll = z.output<typeof askRollSchema>['roll'];
+
 /** Para repetir una tirada gastando un punto de Suerte del personaje que tira. */
 export const rerollSchema = z.object({
   /** De quién son los dados que se repiten: en una tirada enfrentada, cada bando repite los suyos. */
@@ -197,7 +302,12 @@ export interface GameRoll {
   result: RollResponse;
   /** Si repite con Suerte otra tirada, que deja de contar. */
   reroll?: GameRollReroll;
+  /** La tirada pedida por el máster que cumple, si viene de una. */
+  requested?: number;
 }
+
+/** Quién tira y contra qué: lo que se enseña de una tirada pedida mientras espera. */
+export type GameRollPreview = Pick<GameRoll, 'actor' | 'target' | 'situation'>;
 
 export interface GameRollReroll {
   /** El evento de la tirada que se repite, que deja de contar. */
@@ -245,11 +355,43 @@ export function rerollerLabel(roll: GameRoll): string | undefined {
 export type GameEventPayload =
   | { kind: 'opened'; number: number; title: string; luckRefilled: boolean }
   | { kind: 'closed'; xpAwarded: number }
-  | { kind: 'reveal'; title: string; body: string }
+  /** Con `to`, en secreto para ese personaje; con `answers`, responde a esa intervención. */
+  | { kind: 'reveal'; title: string; body: string; to?: CharacterRef; answers?: number }
   | { kind: 'note'; text: string }
   | { kind: 'roll'; roll: GameRoll }
   /** El nombre se guarda tal cual era: el PNJ puede cambiar de nombre o borrarse después. */
-  | { kind: 'speech'; npcId: string; name: string; text: string };
+  | {
+      kind: 'speech';
+      npcId: string;
+      name: string;
+      text: string;
+      to?: CharacterRef;
+      answers?: number;
+    }
+  /** El máster da la palabra; con `answers`, atiende así esa intervención. */
+  | { kind: 'floor'; floor: Floor; answers?: number }
+  /** Un jugador interviene o pide la palabra con su personaje. Espera a que la atiendan. */
+  | {
+      kind: 'intervention';
+      characterId: string;
+      name: string;
+      intent: InterventionIntent;
+      text: string;
+    }
+  /**
+   * El máster pide una tirada: la hace el jugador de `characterId`. `request` es la tirada
+   * que se resolverá entonces, y `preview` cómo se veía al pedirla.
+   */
+  | {
+      kind: 'rollRequest';
+      characterId: string;
+      name: string;
+      request: RequestedRoll;
+      preview: GameRollPreview;
+      answers?: number;
+    }
+  /** Se cierra una intervención o una tirada pedida sin nada más. */
+  | { kind: 'settled'; of: number; how: SettledHow };
 
 export type GameEventKind = GameEventPayload['kind'];
 
@@ -306,6 +448,60 @@ export function supersededRolls(events: readonly GameEvent[]): Set<number> {
     events.flatMap((event) =>
       event.kind === 'roll' && event.roll.reroll ? [event.roll.reroll.of] : [],
     ),
+  );
+}
+
+export type InterventionEvent = GameEvent & { kind: 'intervention' };
+export type RollRequestEvent = GameEvent & { kind: 'rollRequest' };
+
+/** Quién tiene la palabra tras estos eventos: a quien se la dio el máster la última vez. */
+export function currentFloor(events: readonly GameEvent[]): Floor {
+  const last = events.findLast((event) => event.kind === 'floor');
+  return last?.kind === 'floor' ? last.floor : { kind: 'master' };
+}
+
+/**
+ * Lo que ya no espera y cómo acabó: las intervenciones que ha atendido el máster (dando la
+ * palabra, pidiendo una tirada, con una frase, una descripción o sin más), a las que ha dicho
+ * «ahora no» o que se han retirado, y las tiradas pedidas que ya se han hecho o retirado.
+ */
+export function settledEvents(events: readonly GameEvent[]): Map<number, SettledHow> {
+  const settled = new Map<number, SettledHow>();
+  const settle = (id: number | undefined, how: SettledHow) => {
+    if (id !== undefined && !settled.has(id)) settled.set(id, how);
+  };
+  for (const event of events) {
+    switch (event.kind) {
+      case 'settled':
+        settle(event.of, event.how);
+        break;
+      case 'roll':
+        settle(event.roll.requested, 'answered');
+        break;
+      case 'floor':
+      case 'reveal':
+      case 'speech':
+      case 'rollRequest':
+        settle(event.answers, 'answered');
+        break;
+    }
+  }
+  return settled;
+}
+
+/** Las intervenciones que esperan a que las atienda el máster, de la más antigua a la última. */
+export function pendingInterventions(events: readonly GameEvent[]): InterventionEvent[] {
+  const settled = settledEvents(events);
+  return events.filter(
+    (event): event is InterventionEvent => event.kind === 'intervention' && !settled.has(event.id),
+  );
+}
+
+/** Las tiradas que ha pedido el máster y aún no se han hecho, de la más antigua a la última. */
+export function pendingRollRequests(events: readonly GameEvent[]): RollRequestEvent[] {
+  const settled = settledEvents(events);
+  return events.filter(
+    (event): event is RollRequestEvent => event.kind === 'rollRequest' && !settled.has(event.id),
   );
 }
 

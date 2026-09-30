@@ -44,14 +44,14 @@ export function AiIdeas(props: {
   label: string;
   /** Cómo se llama cada idea al retocarla: "Complicación". */
   ideaLabel: string;
-  /** El campo opcional para afinar lo que se pide. */
-  hint: { label: string; placeholder: string };
+  /** El campo opcional para afinar lo que se pide, y lo que trae escrito de entrada. */
+  hint: { label: string; placeholder: string; initial?: string | undefined };
   ask: (hint: string, options: AiTextOptions) => Promise<string>;
   action?: IdeaAction;
 }) {
   const { game, action } = props;
   const [open, setOpen] = useState(false);
-  const [hint, setHint] = useState('');
+  const [hint, setHint] = useState(props.hint.initial ?? '');
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [editing, setEditing] = useState<{ id: number; text: string } | null>(null);
   const headingId = useId();

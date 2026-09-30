@@ -17,11 +17,18 @@ import {
   type Random,
   type WoundState,
 } from '@dungeon-copilot/rules';
-import type { GameRoll, GameRollSide, RollResponse, gameRollSchema } from '@dungeon-copilot/shared';
+import type {
+  GameRoll,
+  GameRollPreview,
+  GameRollSide,
+  RollResponse,
+  gameRollSchema,
+} from '@dungeon-copilot/shared';
 import type { z } from 'zod';
 import { HttpError } from '../http/errors';
 
-type RollRequest = z.output<typeof gameRollSchema>;
+/** Una tirada de partida tal como llega, ya validada: al momento o pedida por el máster. */
+type RollRequest = Omit<z.output<typeof gameRollSchema>, 'secret'>;
 type RollSide = RollRequest['actor'];
 
 /** Lo que hace falta de un personaje para tirar por él. */
@@ -107,6 +114,51 @@ function resolveSide(
   return resolveCharacterSide(side, character);
 }
 
+/** Una tirada de partida lista para tirar: ya se sabe quién tira, contra qué y con qué. */
+export interface PlannedRoll {
+  preview: GameRollPreview;
+  /** Lo que cambia la ficha sin que nadie lo pida, como la desventaja por herida grave. */
+  notes: string[];
+  roll(random: Random): RollResponse;
+}
+
+/**
+ * Prepara una tirada de partida sin tirar los dados: valida lo que se tira y calcula los
+ * bonificadores con la ficha de los personajes, con las desventajas por heridas ya puestas.
+ * `characters` trae los personajes que aparecen. Sirve también para pedir una tirada.
+ */
+export function planGameRoll(
+  request: RollRequest,
+  characters: ReadonlyMap<string, RollingCharacter>,
+): PlannedRoll {
+  const actor = resolveSide(request.actor, characters);
+  if (request.target.kind === 'difficulty') {
+    const { difficulty } = request.target;
+    return {
+      preview: {
+        actor: actor.view,
+        target: { kind: 'difficulty', label: difficultyLabel(difficulty) },
+        situation: request.situation,
+      },
+      notes: actor.notes,
+      roll: (random) => ({ kind: 'test', ...resolveTest(actor.check, difficulty, random) }),
+    };
+  }
+  const opponent = resolveSide(request.target.opponent, characters);
+  return {
+    preview: {
+      actor: actor.view,
+      target: { kind: 'opposed', ...opponent.view },
+      situation: request.situation,
+    },
+    notes: [...actor.notes, ...opponent.notes],
+    roll: (random) => ({
+      kind: 'opposed',
+      ...resolveOpposed(actor.check, opponent.check, random),
+    }),
+  };
+}
+
 /**
  * Resuelve una tirada de partida. Los bonificadores de los personajes salen de su ficha y las
  * desventajas por heridas se aplican solas; `characters` trae los personajes que aparecen.
@@ -116,25 +168,8 @@ export function resolveGameRoll(
   characters: ReadonlyMap<string, RollingCharacter>,
   random: Random,
 ): GameRoll {
-  const actor = resolveSide(request.actor, characters);
-  if (request.target.kind === 'difficulty') {
-    const { difficulty } = request.target;
-    return {
-      actor: actor.view,
-      target: { kind: 'difficulty', label: difficultyLabel(difficulty) },
-      situation: request.situation,
-      notes: actor.notes,
-      result: { kind: 'test', ...resolveTest(actor.check, difficulty, random) },
-    };
-  }
-  const opponent = resolveSide(request.target.opponent, characters);
-  return {
-    actor: actor.view,
-    target: { kind: 'opposed', ...opponent.view },
-    situation: request.situation,
-    notes: [...actor.notes, ...opponent.notes],
-    result: { kind: 'opposed', ...resolveOpposed(actor.check, opponent.check, random) },
-  };
+  const plan = planGameRoll(request, characters);
+  return { ...plan.preview, notes: plan.notes, result: plan.roll(random) };
 }
 
 /**
