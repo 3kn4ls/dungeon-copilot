@@ -1,10 +1,9 @@
-import { LUCK_PER_SESSION, UNHARMED, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
+import { LUCK_PER_SESSION, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
 import {
   characterSides,
   closeGameSchema,
   complicationsSchema,
   gameRollSchema,
-  groupSize,
   ideasSchema,
   narrationSchema,
   noteSchema,
@@ -41,7 +40,6 @@ import {
   visibleIdeas,
   visibleRecap,
   visibleScene,
-  type PromptFighter,
 } from '../ai/prompts';
 import { requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
@@ -71,7 +69,14 @@ import {
 } from '../games/events';
 import { findBlow, requireCombat } from '../games/combat';
 import { answeredIntervention } from '../games/pending';
-import { findCampaignContext, findNpcLines, findScenes } from '../games/prompt-context';
+import {
+  findCampaignContext,
+  findFighters,
+  findNpcKnown,
+  findNpcLines,
+  findScenes,
+  npcFighter,
+} from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import { rerollGameRoll, resolveGameRoll } from '../games/rolls';
 import { findSceneTitle } from '../games/scenes';
@@ -675,46 +680,9 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
     const acting = combat.order.find((combatant) => combatant.id === body.combatantId);
     if (acting?.kind !== 'npc') throw notFound('Esos PNJ no están en el combate');
 
-    const ids = combat.order.flatMap((combatant) =>
-      combatant.kind === 'character' ? [combatant.id] : [],
-    );
-    const sheets =
-      ids.length === 0
-        ? []
-        : await db
-            .select({
-              id: characters.id,
-              severity: characters.severity,
-              gear: characters.gear,
-            })
-            .from(characters)
-            .where(and(eq(characters.campaignId, campaignId), inArray(characters.id, ids)));
-    const fighters = combat.order.flatMap((combatant): PromptFighter[] => {
-      if (combatant.kind === 'npc') {
-        return [
-          {
-            kind: 'npc',
-            name: combatant.name,
-            profile: combatant.profile,
-            count: groupSize(combatant),
-            harm: combat.harm[combatant.id] ?? UNHARMED,
-          },
-        ];
-      }
-      const sheet = sheets.find((other) => other.id === combatant.id);
-      return sheet ? [{ kind: 'character', name: combatant.name, ...sheet }] : [];
-    });
+    const fighters = await findFighters(db, campaignId, combat);
     // Lo que sabe el máster del PNJ, si es de la campaña: nunca sus secretos.
-    const [npc] = acting.npcId
-      ? await db
-          .select({
-            concept: npcs.concept,
-            personality: npcs.personality,
-            goals: npcs.goals,
-          })
-          .from(npcs)
-          .where(and(eq(npcs.id, acting.npcId), eq(npcs.campaignId, campaignId)))
-      : [];
+    const npc = await findNpcKnown(db, campaignId, acting);
 
     return sendAiText(request, reply, {
       ai: model,
@@ -725,16 +693,7 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
           scene: await findSceneTitle(db, gameId),
           round: combat.round,
           fighters,
-          acting: {
-            fighter: {
-              kind: 'npc',
-              name: acting.name,
-              profile: acting.profile,
-              count: groupSize(acting),
-              harm: combat.harm[acting.id] ?? UNHARMED,
-            },
-            ...npc,
-          },
+          acting: { fighter: npcFighter(combat, acting), ...npc },
           hint: body.hint,
         }),
         format: IDEAS_FORMAT,

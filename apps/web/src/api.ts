@@ -20,6 +20,8 @@ import type {
   DamageResponse,
   DealDamageRequest,
   EndCombatRequest,
+  EnemyDecision,
+  EnemyDecisionRequest,
   GameDetail,
   GameEvent,
   GameRollRequest,
@@ -296,6 +298,14 @@ export const api = {
   /** La IA propone cómo contar el golpe de una tirada de combate, sin enseñarlo. */
   narrateBlow: (id: string, eventId: number, body: NarrationRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/rolls/${eventId}/narration`, body, options),
+  /** La IA sugiere a quién atacan unos PNJ y si siguen, huyen o se rinden. */
+  enemyDecision: (id: string, body: EnemyDecisionRequest, signal?: AbortSignal) =>
+    request<{ decision: EnemyDecision }>(
+      'POST',
+      `/api/games/${id}/combat/decision`,
+      body,
+      signal,
+    ).then((r) => r.decision),
   /** La IA propone qué pueden hacer unos PNJ en su turno, sin enseñarlo. */
   tactics: (id: string, body: TacticsRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/combat/tactics`, body, options),

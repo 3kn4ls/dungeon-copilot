@@ -140,6 +140,13 @@ Con IA, el máster tiene dos ayudas más, que no escriben nada en la partida: pr
 - **Narrar el golpe con IA**, bajo las tiradas de combate: tres maneras de contar lo que pasa, con quién ataca a quién, sus armas, el resultado y lo que ha causado (si alguien cae o queda malherido).
 - **¿Qué hace Garrick?**, en el turno de los enemigos: tres cosas distintas que pueden hacer, sabiendo cómo va cada uno que pelea y lo que el máster sabe de un PNJ de la campaña (nunca sus secretos).
 
+Con las sugerencias de la IA (Nimble), además, en el turno de los enemigos:
+
+- **A quién atacan**: cada personaje lleva su probabilidad y el más probable sale marcado. La IA lo decide sabiendo cómo va cada uno que pelea, los últimos golpes del combate y lo que el máster sabe de un PNJ de la campaña (nunca sus secretos). Se pregunta con los personajes en un orden y en el contrario, y se hace la media: si no, tira hacia el primero de la lista.
+- **Su moral**: si lo más probable es que huyan o se rindan, sale «Puede que huyan (55 %)» con **Sacar del combate**.
+
+También tras un golpe: bajo el último golpe a unos enemigos, si cae uno y el grupo sigue en pie, el máster ve si puede que huyan o se rindan, con el mismo botón. Se pregunta una vez por turno y una por golpe.
+
 ### En la pantalla
 
 La pantalla enseña la ronda, el orden de iniciativa con quien tiene el turno destacado, cuántos quedan en pie de cada grupo y quién está herido, el último golpe y las tiradas que faltan, como la defensa que tiene que tirar un personaje.
@@ -184,6 +191,7 @@ Lo secreto no sale en la pantalla, no llega al resumen de la partida ni a las es
 Además de la IA que escribe, el servidor puede tener otra que decide: Nimble (`OLLAMA_DECISION_MODEL`). No escribe nada: lee lo que pasa y responde a unas preguntas concretas con su probabilidad. Lo usa para sugerir al máster donde antes elegía a ojo:
 
 - **Qué tirada pedir** para una intervención (ver [Cómo las atiende el máster](#cómo-las-atiende-el-máster)).
+- **Qué hacen los enemigos**: a quién atacan en su turno y si huyen o se rinden (ver [La IA en combate](#la-ia-en-combate)).
 
 Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni lo ve la mesa. Es solo del máster, con la partida en juego. Nada espera por ella: si tarda o falla, todo sigue como sin ella, y sin Nimble la sala es la de siempre.
 
@@ -223,4 +231,4 @@ Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni
 - La iniciativa la tira el servidor (`apps/server/src/games/combat.ts`) con las reglas de `packages/rules` (`initiativeEdge`, `compareInitiative` y la Destreza de los perfiles). El daño se calcula con `hitDamage`, `attackExtras` y `combatBlows`, y el de los grupos, con `damageNpcs`.
 - Las rutas están en `apps/server/src/routes/table.ts`, `combat.ts`, `damage.ts` y `scenes.ts`; las de la IA en combate, con el resto de la ayuda para narrar, en `routes/games.ts`. `addEvent` y la lectura del registro según quién mira están en `apps/server/src/games/events.ts`.
 - Lo secreto es la visibilidad `private`, con el jugador en `game_events.player_id`.
-- Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`.
+- Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`. Qué hacen los enemigos es `EnemyDecision`, y lo que se cuenta del combate (quién pelea, lo que se sabe de un PNJ y los últimos golpes) lo montan `findFighters`, `findNpcKnown` y `findCombatBlows` (`apps/server/src/games/prompt-context.ts`), que comparte con las ideas para los PNJ.

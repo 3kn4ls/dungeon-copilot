@@ -7,6 +7,7 @@ import {
   createCharacterSchema,
   updateCharacterSchema,
 } from './characters';
+import { enemyDecisionSchema } from './decisions';
 import {
   complicationsSchema,
   gameRollSchema,
@@ -211,5 +212,18 @@ describe('PNJ', () => {
       npcId,
       text: '¿Qué queréis?',
     });
+  });
+});
+
+describe('sugerencias de la IA', () => {
+  it('qué hacen unos PNJ: de quién, y por defecto también a quién atacan', () => {
+    const combatantId = '5f0c3b7e-9a2d-4c1e-8b6f-0a3d2c1b4e5f';
+    expect(enemyDecisionSchema.parse({ combatantId })).toEqual({ combatantId, targets: true });
+    expect(enemyDecisionSchema.parse({ combatantId, targets: false })).toEqual({
+      combatantId,
+      targets: false,
+    });
+    expect(enemyDecisionSchema.safeParse({}).success).toBe(false);
+    expect(enemyDecisionSchema.safeParse({ combatantId: 'bandidos' }).success).toBe(false);
   });
 });

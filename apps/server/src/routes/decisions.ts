@@ -1,7 +1,14 @@
-import { isCheckedIntent, type PublicUser } from '@dungeon-copilot/shared';
+import { enemyDecisionSchema, isCheckedIntent, type PublicUser } from '@dungeon-copilot/shared';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { checkQuestions, checkSuggestion, type CheckPrompt } from '../ai/decisions';
+import {
+  checkQuestions,
+  checkSuggestion,
+  enemyDecision,
+  enemyQuestions,
+  type CheckPrompt,
+  type EnemyPrompt,
+} from '../ai/decisions';
 import { askDecider, requireDecider } from '../ai/respond';
 import type { AppContext } from '../context';
 import { characters } from '../db/schema';
@@ -12,10 +19,17 @@ import {
   findVisibleEvent,
   requireMasterOf,
 } from '../games/events';
+import { requireCombat } from '../games/combat';
 import { INTERVENTION_NOT_FOUND } from '../games/pending';
-import { findScenes } from '../games/prompt-context';
+import {
+  findCombatBlows,
+  findFighters,
+  findNpcKnown,
+  findScenes,
+  npcFighter,
+} from '../games/prompt-context';
 import { findSceneTitle } from '../games/scenes';
-import { HttpError, notFound, parseId } from '../http/errors';
+import { HttpError, notFound, parseBody, parseId } from '../http/errors';
 import { requireUser } from './auth';
 
 interface IdParams {
@@ -30,6 +44,8 @@ const CHARACTER_GONE = 'Ese personaje ya no está en la campaña';
 const CHECK_BY_RULES =
   'Cuerpo a cuerpo, la tirada la dice el reglamento con el equipo de la ficha: no hay nada que sugerir';
 const CHECK_WITHOUT_TEXT = 'Esa intervención no dice qué intenta: no hay nada que sugerir';
+/** Los golpes del combate que se cuentan a la IA para que sepa cómo va. */
+const RECENT_BLOWS = 5;
 
 /**
  * Las sugerencias de la IA que decide (Nimble) al máster: qué tirada pedir para una intervención,
@@ -87,4 +103,39 @@ export function registerDecisionRoutes(app: FastifyInstance, ctx: AppContext): v
       return { suggestion: checkSuggestion(prompt, answers) };
     },
   );
+
+  /**
+   * Qué hacen unos PNJ del combate: a quién atacan, si hay a quién elegir, y si siguen, huyen o se
+   * rinden. Con `targets: false`, solo lo segundo. Sabe cómo va cada uno que pelea y los últimos
+   * golpes, y de un PNJ de la campaña, lo que sabe el máster: nunca lo que oculta.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/combat/decision', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(
+      enemyDecisionSchema,
+      request.body,
+      'Revisa de quién pides la sugerencia',
+    );
+    const { found, nimble } = await findDecidedGame(user, gameId);
+    const combat = await requireCombat(db, gameId);
+    const acting = combat.order.find((combatant) => combatant.id === body.combatantId);
+    if (acting?.kind !== 'npc') throw notFound('Esos PNJ no están en el combate');
+    const { campaignId } = found.game;
+
+    const prompt: EnemyPrompt = {
+      round: combat.round,
+      scene: await findSceneTitle(db, gameId),
+      fighters: await findFighters(db, campaignId, combat),
+      acting: {
+        fighter: npcFighter(combat, acting),
+        ...(await findNpcKnown(db, campaignId, acting)),
+      },
+      blows: await findCombatBlows(db, gameId, combat, RECENT_BLOWS),
+      targets: body.targets,
+    };
+    const answers = await askDecider(request, reply, nimble, enemyQuestions(prompt));
+    if (!answers) return reply;
+    return { decision: enemyDecision(prompt, answers) };
+  });
 }

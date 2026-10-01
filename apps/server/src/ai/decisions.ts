@@ -6,11 +6,15 @@ import {
 } from '@dungeon-copilot/rules';
 import {
   INTERVENTION_LABELS,
+  MORALES,
   SPELL_EFFECT_LABELS,
   type CheckSuggestion,
   type CheckedIntent,
+  type EnemyDecision,
+  type Morale,
   type SkillOdds,
   type SpellEffect,
+  type TargetOdds,
 } from '@dungeon-copilot/shared';
 import type {
   ChoiceQuestion,
@@ -19,7 +23,16 @@ import type {
   NoulQuestion,
   ScoreQuestion,
 } from './decide';
-import { fit, type PromptCharacter, type PromptScene } from './prompts';
+import {
+  fighterLine,
+  fighterText,
+  fit,
+  knownLines,
+  type PromptCharacter,
+  type PromptFighter,
+  type PromptNpcKnown,
+  type PromptScene,
+} from './prompts';
 
 // Las preguntas para la IA que decide (Nimble) y cómo se leen sus respuestas. Como los prompts,
 // en español y con topes de longitud: el texto (`state`) y las preguntas tienen que caber en su
@@ -231,4 +244,109 @@ export function checkSuggestion(
         }
       : {}),
   };
+}
+
+/** Quien pelea, con su id en el combate: los personajes son a quien pueden atacar. */
+export type EnemyFighter = PromptFighter & { id: string };
+
+export interface EnemyPrompt {
+  round: number;
+  /** El título de la escena en juego, si el máster ha empezado alguna. */
+  scene?: string | undefined;
+  /** Quien pelea, en el orden de iniciativa. */
+  fighters: EnemyFighter[];
+  /** Los PNJ que deciden, y lo que sabe el máster de ellos (nunca lo que ocultan). */
+  acting: { fighter: EnemyFighter & { kind: 'npc' } } & PromptNpcKnown;
+  /** Los últimos golpes del combate, del más antiguo al más reciente (ver damageText). */
+  blows: string[];
+  /** Si se pregunta también a quién atacan. */
+  targets: boolean;
+}
+
+/**
+ * A quién atacan se pregunta dos veces, con los personajes en un orden y en el contrario: el
+ * modelo tira hacia el primero de la lista, y en un caso dudoso pasa del 39 al 73 % solo por eso.
+ * Juntas, lo dudoso sale dudoso.
+ */
+export type EnemyQuestions = {
+  target?: ChoiceQuestion;
+  targetReversed?: ChoiceQuestion;
+  morale: ChoiceQuestion;
+};
+
+/** Lo que el modelo sabe del combate: cómo va cada uno, a quién le toca y los últimos golpes. */
+function enemyState(prompt: EnemyPrompt): string {
+  const { acting } = prompt;
+  return [
+    `Ronda ${prompt.round}.`,
+    prompt.scene?.trim() ? `Escena: ${prompt.scene.trim()}.` : '',
+    `Quién pelea y cómo va:\n${prompt.fighters.map(fighterLine).join('\n')}`,
+    [`Le toca a: ${fighterText(acting.fighter)}`, ...knownLines(acting)].join('\n'),
+    prompt.blows.length > 0
+      ? `Los últimos golpes del combate:\n${prompt.blows.map((blow) => `- ${blow}`).join('\n')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Qué hacen unos PNJ en su turno: a quién atacan, si hay a quién elegir, y su moral. */
+export function enemyQuestions(prompt: EnemyPrompt): DecisionPrompt<EnemyQuestions> {
+  const { fighter } = prompt.acting;
+  const group = fighter.count > 1;
+  const name = fighter.name;
+  const characters = prompt.fighters.filter((other) => other.kind === 'character');
+  const questions: EnemyQuestions = {
+    morale: {
+      type: 'choice',
+      instructions: `¿Qué ${group ? 'hacen' : 'hace'} ahora ${name}, tal como va el combate?`,
+      criteria: {
+        fight: group ? 'Siguen peleando' : 'Sigue peleando',
+        flee: group
+          ? 'Huyen: se retiran o escapan como pueden'
+          : 'Huye: se retira o escapa como puede',
+        surrender: group
+          ? 'Se rinden: tiran las armas y piden clemencia'
+          : 'Se rinde: tira las armas y pide clemencia',
+      },
+    },
+  };
+  if (prompt.targets && characters.length > 1) {
+    const target = (list: EnemyFighter[]): ChoiceQuestion => ({
+      type: 'choice',
+      instructions: `¿A quién ${group ? 'atacan' : 'ataca'} ahora ${name}? Piensa en lo que ${group ? 'harían' : 'haría'}: ir a por quien más ${group ? 'les' : 'le'} amenaza, rematar al que está peor o devolver el golpe a quien acaba de herir${group ? 'les' : 'le'}.`,
+      criteria: Object.fromEntries(list.map((other) => [other.id, fighterText(other)])),
+    });
+    questions.target = target(characters);
+    questions.targetReversed = target([...characters].reverse());
+  }
+  return { state: enemyState(prompt), questions };
+}
+
+/** Lo que sugiere la IA de unos PNJ, a partir de sus respuestas. */
+export function enemyDecision(
+  prompt: EnemyPrompt,
+  answers: DecisionAnswers<EnemyQuestions>,
+): EnemyDecision {
+  const asked = [answers.target, answers.targetReversed].filter((answer) => answer !== undefined);
+  const targets: TargetOdds[] =
+    asked.length === 0
+      ? []
+      : prompt.fighters
+          .filter((other) => other.kind === 'character')
+          .map((other) => ({
+            id: other.id,
+            name: other.name,
+            probability:
+              asked.reduce((sum, answer) => sum + (answer.probabilities[other.id] ?? 0), 0) /
+              asked.length,
+          }))
+          .sort((a, b) => b.probability - a.probability);
+  const probabilities = Object.fromEntries(
+    MORALES.map((morale) => [morale, answers.morale.probabilities[morale] ?? 0]),
+  ) as Record<Morale, number>;
+  const choice = MORALES.reduce((best, morale) =>
+    probabilities[morale] > probabilities[best] ? morale : best,
+  );
+  return { targets, morale: { choice, probabilities } };
 }

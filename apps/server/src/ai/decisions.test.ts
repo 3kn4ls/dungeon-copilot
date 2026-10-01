@@ -1,6 +1,13 @@
-import { DEFAULT_SKILLS } from '@dungeon-copilot/rules';
+import { DEFAULT_GEAR, DEFAULT_SKILLS } from '@dungeon-copilot/rules';
 import { describe, expect, it } from 'vitest';
-import { checkQuestions, checkSuggestion, type CheckPrompt } from './decisions';
+import {
+  checkQuestions,
+  checkSuggestion,
+  enemyDecision,
+  enemyQuestions,
+  type CheckPrompt,
+  type EnemyPrompt,
+} from './decisions';
 
 const kael = { name: 'Kael', background: 'Mercenario de la Compañía Libre' };
 
@@ -173,6 +180,108 @@ describe('qué tirada pedir: lo que sugiere', () => {
     expect(checkSuggestion(shot, { range: { score: 0.2 } }).shot).toEqual({
       range: 'short',
       cover: 0,
+    });
+  });
+});
+
+const kaelFighter = {
+  kind: 'character' as const,
+  id: 'kael-id',
+  name: 'Kael',
+  severity: 'grave' as const,
+  gear: DEFAULT_GEAR,
+};
+const miraFighter = { ...kaelFighter, id: 'mira-id', name: 'Mira', severity: 'none' as const };
+const bandits = {
+  kind: 'npc' as const,
+  id: 'bandits-id',
+  name: 'Bandidos',
+  profile: 'minion' as const,
+  count: 3,
+  harm: { down: 2, damage: 0 },
+};
+const ambush: EnemyPrompt = {
+  round: 3,
+  scene: 'El callejón del puerto',
+  fighters: [kaelFighter, bandits, miraFighter],
+  acting: { fighter: bandits, concept: 'Matones del gremio', goals: 'Cobrar la deuda' },
+  blows: ['Golpe de Kael a Bandidos (3 de daño): cae uno y quedan 2.'],
+  targets: true,
+};
+
+describe('qué hacen los enemigos: las preguntas', () => {
+  it('cuenta cómo va el combate: la ronda, quién pelea, a quién le toca y los últimos golpes', () => {
+    expect(enemyQuestions(ambush).state).toBe(
+      [
+        'Ronda 3.',
+        'Escena: El callejón del puerto.',
+        'Quién pelea y cómo va:',
+        '- Kael (PJ): grave; lleva Arma media',
+        '- Bandidos (PNJ, esbirro): quedan 1 de 3 en pie',
+        '- Mira (PJ): sin heridas; lleva Arma media',
+        'Le toca a: Bandidos (PNJ, esbirro): quedan 1 de 3 en pie',
+        'Concepto: Matones del gremio',
+        'Objetivos: Cobrar la deuda',
+        'Los últimos golpes del combate:',
+        '- Golpe de Kael a Bandidos (3 de daño): cae uno y quedan 2.',
+      ].join('\n'),
+    );
+  });
+
+  it('a quién atacan, entre los personajes, en un orden y en el contrario; y su moral', () => {
+    const { questions } = enemyQuestions(ambush);
+    expect(Object.keys(questions.target?.criteria ?? {})).toEqual(['kael-id', 'mira-id']);
+    expect(Object.keys(questions.targetReversed?.criteria ?? {})).toEqual(['mira-id', 'kael-id']);
+    expect(questions.target?.criteria['kael-id']).toBe('Kael (PJ): grave; lleva Arma media');
+    expect(questions.target?.instructions).toContain('¿A quién atacan ahora Bandidos?');
+    expect(Object.keys(questions.morale.criteria)).toEqual(['fight', 'flee', 'surrender']);
+    expect(questions.morale.criteria.flee).toBe('Huyen: se retiran o escapan como pueden');
+  });
+
+  it('a quién atacan no se pregunta si solo hay uno, ni si no se pide', () => {
+    const alone = { ...ambush, fighters: [kaelFighter, bandits] };
+    expect(Object.keys(enemyQuestions(alone).questions)).toEqual(['morale']);
+    expect(Object.keys(enemyQuestions({ ...ambush, targets: false }).questions)).toEqual([
+      'morale',
+    ]);
+  });
+
+  it('un PNJ solo, en singular', () => {
+    const garrick = { ...bandits, name: 'Garrick', count: 1, harm: { down: 0, damage: 1 } };
+    const { questions } = enemyQuestions({ ...ambush, acting: { fighter: garrick } });
+    expect(questions.morale.instructions).toBe('¿Qué hace ahora Garrick, tal como va el combate?');
+    expect(questions.morale.criteria.surrender).toBe('Se rinde: tira las armas y pide clemencia');
+    expect(questions.target?.instructions).toContain('¿A quién ataca ahora Garrick?');
+  });
+});
+
+describe('qué hacen los enemigos: lo que sugiere', () => {
+  it('a quién atacan, con la media de los dos órdenes, y la moral más probable', () => {
+    const decision = enemyDecision(ambush, {
+      target: { choice: 'kael-id', probabilities: { 'kael-id': 0.73, 'mira-id': 0.27 } },
+      targetReversed: { choice: 'mira-id', probabilities: { 'mira-id': 0.61, 'kael-id': 0.39 } },
+      morale: { choice: 'flee', probabilities: { fight: 0.33, flee: 0.5, surrender: 0.17 } },
+    });
+    expect(decision.targets.map((target) => target.name)).toEqual(['Kael', 'Mira']);
+    expect(decision.targets[0]).toEqual({
+      id: 'kael-id',
+      name: 'Kael',
+      probability: expect.closeTo(0.56, 5),
+    });
+    expect(decision.targets[1]?.probability).toBeCloseTo(0.44, 5);
+    expect(decision.morale).toEqual({
+      choice: 'flee',
+      probabilities: { fight: 0.33, flee: 0.5, surrender: 0.17 },
+    });
+  });
+
+  it('sin preguntar a quién atacan, nadie; y la moral solo con sus tres opciones', () => {
+    const decision = enemyDecision(ambush, {
+      morale: { choice: 'fight', probabilities: { fight: 0.9, flee: 0.1, dance: 0.5 } },
+    });
+    expect(decision).toEqual({
+      targets: [],
+      morale: { choice: 'fight', probabilities: { fight: 0.9, flee: 0.1, surrender: 0 } },
     });
   });
 });

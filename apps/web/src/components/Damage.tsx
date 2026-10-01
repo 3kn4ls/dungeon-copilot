@@ -25,9 +25,10 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { refreshCharacters, useMe, useStoreGameEvent } from '../queries';
+import { refreshCharacters, useEnemyDecision, useMe, useStoreGameEvent } from '../queries';
 import { buildOf } from '../rolling';
 import { signed } from '../rules-text';
+import { MoraleAdvice } from './Decisions';
 import { ARMOR_OPTIONS, WEAPON_OPTIONS } from './Gear';
 import { ConfirmButton, ErrorNote, Segmented, Stepper } from './ui';
 
@@ -473,4 +474,52 @@ export function FallenActions(props: {
       <ErrorNote error={survive.error ?? stand.error} />
     </div>
   );
+}
+
+/**
+ * Bajo el golpe que tumba a uno de un grupo de PNJ que sigue en pie, lo que sugiere la IA de su
+ * moral: si puede que huyan o se rindan, con un botón para sacarlos del combate. Solo para el
+ * máster; mientras la IA piensa, o si falla, no dice nada.
+ */
+export function MoraleHint(props: { game: GameDetail; combat: Combat; event: DamageEvent }) {
+  const { game, combat, event } = props;
+  const storeEvent = useStoreGameEvent(game.id);
+  const fighting = combat.order.find((combatant) => combatant.id === event.target.id);
+  const enemy = fighting?.kind === 'npc' ? fighting : undefined;
+  const advice = useEnemyDecision(game.id, enemy?.id, `golpe:${event.id}`, false);
+  const leave = useMutation({
+    mutationFn: (combatantId: string) => api.leaveCombat(game.id, { combatantId }),
+    onSuccess: storeEvent,
+  });
+  if (!enemy || !advice.data) return null;
+  return (
+    <>
+      <MoraleAdvice
+        decision={advice.data}
+        enemy={enemy}
+        leaving={leave.isPending}
+        onLeave={() => leave.mutate(enemy.id)}
+      />
+      <ErrorNote error={leave.error} />
+    </>
+  );
+}
+
+/**
+ * El golpe tras el que se pregunta por la moral de unos PNJ: el último a PNJ del combate en juego,
+ * si tumba a uno y el grupo sigue peleando.
+ */
+export function moraleBlow(
+  events: readonly GameEvent[],
+  combat: Combat | null,
+): number | undefined {
+  if (!combat) return undefined;
+  const last = events.findLast(
+    (event): event is DamageEvent =>
+      event.kind === 'damage' && event.target.kind === 'npc' && event.id > combat.startedAt,
+  );
+  if (last?.target.kind !== 'npc' || !last.target.fell) return undefined;
+  const standing = last.target.count - last.target.harm.down;
+  const fighting = combat.order.some((combatant) => combatant.id === last.target.id);
+  return standing > 0 && fighting ? last.id : undefined;
 }

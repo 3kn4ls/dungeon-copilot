@@ -1,8 +1,13 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { UNHARMED } from '@dungeon-copilot/rules';
+import { groupSize, type Combat, type NpcCombatant } from '@dungeon-copilot/shared';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import {
   IDEA_NPCS,
+  damageText,
   type PromptCampaign,
   type PromptCharacter,
+  type PromptFighter,
+  type PromptNpcKnown,
   type PromptNpcLine,
   type PromptScene,
 } from '../ai/prompts';
@@ -62,5 +67,85 @@ export async function findScenes(db: Executor, gameId: string, limit = 1): Promi
     .flatMap(({ payload }) =>
       payload.kind === 'reveal' ? [{ title: payload.title, body: payload.body }] : [],
     )
+    .reverse();
+}
+
+/** Quien pelea, visto por la IA: con su id en el combate. */
+export type IdentifiedFighter = PromptFighter & { id: string };
+
+/** Unos PNJ que pelean, para la IA: cuántos son y cómo van. */
+export const npcFighter = (
+  combat: Combat,
+  combatant: NpcCombatant,
+): IdentifiedFighter & { kind: 'npc' } => ({
+  kind: 'npc',
+  id: combatant.id,
+  name: combatant.name,
+  profile: combatant.profile,
+  count: groupSize(combatant),
+  harm: combat.harm[combatant.id] ?? UNHARMED,
+});
+
+/**
+ * Quien pelea en el combate, en el orden de iniciativa, como lo ve la IA: los personajes con sus
+ * heridas y su equipo, y los PNJ con cuántos quedan en pie.
+ */
+export async function findFighters(
+  db: Executor,
+  campaignId: string,
+  combat: Combat,
+): Promise<IdentifiedFighter[]> {
+  const ids = combat.order.flatMap((combatant) =>
+    combatant.kind === 'character' ? [combatant.id] : [],
+  );
+  const sheets =
+    ids.length === 0
+      ? []
+      : await db
+          .select({ id: characters.id, severity: characters.severity, gear: characters.gear })
+          .from(characters)
+          .where(and(eq(characters.campaignId, campaignId), inArray(characters.id, ids)));
+  return combat.order.flatMap((combatant): IdentifiedFighter[] => {
+    if (combatant.kind === 'npc') return [npcFighter(combat, combatant)];
+    const sheet = sheets.find((other) => other.id === combatant.id);
+    return sheet ? [{ kind: 'character', name: combatant.name, ...sheet }] : [];
+  });
+}
+
+/** Lo que sabe el máster de unos PNJ que pelean, si son de la campaña: nunca lo que ocultan. */
+export async function findNpcKnown(
+  db: Executor,
+  campaignId: string,
+  combatant: NpcCombatant,
+): Promise<PromptNpcKnown> {
+  if (!combatant.npcId) return {};
+  const [npc] = await db
+    .select({ concept: npcs.concept, personality: npcs.personality, goals: npcs.goals })
+    .from(npcs)
+    .where(and(eq(npcs.id, combatant.npcId), eq(npcs.campaignId, campaignId)));
+  return npc ?? {};
+}
+
+/** Los últimos golpes del combate, del más antiguo al más reciente, contados en una frase. */
+export async function findCombatBlows(
+  db: Executor,
+  gameId: string,
+  combat: Combat,
+  limit: number,
+): Promise<string[]> {
+  const rows = await db
+    .select({ payload: gameEvents.payload })
+    .from(gameEvents)
+    .where(
+      and(
+        eq(gameEvents.gameId, gameId),
+        gt(gameEvents.id, combat.startedAt),
+        sql`${gameEvents.payload} ->> 'kind' = 'damage'`,
+      ),
+    )
+    .orderBy(desc(gameEvents.id))
+    .limit(limit);
+  return rows
+    .flatMap(({ payload }) => (payload.kind === 'damage' ? [damageText(payload)] : []))
     .reverse();
 }

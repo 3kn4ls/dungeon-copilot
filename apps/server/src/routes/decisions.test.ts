@@ -223,6 +223,124 @@ describe('qué tirada pedir para una intervención', () => {
   });
 });
 
+/** Kael y Mira contra Garrick, un PNJ de la campaña con secretos, y tres matones. */
+async function fight() {
+  const tableState = await table();
+  const { master, ana, campaign, kael: sheet, url } = tableState;
+  const mira = (
+    await ana.post(`/api/campaigns/${campaign.id}/characters`, kael({ name: 'Mira' }))
+  ).json().character;
+  const garrick = (
+    await master.post(`/api/campaigns/${campaign.id}/npcs`, {
+      name: 'Garrick',
+      concept: 'Capitán de los contrabandistas',
+      personality: 'Orgulloso y rencoroso',
+      goals: 'Que nadie descubra el almacén',
+      secrets: 'Trabaja para el conde',
+      profile: 'veteran',
+    })
+  ).json().npc;
+  dice = fixedDice(6, 6, 5, 5, 4, 4, 3, 3);
+  const started = await created(
+    master.post(`${url}/combat`, {
+      combatants: [
+        { kind: 'character', characterId: sheet.id },
+        { kind: 'character', characterId: mira.id },
+        { kind: 'npc', name: 'Garrick', profile: 'veteran', npcId: garrick.id },
+        { kind: 'npc', name: 'Matones', profile: 'minion', count: 3 },
+      ],
+    }),
+  );
+  if (started.kind !== 'combatStarted') throw new Error('No ha empezado el combate');
+  const byName = (name: string) => {
+    const combatant = started.order.find((other) => other.name === name);
+    if (!combatant) throw new Error(`${name} no pelea`);
+    return combatant;
+  };
+  return {
+    ...tableState,
+    mira,
+    garrickCombatant: byName('Garrick'),
+    thugs: byName('Matones'),
+    decision: `${url}/combat/decision`,
+  };
+}
+
+describe('qué hacen los enemigos', () => {
+  it('a quién atacan y su moral, sabiendo cómo va el combate y sin los secretos del PNJ', async () => {
+    const { master, kael: sheet, mira, garrickCombatant, thugs, url, decision } = await fight();
+    await created(master.post(`${url}/damage`, { targetId: thugs.id, amount: 1 }));
+    const before = await eventsOf(master, url);
+
+    ollama.queueDecision({
+      kind: 'answers',
+      answers: {
+        target: { choice: { [sheet.id]: 0.7, [mira.id]: 0.3 } },
+        targetReversed: { choice: { [mira.id]: 0.5, [sheet.id]: 0.5 } },
+        morale: { choice: { fight: 0.3, flee: 0.55, surrender: 0.15 } },
+      },
+    });
+    const response = await master.post(decision, { combatantId: garrickCombatant.id });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      decision: {
+        targets: [
+          { id: sheet.id, name: 'Kael', probability: 0.6 },
+          { id: mira.id, name: 'Mira', probability: 0.4 },
+        ],
+        morale: { choice: 'flee', probabilities: { fight: 0.3, flee: 0.55, surrender: 0.15 } },
+      },
+    });
+
+    const { states, keys } = asked();
+    expect(keys).toEqual(['morale', 'target', 'targetReversed']);
+    expect(states).toHaveLength(1);
+    const [state] = states;
+    expect(state).toContain('Ronda 1.');
+    expect(state).toContain('- Matones (PNJ, esbirro): quedan 2 de 3 en pie');
+    expect(state).toContain('Le toca a: Garrick (PNJ, veterano): sin heridas');
+    expect(state).toContain('Concepto: Capitán de los contrabandistas');
+    expect(state).toContain('Golpe a Matones (1 de daño): cae uno y quedan 2.');
+    // Lo que oculta Garrick no sale nunca.
+    expect(JSON.stringify(ollama.decisions)).not.toContain('conde');
+    // Solo sugiere: la partida sigue igual.
+    expect(await eventsOf(master, url)).toEqual(before);
+  });
+
+  it('solo la moral, si no se pide a quién atacan', async () => {
+    const { master, thugs, decision } = await fight();
+    ollama.queueDecision({
+      kind: 'answers',
+      answers: { morale: { choice: { fight: 0.2, flee: 0.1, surrender: 0.7 } } },
+    });
+    const response = await master.post(decision, { combatantId: thugs.id, targets: false });
+    expect(response.json().decision).toEqual({
+      targets: [],
+      morale: { choice: 'surrender', probabilities: { fight: 0.2, flee: 0.1, surrender: 0.7 } },
+    });
+    expect(asked().keys).toEqual(['morale']);
+  });
+
+  it('solo de PNJ del combate, con un combate en juego, y solo para el máster', async () => {
+    const { master, ana, bruno, kael: sheet, thugs, url, decision } = await fight();
+    expect((await bruno.post(decision, { combatantId: thugs.id })).statusCode).toBe(404);
+    expect((await ana.post(decision, { combatantId: thugs.id })).statusCode).toBe(403);
+
+    const character = await master.post(decision, { combatantId: sheet.id });
+    expect(character.statusCode).toBe(404);
+    expect(character.json().error).toBe('Esos PNJ no están en el combate');
+    const nobody = await master.post(decision, { combatantId: crypto.randomUUID() });
+    expect(nobody.statusCode).toBe(404);
+    expect((await master.post(decision, {})).statusCode).toBe(400);
+
+    await master.post(`${url}/combat/end`, {});
+    const ended = await master.post(decision, { combatantId: thugs.id });
+    expect(ended.statusCode).toBe(409);
+    expect(ended.json().error).toBe('No hay ningún combate en juego');
+    expect(ollama.decisions).toHaveLength(0);
+  });
+});
+
 describe('sin Nimble', () => {
   it('la web lo sabe y las sugerencias responden 503', async () => {
     const { master, ana, kael: sheet, url } = await table();

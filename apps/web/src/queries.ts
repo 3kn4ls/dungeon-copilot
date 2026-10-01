@@ -22,6 +22,8 @@ export const keys = {
   npc: (id: string) => ['npcs', id] as const,
   ai: ['ai'] as const,
   check: (gameId: string, eventId: number) => ['games', gameId, 'check', eventId] as const,
+  enemy: (gameId: string, combatantId: string, moment: string, targets: boolean) =>
+    ['games', gameId, 'enemy', combatantId, moment, targets] as const,
 };
 
 export function createQueryClient(): QueryClient {
@@ -153,6 +155,25 @@ export const useCheckSuggestion = (gameId: string, intervention: InterventionEve
     queryKey: keys.check(gameId, intervention?.id ?? 0),
     queryFn: ({ signal }) => api.checkSuggestion(gameId, intervention?.id ?? 0, signal),
     enabled: intervention !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+/**
+ * Qué hacen unos PNJ del combate según la IA, si se pide (`combatantId`): a quién atacan (con
+ * `targets`) y su moral. Se pide una vez por `moment` (un turno, un golpe): es barato.
+ */
+export const useEnemyDecision = (
+  gameId: string,
+  combatantId: string | undefined,
+  moment: string,
+  targets = true,
+) =>
+  useQuery({
+    queryKey: keys.enemy(gameId, combatantId ?? '', moment, targets),
+    queryFn: ({ signal }) =>
+      api.enemyDecision(gameId, { combatantId: combatantId ?? '', targets }, signal),
+    enabled: combatantId !== undefined,
     staleTime: Infinity,
     retry: false,
   });

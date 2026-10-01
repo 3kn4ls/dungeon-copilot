@@ -1,11 +1,16 @@
 import { DIFFICULTY_LABELS, defaultSkillCatalog, type Range } from '@dungeon-copilot/rules';
 import {
+  MORALE_LABELS,
   SPELL_EFFECT_LABELS,
   SUGGESTION_THRESHOLDS,
+  groupSize,
   type CheckSuggestion,
+  type EnemyDecision as Decision,
   type InterventionIntent,
+  type NpcCombatant,
 } from '@dungeon-copilot/shared';
 import { percent } from '../rolling';
+import { ConfirmButton } from './ui';
 
 // Lo que sugiere la IA que decide (Nimble). Solo sugiere: el máster aplica lo que quiera, y si la
 // IA tarda o falla, todo sigue como sin ella.
@@ -103,4 +108,57 @@ export function CheckHint(props: {
       )}
     </div>
   );
+}
+
+/**
+ * Si la IA cree que unos PNJ van a huir o a rendirse: «Puede que huyan (55 %)», con un botón para
+ * sacarlos del combate. Si siguen peleando, nada.
+ */
+export function MoraleAdvice(props: {
+  decision: Decision;
+  enemy: NpcCombatant;
+  leaving: boolean;
+  onLeave: () => void;
+}) {
+  const { decision, enemy, leaving, onLeave } = props;
+  const { choice, probabilities } = decision.morale;
+  if (choice === 'fight') return null;
+  const label = MORALE_LABELS[choice][groupSize(enemy) > 1 ? 'group' : 'one'];
+  return (
+    <div className="suggestion morale">
+      <p>
+        La IA sugiere: <strong>{label}</strong> ({percent(probabilities[choice])})
+      </p>
+      <div className="actions">
+        <ConfirmButton
+          small
+          confirmLabel={`¿Sacar a ${enemy.name} del combate?`}
+          disabled={leaving}
+          onConfirm={onLeave}
+        >
+          Sacar del combate
+        </ConfirmButton>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lo que sugiere la IA en el turno de unos PNJ: mientras llega, lo dice; si falla, por qué. A
+ * quién atacan va en sus fichas (ver CombatTracker); aquí, si puede que huyan o se rindan.
+ */
+export function EnemyDecision(props: {
+  asked: Asked<Decision>;
+  enemy: NpcCombatant;
+  leaving: boolean;
+  onLeave: () => void;
+}) {
+  const { asked, enemy } = props;
+  if (asked.error) {
+    return <p className="suggestion-note">Sin sugerencia de la IA: {errorText(asked.error)}</p>;
+  }
+  if (!asked.data) {
+    return <p className="suggestion-note">La IA está pensando qué hace {enemy.name}…</p>;
+  }
+  return <MoraleAdvice {...props} decision={asked.data} />;
 }

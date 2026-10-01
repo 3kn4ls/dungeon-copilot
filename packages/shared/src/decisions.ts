@@ -1,4 +1,5 @@
 import type { DifficultyLevel, Range } from '@dungeon-copilot/rules';
+import { z } from 'zod';
 import type { InterventionIntent } from './games';
 
 // Lo que sugiere la IA que decide (Nimble) al máster. Solo sugiere: no escribe nada en la partida,
@@ -71,3 +72,41 @@ export const SUGGESTION_THRESHOLDS = {
   /** Por debajo, «Quizá no haga falta tirar». */
   needsRoll: 0.4,
 } as const;
+
+/** Qué hacen unos enemigos según como va el combate: siguen, huyen o se rinden. */
+export const MORALES = ['fight', 'flee', 'surrender'] as const;
+export type Morale = (typeof MORALES)[number];
+
+/** Lo que pueden hacer, dicho para el máster: de un grupo o de uno solo. */
+export const MORALE_LABELS: Record<Morale, { group: string; one: string }> = {
+  fight: { group: 'Siguen peleando', one: 'Sigue peleando' },
+  flee: { group: 'Puede que huyan', one: 'Puede que huya' },
+  surrender: { group: 'Puede que se rindan', one: 'Puede que se rinda' },
+};
+
+/** Para preguntar a la IA qué hacen unos PNJ del combate. */
+export const enemyDecisionSchema = z.object({
+  /** Los PNJ: su id en el combate. */
+  combatantId: z.uuid('Elige qué PNJ'),
+  /** Si se pregunta también a quién atacan; si no, solo su moral. */
+  targets: z.boolean().default(true),
+});
+
+export type EnemyDecisionRequest = z.input<typeof enemyDecisionSchema>;
+
+/** Un personaje del combate al que pueden atacar unos PNJ, con lo probable que lo ve la IA. */
+export interface TargetOdds {
+  id: string;
+  name: string;
+  probability: number;
+}
+
+/** Qué hacen unos PNJ, según la IA: a quién atacan y si siguen, huyen o se rinden. */
+export interface EnemyDecision {
+  /**
+   * Los personajes que pelean, de más a menos probable. Vacío si no se ha preguntado o solo hay
+   * uno: no hay nada que elegir.
+   */
+  targets: TargetOdds[];
+  morale: { choice: Morale; probabilities: Record<Morale, number> };
+}

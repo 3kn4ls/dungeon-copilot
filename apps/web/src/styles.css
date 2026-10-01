@@ -2262,6 +2262,21 @@ h1 .badge {
   color: var(--muted);
 }
 
+.suggestion.morale p {
+  margin: 0;
+}
+
+/* El objetivo que sugiere la IA en el turno de los enemigos, y la probabilidad de cada uno. */
+.chip.suggested {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.chip-odds {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* Las escenas y las técnicas que se gastan. */
 .scene-line {
   margin: 0;

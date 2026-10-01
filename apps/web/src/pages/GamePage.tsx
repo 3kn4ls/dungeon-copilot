@@ -63,7 +63,14 @@ import {
 import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
 import { CheckHint } from '../components/Decisions';
-import { FallenActions, ManualDamage, RollDamage, type DamageEvent } from '../components/Damage';
+import {
+  FallenActions,
+  ManualDamage,
+  MoraleHint,
+  RollDamage,
+  moraleBlow,
+  type DamageEvent,
+} from '../components/Damage';
 import { FloorControl, FloorStatus, holdsFloor } from '../components/Floor';
 import { EventCard } from '../components/GameEvents';
 import { AiIdeas } from '../components/Ideas';
@@ -226,6 +233,9 @@ export function GamePage() {
   const combat = currentCombat(state.data.events);
   const spent = spentAbilities(state.data.events);
   const intents = rollIntents(state.data.events);
+  // Tras tumbar a uno de un grupo de enemigos, la IA dice si puede que huyan o se rindan.
+  const morale =
+    isMaster && isOpen && ai.data?.decisions ? moraleBlow(state.data.events, combat) : undefined;
 
   return (
     <>
@@ -308,6 +318,9 @@ export function GamePage() {
                     )}
                     {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
                       <RollRequestAction game={game} event={event} />
+                    )}
+                    {event.kind === 'damage' && combat && event.id === morale && (
+                      <MoraleHint game={game} combat={combat} event={event} />
                     )}
                     {event.kind === 'damage' && isOpen && (
                       <FallenActions
@@ -516,6 +529,7 @@ function MasterDesk({ state }: { state: GameState }) {
             characters={characters}
             spent={spent}
             ai={ai.data?.enabled === true}
+            decisions={ai.data?.decisions === true}
             onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
           />
         ) : (
