@@ -9,6 +9,8 @@ import {
 import {
   COMBAT_EVENT_KINDS,
   currentCombat,
+  type Blow,
+  type BlowRequest,
   type Combat,
   type Combatant,
   type CombatantRef,
@@ -52,6 +54,8 @@ export async function requireCombat(db: Executor, gameId: string): Promise<Comba
   return combat;
 }
 
+const NOT_FIGHTING = 'Quien eliges no está en el combate';
+
 /** Alguien que pelea, contra quien va una intervención: 404 si no está en el combate. */
 export async function findCombatTarget(
   db: Executor,
@@ -59,8 +63,22 @@ export async function findCombatTarget(
   id: string,
 ): Promise<CombatantRef> {
   const target = (await findCombat(db, gameId))?.order.find((combatant) => combatant.id === id);
-  if (!target) throw notFound('Quien eliges no está en el combate');
+  if (!target) throw notFound(NOT_FIGHTING);
   return { id: target.id, name: target.name };
+}
+
+/**
+ * Quién ataca a quién en una tirada de combate, con sus nombres: 409 si no hay combate y 404 si
+ * alguno no está peleando.
+ */
+export async function findBlow(db: Executor, gameId: string, blow: BlowRequest): Promise<Blow> {
+  const combat = await requireCombat(db, gameId);
+  const ref = (id: string): CombatantRef => {
+    const combatant = combat.order.find((other) => other.id === id);
+    if (!combatant) throw notFound(NOT_FIGHTING);
+    return { id: combatant.id, name: combatant.name };
+  };
+  return { attacker: ref(blow.attackerId), defender: ref(blow.defenderId) };
 }
 
 /**
@@ -135,7 +153,7 @@ function characterCombatant(
   };
 }
 
-/** Unos PNJ tiran la iniciativa con la Destreza de su perfil, una vez por grupo. */
+/** Unos PNJ tiran la iniciativa con la Destreza de su perfil, una vez por grupo, sean cuantos sean. */
 function npcCombatant(entering: Extract<Entering, { kind: 'npc' }>, random: Random): Combatant {
   const bonus = NPC_PROFILES[entering.profile].dexterity;
   const { dice, total } = rollInitiative(bonus, 'none', random);
@@ -144,6 +162,7 @@ function npcCombatant(entering: Extract<Entering, { kind: 'npc' }>, random: Rand
     id: randomUUID(),
     name: entering.name,
     profile: entering.profile,
+    count: entering.count,
     npcId: entering.npcId,
     initiative: { dice, bonus, total, notes: [] },
   };

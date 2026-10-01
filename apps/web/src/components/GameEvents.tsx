@@ -1,6 +1,14 @@
-import { OUTCOME_GUIDES, OUTCOME_LABELS, doublesShift } from '@dungeon-copilot/rules';
+import {
+  OUTCOME_GUIDES,
+  OUTCOME_LABELS,
+  SEVERITIES,
+  SEVERITY_LABELS,
+  defaultSkillCatalog,
+  doublesShift,
+} from '@dungeon-copilot/rules';
 import {
   INTERVENTION_LABELS,
+  groupLabel,
   rerollerLabel,
   type Combatant,
   type CombatantRef,
@@ -89,21 +97,54 @@ function secretWith(event: GameEvent): string | undefined {
 function InitiativeList({ combatants }: { combatants: Combatant[] }) {
   return (
     <ol className="initiative-list">
-      {combatants.map(({ id, name, initiative }) => (
-        <li key={id}>
-          <strong>{name}</strong> {initiative.total}{' '}
-          <span className="muted">
-            ({initiative.dice.kept.join(' + ')} + {initiative.bonus})
-          </span>
-          {initiative.notes.map((note) => (
-            <span key={note} className="roll-note">
-              {note}
+      {combatants.map((combatant) => {
+        const { id, initiative } = combatant;
+        return (
+          <li key={id}>
+            <strong>{groupLabel(combatant)}</strong> {initiative.total}{' '}
+            <span className="muted">
+              ({initiative.dice.kept.join(' + ')} + {initiative.bonus})
             </span>
-          ))}
-        </li>
-      ))}
+            {initiative.notes.map((note) => (
+              <span key={note} className="roll-note">
+                {note}
+              </span>
+            ))}
+          </li>
+        );
+      })}
     </ol>
   );
+}
+
+type DamageEvent = GameEvent & { kind: 'damage' };
+
+/** «Golpe de Garrick a Kael: 2 de daño.», o «Golpe a Bandidos: 1 de daño.» si no se sabe de quién. */
+export function blowLine(event: DamageEvent): string {
+  const from = event.by ? ` de ${event.by.name}` : '';
+  const dodged = event.dodged ? ', con Esquiva prodigiosa' : '';
+  return `Golpe${from} a ${event.target.name}: ${event.amount} de daño${dodged}.`;
+}
+
+/**
+ * Cómo queda quien recibe un golpe. De los PNJ, la mesa sabe si caen; lo que aguantan, solo el
+ * máster.
+ */
+export function blowResult(event: DamageEvent, master: boolean): string {
+  const { target } = event;
+  if (target.kind === 'character') {
+    const worse =
+      SEVERITIES.indexOf(target.after.severity) > SEVERITIES.indexOf(target.before.severity);
+    if (!worse) return `Rasguños: ${target.after.scratches}.`;
+    return `Queda ${SEVERITY_LABELS[target.after.severity].toLowerCase()}.`;
+  }
+  const standing = target.count - target.harm.down;
+  const out = event.position ? ' Sale del combate.' : '';
+  if (target.fell) {
+    if (target.count === 1) return `Cae.${out}`;
+    return standing === 0 ? `Caen todos.${out}` : `Cae uno: quedan ${standing} de ${target.count}.`;
+  }
+  return master ? `Lleva ${target.harm.damage} de ${target.toughness}.` : 'Aguanta.';
 }
 
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */
@@ -181,12 +222,15 @@ export function EventCard({
   event,
   superseded = false,
   settled,
+  survived = false,
   master = false,
   children,
 }: {
   event: GameEvent;
   superseded?: boolean;
   settled?: SettledHow | undefined;
+  /** De un golpe mortal: el personaje ha gastado Suerte para seguir con vida. */
+  survived?: boolean;
   master?: boolean;
   children?: ReactNode;
 }) {
@@ -331,6 +375,57 @@ export function EventCard({
           <p>Sale del combate: {event.left.name}.</p>
         </article>
       );
+    case 'damage':
+      return (
+        <article className="feed-item feed-damage">
+          {meta}
+          <p>
+            <strong>{blowLine(event)}</strong> {blowResult(event, master)}
+          </p>
+          {event.target.kind === 'character' && event.target.lethal && (
+            <p className="lethal">
+              {survived
+                ? `Golpe mortal: ${event.target.name} gasta un punto de Suerte y sigue con vida.`
+                : `Golpe mortal: ${event.target.name} muere salvo que gaste un punto de Suerte.`}
+            </p>
+          )}
+          {children}
+        </article>
+      );
+    case 'survived':
+      return (
+        <article className="feed-item feed-floor">
+          {meta}
+          <p>{event.name} gasta un punto de Suerte y sigue con vida.</p>
+        </article>
+      );
+    case 'scene': {
+      const recovered = event.recovered.map(({ name }) => name);
+      return (
+        <article className="feed-item feed-milestone">
+          {meta}
+          <h3>Escena: {event.title}</h3>
+          {recovered.length > 0 && (
+            <p className="muted">
+              {listText(recovered)} {recovered.length === 1 ? 'recupera' : 'recuperan'} el aliento:
+              se borran sus rasguños.
+            </p>
+          )}
+        </article>
+      );
+    }
+    case 'ability': {
+      const skill = defaultSkillCatalog.get(event.skill);
+      return (
+        <article className="feed-item feed-floor">
+          {meta}
+          <p>
+            <strong>{event.name}</strong> usa {event.label}.
+          </p>
+          {skill && <p className="muted">{skill.description}</p>}
+        </article>
+      );
+    }
     case 'combatEnded': {
       const recovered = event.recovered.map(({ name }) => name);
       return (

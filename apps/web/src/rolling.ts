@@ -4,9 +4,12 @@ import {
   combineEdges,
   conditionEdges,
   defaultSkillCatalog,
+  meleeAttack,
+  meleeDefense,
   opposedOdds,
   testOdds,
   type Attribute,
+  type CharacterBuild,
   type DifficultyLevel,
   type Edge,
   type OutcomeOdds,
@@ -14,6 +17,7 @@ import {
   type Situation,
 } from '@dungeon-copilot/rules';
 import type {
+  Blow,
   CharacterView,
   Combat,
   Combatant,
@@ -42,14 +46,24 @@ export function defaultCheck(character: CharacterView): string {
   return best ? `skill:${best[0]}` : 'attribute:strength';
 }
 
-export function characterDraft(character: CharacterView, check?: string): SideDraft {
+export function characterDraft(
+  character: CharacterView,
+  check?: string,
+  extra: { modifier?: number; edge?: Edge } = {},
+): SideDraft {
   return {
     kind: 'character',
     characterId: character.id,
     check: check ?? defaultCheck(character),
-    modifier: 0,
-    edge: 'none',
+    modifier: extra.modifier ?? 0,
+    edge: extra.edge ?? 'none',
   };
+}
+
+/** Lo que dice el reglamento de un personaje de la mesa. */
+export function buildOf(character: CharacterView): CharacterBuild {
+  const { name, background, attributes, skills, advancedSkills } = character;
+  return { name, background, attributes, skills, advancedSkills };
 }
 
 export const freeDraft = (label: string): SideDraft => ({
@@ -86,6 +100,8 @@ export interface SideCheck {
   edge: Edge;
   /** Tira con desventaja por una herida grave. */
   wounded: boolean;
+  /** Tira con desventaja por su armadura pesada. */
+  armored: boolean;
 }
 
 /**
@@ -93,30 +109,25 @@ export interface SideCheck {
  * de ahora. null si el personaje no está en la lista.
  */
 export function sideCheck(side: RollSideRequest, characters: CharacterView[]): SideCheck | null {
-  if (side.kind === 'free') return { bonus: side.bonus, edge: side.edge ?? 'none', wounded: false };
+  if (side.kind === 'free') {
+    return { bonus: side.bonus, edge: side.edge ?? 'none', wounded: false, armored: false };
+  }
   const character = characters.find((c) => c.id === side.characterId);
   if (!character) return null;
-  const build = {
-    name: character.name,
-    background: character.background,
-    attributes: character.attributes,
-    skills: character.skills,
-    advancedSkills: character.advancedSkills,
-  };
+  const build = buildOf(character);
   const breakdown = checkBonus(build, {
     skill: side.skill,
     attribute: side.attribute,
     modifier: side.modifier ?? 0,
   });
-  const imposed = conditionEdges(
-    build,
-    { attribute: breakdown.attribute, skill: side.skill },
-    { wounds: character.wounds },
-  );
+  const check = { attribute: breakdown.attribute, skill: side.skill };
+  const wounded = conditionEdges(build, check, { wounds: character.wounds });
+  const armored = conditionEdges(build, check, { armor: character.gear.armor });
   return {
     bonus: breakdown.bonus,
-    edge: combineEdges(side.edge ?? 'none', ...imposed),
-    wounded: imposed.includes('disadvantage'),
+    edge: combineEdges(side.edge ?? 'none', ...wounded, ...armored),
+    wounded: wounded.includes('disadvantage'),
+    armored: armored.includes('disadvantage'),
   };
 }
 
@@ -143,21 +154,42 @@ function skillBonus(character: CharacterView, skill: string): number {
   return (attribute ? character.attributes[attribute] : 0) + (character.skills[skill] ?? 0);
 }
 
-/** De entre estas habilidades, con la que más suma el personaje; con empate, la primera. */
-function bestOf(character: CharacterView, ...skills: string[]): string {
-  const best = skills.reduce((a, b) =>
-    skillBonus(character, b) > skillBonus(character, a) ? b : a,
-  );
-  return `skill:${best}`;
+/** Con qué ataca cuerpo a cuerpo, según el arma de su ficha: Esgrima si es ligera. */
+export const meleeCheck = (character: CharacterView) =>
+  `skill:${meleeAttack(buildOf(character), character.gear.melee.weapon).skill}`;
+
+/** Un personaje que ataca cuerpo a cuerpo con su arma: con desventaja si es pesada y le pesa. */
+export function attackDraft(character: CharacterView): SideDraft {
+  const attack = meleeAttack(buildOf(character), character.gear.melee.weapon);
+  return characterDraft(character, `skill:${attack.skill}`, {
+    edge: combineEdges(...attack.edges),
+  });
 }
 
-/** Para atacar cuerpo a cuerpo sin saber su arma: con Armas cuerpo a cuerpo o Esgrima, lo mejor. */
-export const meleeCheck = (character: CharacterView) =>
-  bestOf(character, 'melee-weapons', 'fencing');
-
-/** Para defenderse: parar con su arma o esquivar con Acrobacias, lo que mejor se le dé. */
-export const defenseCheck = (character: CharacterView) =>
-  bestOf(character, 'melee-weapons', 'fencing', 'acrobatics');
+/**
+ * Un personaje que se defiende cuerpo a cuerpo, como mejor le vaya: parando con su arma (el escudo
+ * suma) o esquivando con Acrobacias (la armadura pesada estorba). Una desventaja cuenta como −2.
+ */
+export function defenseDraft(character: CharacterView): SideDraft {
+  const build = buildOf(character);
+  const { weapon } = character.gear.melee;
+  const parry = meleeDefense(build, 'parry', { weapon, shield: character.gear.shield });
+  const dodge = meleeDefense(build, 'dodge', {});
+  const armored = conditionEdges(
+    build,
+    { attribute: 'dexterity', skill: 'acrobatics' },
+    { armor: character.gear.armor },
+  );
+  const worth = (skill: string, modifier: number, edges: readonly Edge[]) =>
+    skillBonus(character, skill) + modifier - (edges.includes('disadvantage') ? 2 : 0);
+  const parrying = worth(parry.skill, parry.modifier, parry.edges);
+  const dodging = worth(dodge.skill, dodge.modifier, armored);
+  if (dodging > parrying) return characterDraft(character, `skill:${dodge.skill}`);
+  return characterDraft(character, `skill:${parry.skill}`, {
+    modifier: parry.modifier,
+    edge: combineEdges(...parry.edges),
+  });
+}
 
 /** Un bando para tirar contra quien pelea: los PNJ, con su perfil; un personaje, defendiéndose. */
 export function combatantDraft(combatant: Combatant, characters: CharacterView[]): SideDraft {
@@ -171,7 +203,7 @@ export function combatantDraft(combatant: Combatant, characters: CharacterView[]
     };
   }
   const character = characters.find((c) => c.id === combatant.id);
-  return character ? characterDraft(character, defenseCheck(character)) : freeDraft(combatant.name);
+  return character ? defenseDraft(character) : freeDraft(combatant.name);
 }
 
 /** De qué depende la dificultad de un disparo, salvo quién dispara. */
@@ -185,13 +217,21 @@ export interface Shot {
 
 export const DEFAULT_SHOT: Shot = { dexterity: 2, range: 'short', cover: false, shield: false };
 
-/** La Destreza de quien pelea: la del personaje o la de su perfil. */
-function combatantDexterity(combatant: Combatant, characters: CharacterView[]): number {
-  if (combatant.kind === 'npc') return NPC_PROFILES[combatant.profile].dexterity;
-  return (
-    characters.find((c) => c.id === combatant.id)?.attributes.dexterity ?? DEFAULT_SHOT.dexterity
-  );
+/** Cómo es de difícil dispararle a quien pelea: con su Destreza y, si es un personaje, su escudo. */
+function combatantShot(combatant: Combatant, characters: CharacterView[]): Shot {
+  if (combatant.kind === 'npc') {
+    return { ...DEFAULT_SHOT, dexterity: NPC_PROFILES[combatant.profile].dexterity };
+  }
+  const character = characters.find((c) => c.id === combatant.id);
+  return character ? characterShot(character) : DEFAULT_SHOT;
 }
+
+/** Disparar a un personaje: con su Destreza y su escudo, si lleva. */
+const characterShot = (character: CharacterView): Shot => ({
+  ...DEFAULT_SHOT,
+  dexterity: character.attributes.dexterity,
+  shield: character.gear.shield,
+});
 
 /**
  * Una tirada ya preparada para el formulario de Tirar: para atender una intervención o para el
@@ -207,6 +247,8 @@ export interface RollPreset {
   /** Que la haga el jugador del personaje que tira o que se defiende. */
   ask: boolean;
   secret: boolean;
+  /** En combate, quién ataca a quién: a quién irá el daño del golpe. */
+  blow?: Blow | undefined;
 }
 
 /** Con qué tira, de entrada, quien ha intervenido: lo más probable según lo que quiere hacer. */
@@ -233,6 +275,7 @@ export function interventionPreset(
   const character = characters.find((c) => c.id === intervention.characterId);
   if (!character) return undefined;
   const target = combat?.order.find((combatant) => combatant.id === intervention.target?.id);
+  const fighting = combat?.order.some((combatant) => combatant.id === character.id) ?? false;
   const preset: RollPreset = {
     actor: characterDraft(character, INTENT_CHECKS[intervention.intent](character)),
     against: 'difficulty',
@@ -242,12 +285,20 @@ export function interventionPreset(
     shot: DEFAULT_SHOT,
     ask: true,
     secret: intervention.visibility === 'private',
+    blow:
+      target && fighting
+        ? {
+            attacker: { id: character.id, name: character.name },
+            defender: { id: target.id, name: target.name },
+          }
+        : undefined,
   };
   switch (intervention.intent) {
     case 'attack':
     case 'melee':
       return {
         ...preset,
+        actor: attackDraft(character),
         against: 'opposed',
         situation: 'melee',
         opponent: target ? combatantDraft(target, characters) : preset.opponent,
@@ -256,9 +307,7 @@ export function interventionPreset(
       return {
         ...preset,
         situation: 'ranged',
-        shot: target
-          ? { ...DEFAULT_SHOT, dexterity: combatantDexterity(target, characters) }
-          : DEFAULT_SHOT,
+        shot: target ? combatantShot(target, characters) : DEFAULT_SHOT,
       };
     default:
       return preset;
@@ -271,10 +320,14 @@ export function enemyAttackPreset(enemy: NpcCombatant, target: CharacterView): R
     actor: combatantDraft(enemy, []),
     against: 'opposed',
     difficulty: 'normal',
-    opponent: characterDraft(target, defenseCheck(target)),
+    opponent: defenseDraft(target),
     situation: 'melee',
-    shot: { ...DEFAULT_SHOT, dexterity: target.attributes.dexterity },
+    shot: characterShot(target),
     ask: true,
     secret: false,
+    blow: {
+      attacker: { id: enemy.id, name: enemy.name },
+      defender: { id: target.id, name: target.name },
+    },
   };
 }

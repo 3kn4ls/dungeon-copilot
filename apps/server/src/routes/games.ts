@@ -1,10 +1,12 @@
-import { LUCK_PER_SESSION, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
+import { LUCK_PER_SESSION, UNHARMED, XP_AWARDS, needsComplication } from '@dungeon-copilot/rules';
 import {
   characterSides,
   closeGameSchema,
   complicationsSchema,
   gameRollSchema,
+  groupSize,
   ideasSchema,
+  narrationSchema,
   noteSchema,
   openGameSchema,
   recapDraftSchema,
@@ -13,27 +15,33 @@ import {
   revealDraftSchema,
   revealSchema,
   speechSchema,
+  tacticsSchema,
   type CharacterRef,
   type GameState,
   type PublicUser,
   type ScreenState,
 } from '@dungeon-copilot/shared';
-import { and, desc, eq, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   IDEAS_FORMAT,
   RECENT_SCENES,
+  blowMessages,
   cleanIdeas,
   cleanRecap,
   cleanScene,
   complicationMessages,
+  damageText,
+  gearLine,
   hasLog,
   ideaMessages,
   recapMessages,
   sceneMessages,
+  tacticsMessages,
   visibleIdeas,
   visibleRecap,
   visibleScene,
+  type PromptFighter,
 } from '../ai/prompts';
 import { requireAi, sendAiText } from '../ai/respond';
 import type { AppContext } from '../context';
@@ -61,10 +69,12 @@ import {
   type FoundGame,
   type GameRow,
 } from '../games/events';
+import { findBlow, requireCombat } from '../games/combat';
 import { answeredIntervention } from '../games/pending';
 import { findCampaignContext, findNpcLines, findScenes } from '../games/prompt-context';
 import { findRecaps } from '../games/recaps';
 import { rerollGameRoll, resolveGameRoll } from '../games/rolls';
+import { findSceneTitle } from '../games/scenes';
 import { lastEventId, openEventStream } from '../games/stream';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster, requireMember } from './access';
@@ -93,6 +103,7 @@ const ROLL_NOT_FOUND = 'Esa tirada no existe en esta partida';
 const ROLL_WENT_WELL =
   'Esa tirada salió bien: las complicaciones son para los éxitos con coste, los fallos y las pifias';
 const ROLL_REPEATED = 'Esa tirada ya se ha repetido: cuenta la segunda';
+const ROLL_DAMAGED = 'Ya se ha aplicado el daño de esa tirada: no se puede repetir';
 
 /** Los enlaces de pantalla son 32 caracteres hexadecimales (ver el esquema de campaigns). */
 const SCREEN_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
@@ -314,8 +325,9 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
           throw forbidden('Solo puedes tirar con tus personajes');
         }
       }
+      const blow = body.blow && (await findBlow(tx, gameId, body.blow));
 
-      const roll = resolveGameRoll(body, rolling, random);
+      const roll = resolveGameRoll(body, rolling, random, blow);
       return { visibility: body.secret ? 'master' : 'public', payload: { kind: 'roll', roll } };
     });
     return reply.status(201).send({ event });
@@ -385,6 +397,18 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
           )
           .limit(1);
         if (repeated) throw new HttpError(409, ROLL_REPEATED);
+        const [damaged] = await tx
+          .select({ id: gameEvents.id })
+          .from(gameEvents)
+          .where(
+            and(
+              eq(gameEvents.gameId, gameId),
+              sql`${gameEvents.payload} ->> 'kind' = 'damage'`,
+              sql`${gameEvents.payload} ->> 'roll' = ${String(eventId)}`,
+            ),
+          )
+          .limit(1);
+        if (damaged) throw new HttpError(409, ROLL_DAMAGED);
         if (character.luck < 1) throw new HttpError(409, `A ${character.name} no le queda Suerte`);
 
         await tx
@@ -556,6 +580,172 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
       });
     },
   );
+
+  /**
+   * La IA propone cómo contar el golpe de una tirada de combate, con lo que ha causado: una
+   * versión por línea según las termina. No se enseña nada: el máster elige.
+   */
+  app.post<{ Params: IdParams & { eventId: string } }>(
+    '/api/games/:id/rolls/:eventId/narration',
+    async (request, reply) => {
+      const user = requireUser(request);
+      const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+      const body = parseBody(narrationSchema, request.body, 'Revisa lo que quieres destacar');
+      const { found, model, context } = await findNarratedGame(user, gameId);
+      const eventId = Number(request.params.eventId);
+      const [row] = isEventId(eventId)
+        ? await db
+            .select({ payload: gameEvents.payload })
+            .from(gameEvents)
+            .where(and(eq(gameEvents.id, eventId), eq(gameEvents.gameId, gameId)))
+        : [];
+      if (row?.payload.kind !== 'roll') throw notFound(ROLL_NOT_FOUND);
+      const { roll } = row.payload;
+      if (roll.situation === 'test') {
+        throw new HttpError(409, 'Esa tirada no es de combate: se narran los golpes');
+      }
+      const blows = await db
+        .select({ payload: gameEvents.payload })
+        .from(gameEvents)
+        .where(
+          and(
+            eq(gameEvents.gameId, gameId),
+            sql`${gameEvents.payload} ->> 'kind' = 'damage'`,
+            sql`${gameEvents.payload} ->> 'roll' = ${String(eventId)}`,
+          ),
+        )
+        .orderBy(asc(gameEvents.id));
+      // Con qué pelean los personajes de la tirada, sean quien tira, quien se opone o el blanco.
+      const ids = [
+        roll.actor.characterId,
+        roll.target.kind === 'opposed' ? roll.target.characterId : undefined,
+        roll.blow?.attacker.id,
+        roll.blow?.defender.id,
+      ].filter((id): id is string => id !== undefined);
+      const armed =
+        ids.length === 0
+          ? []
+          : await db
+              .select({ name: characters.name, gear: characters.gear })
+              .from(characters)
+              .where(
+                and(
+                  eq(characters.campaignId, found.game.campaignId),
+                  inArray(characters.id, [...new Set(ids)]),
+                ),
+              )
+              .orderBy(asc(characters.createdAt));
+
+      return sendAiText(request, reply, {
+        ai: model,
+        request: {
+          messages: blowMessages({
+            ...context,
+            scenes: await findScenes(db, gameId, RECENT_SCENES),
+            scene: await findSceneTitle(db, gameId),
+            roll,
+            gear: armed.map(({ name, gear }) => gearLine(name, gear)),
+            blows: blows.flatMap(({ payload }) =>
+              payload.kind === 'damage' ? [damageText(payload)] : [],
+            ),
+            hint: body.hint,
+          }),
+          format: IDEAS_FORMAT,
+          temperature: 0.9,
+          maxTokens: 450,
+        },
+        visible: visibleIdeas,
+        finish: cleanIdeas,
+        cutMessage: 'Se cortó la narración del golpe',
+      });
+    },
+  );
+
+  /**
+   * La IA propone qué pueden hacer unos PNJ en su turno de combate, sabiendo cómo va cada uno:
+   * una idea por línea según las termina. No se enseña nada: el máster elige.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/combat/tactics', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(tacticsSchema, request.body, 'Revisa para quién pides ideas');
+    const { found, model, context } = await findNarratedGame(user, gameId);
+    const { campaignId } = found.game;
+    const combat = await requireCombat(db, gameId);
+    const acting = combat.order.find((combatant) => combatant.id === body.combatantId);
+    if (acting?.kind !== 'npc') throw notFound('Esos PNJ no están en el combate');
+
+    const ids = combat.order.flatMap((combatant) =>
+      combatant.kind === 'character' ? [combatant.id] : [],
+    );
+    const sheets =
+      ids.length === 0
+        ? []
+        : await db
+            .select({
+              id: characters.id,
+              severity: characters.severity,
+              gear: characters.gear,
+            })
+            .from(characters)
+            .where(and(eq(characters.campaignId, campaignId), inArray(characters.id, ids)));
+    const fighters = combat.order.flatMap((combatant): PromptFighter[] => {
+      if (combatant.kind === 'npc') {
+        return [
+          {
+            kind: 'npc',
+            name: combatant.name,
+            profile: combatant.profile,
+            count: groupSize(combatant),
+            harm: combat.harm[combatant.id] ?? UNHARMED,
+          },
+        ];
+      }
+      const sheet = sheets.find((other) => other.id === combatant.id);
+      return sheet ? [{ kind: 'character', name: combatant.name, ...sheet }] : [];
+    });
+    // Lo que sabe el máster del PNJ, si es de la campaña: nunca sus secretos.
+    const [npc] = acting.npcId
+      ? await db
+          .select({
+            concept: npcs.concept,
+            personality: npcs.personality,
+            goals: npcs.goals,
+          })
+          .from(npcs)
+          .where(and(eq(npcs.id, acting.npcId), eq(npcs.campaignId, campaignId)))
+      : [];
+
+    return sendAiText(request, reply, {
+      ai: model,
+      request: {
+        messages: tacticsMessages({
+          ...context,
+          scenes: await findScenes(db, gameId, RECENT_SCENES),
+          scene: await findSceneTitle(db, gameId),
+          round: combat.round,
+          fighters,
+          acting: {
+            fighter: {
+              kind: 'npc',
+              name: acting.name,
+              profile: acting.profile,
+              count: groupSize(acting),
+              harm: combat.harm[acting.id] ?? UNHARMED,
+            },
+            ...npc,
+          },
+          hint: body.hint,
+        }),
+        format: IDEAS_FORMAT,
+        temperature: 0.9,
+        maxTokens: 450,
+      },
+      visible: visibleIdeas,
+      finish: cleanIdeas,
+      cutMessage: 'Se cortaron las ideas para los PNJ',
+    });
+  });
 
   /**
    * La IA propone qué puede pasar ahora en la escena, para cuando la mesa se atasca: una idea

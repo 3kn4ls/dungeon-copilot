@@ -17,6 +17,7 @@ import type {
   CreateCharacterRequest,
   DamageRequest,
   DamageResponse,
+  DealDamageRequest,
   EndCombatRequest,
   GameDetail,
   GameEvent,
@@ -32,6 +33,7 @@ import type {
   LeaveCombatRequest,
   LoginRequest,
   MeResponse,
+  NarrationRequest,
   NextTurnRequest,
   NoteRequest,
   NpcDraft,
@@ -50,10 +52,13 @@ import type {
   ScreenState,
   SpeechRequest,
   StartCombatRequest,
+  StartSceneRequest,
+  TacticsRequest,
   TalkRequest,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
   UpdateNpcRequest,
+  UseAbilityRequest,
 } from '@dungeon-copilot/shared';
 
 /** Error de la API con el mensaje en español que manda el servidor y, si los hay, los campos que fallan. */
@@ -259,6 +264,24 @@ export const api = {
     post<EventResponse>(`/api/games/${id}/combat/leave`, body).then((r) => r.event),
   endCombat: (id: string, body: EndCombatRequest) =>
     post<EventResponse>(`/api/games/${id}/combat/end`, body).then((r) => r.event),
+  /** El máster aplica un golpe a un personaje o a PNJ del combate. */
+  dealDamage: (id: string, body: DealDamageRequest) =>
+    post<EventResponse>(`/api/games/${id}/damage`, body).then((r) => r.event),
+  /** Un personaje gasta un punto de Suerte para no morir de un golpe mortal. */
+  survive: (id: string, eventId: number) =>
+    post<EventResponse>(`/api/games/${id}/damage/${eventId}/survive`).then((r) => r.event),
+  /** El máster empieza una escena nueva. */
+  startScene: (id: string, body: StartSceneRequest) =>
+    post<EventResponse>(`/api/games/${id}/scenes`, body).then((r) => r.event),
+  /** Un personaje usa una técnica de una vez por escena o por sesión. */
+  useAbility: (id: string, body: UseAbilityRequest) =>
+    post<EventResponse>(`/api/games/${id}/abilities`, body).then((r) => r.event),
+  /** La IA propone cómo contar el golpe de una tirada de combate, sin enseñarlo. */
+  narrateBlow: (id: string, eventId: number, body: NarrationRequest, options: AiTextOptions) =>
+    aiText(`/api/games/${id}/rolls/${eventId}/narration`, body, options),
+  /** La IA propone qué pueden hacer unos PNJ en su turno, sin enseñarlo. */
+  tactics: (id: string, body: TacticsRequest, options: AiTextOptions) =>
+    aiText(`/api/games/${id}/combat/tactics`, body, options),
   saveRecap: (id: string, body: RecapRequest) =>
     put<{ game: GameDetail }>(`/api/games/${id}/recap`, body).then((r) => r.game),
   /** La IA propone un resumen de la partida, sin guardarlo. */

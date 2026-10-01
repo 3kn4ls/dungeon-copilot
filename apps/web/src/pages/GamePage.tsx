@@ -23,14 +23,17 @@ import {
   GAME_STATUS_LABELS,
   currentCombat,
   currentFloor,
+  currentScene,
   gameName,
   pendingInterventions,
   pendingRollRequests,
   settledEvents,
+  spentAbilities,
   supersededRolls,
   turnOf,
   type AskRollRequest,
   type CharacterView,
+  type Combat,
   type GameDetail,
   type GameEvent,
   type GameRollRequest,
@@ -39,6 +42,7 @@ import {
   type InterventionEvent,
   type NpcView,
   type SettledHow,
+  type SpentAbilities,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
@@ -54,7 +58,9 @@ import {
   StartCombat,
   TurnStatus,
 } from '../components/Combat';
+import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
+import { FallenActions, ManualDamage, RollDamage, type DamageEvent } from '../components/Damage';
 import { FloorControl, FloorStatus, holdsFloor } from '../components/Floor';
 import { EventCard } from '../components/GameEvents';
 import { AiIdeas } from '../components/Ideas';
@@ -74,6 +80,7 @@ import {
   RequestedRollCard,
   RollRequestAction,
 } from '../components/RollRequests';
+import { LimitedAbilities, SceneControl, SceneLine } from '../components/Scenes';
 import { ScreenLink } from '../components/ScreenLink';
 import {
   ConfirmButton,
@@ -85,6 +92,7 @@ import {
 } from '../components/ui';
 import { LIVE_STATUS_LABELS, useLiveEvents, type LiveStatus } from '../live';
 import {
+  changesSheets,
   keys,
   refreshCharacters,
   useAiStatus,
@@ -139,11 +147,8 @@ export function GamePage() {
       storeEvent(event);
       // Al cerrar se reparten PX: las fichas guardadas ya no están al día.
       if (event.kind === 'closed' && game) refreshCampaign(queryClient, game.campaignId);
-      // Alguien ha gastado Suerte para repetir una tirada, o han recuperado el aliento.
-      const recovered = event.kind === 'combatEnded' && event.recovered.length > 0;
-      if (((event.kind === 'roll' && event.roll.reroll) || recovered) && game) {
-        refreshCharacters(queryClient, game.campaignId);
-      }
+      // Alguien ha gastado Suerte, ha recibido un golpe o ha recuperado el aliento.
+      if (changesSheets(event) && game) refreshCharacters(queryClient, game.campaignId);
     },
     endsWith: (event) => event.kind === 'closed',
     // Ya no deja conectar (por ejemplo, han echado a quien mira): se vuelve a pedir la partida.
@@ -190,10 +195,32 @@ export function GamePage() {
           .map((event) => event.id)
       : [],
   );
-  // La Suerte se gasta en lo que ve quien tira: las tiradas secretas del máster no se repiten.
+  // Los golpes aplicados de cada tirada y los golpes mortales de los que alguien se ha salvado.
+  const blows = new Map<number, DamageEvent[]>();
+  const survived = new Set<number>();
+  for (const event of state.data.events) {
+    if (event.kind === 'damage' && event.roll !== undefined) {
+      blows.set(event.roll, [...(blows.get(event.roll) ?? []), event]);
+    }
+    if (event.kind === 'survived') survived.add(event.of);
+  }
+  // La Suerte se gasta en lo que ve quien tira, y antes de aplicar el daño: las tiradas secretas
+  // del máster no se repiten.
   const rerollable = new Set(
-    recent.filter((event) => event.visibility !== 'master').map((event) => event.id),
+    recent
+      .filter((event) => event.visibility !== 'master' && !blows.has(event.id))
+      .map((event) => event.id),
   );
+  // El máster aplica los golpes y la IA los narra al momento: en las últimas tiradas de combate.
+  const striking = new Set(
+    isMaster
+      ? recent
+          .filter((event) => event.kind === 'roll' && event.roll.situation !== 'test')
+          .map((event) => event.id)
+      : [],
+  );
+  const combat = currentCombat(state.data.events);
+  const spent = spentAbilities(state.data.events);
   const intents = rollIntents(state.data.events);
 
   return (
@@ -253,16 +280,39 @@ export function GamePage() {
                     event={event}
                     superseded={superseded.has(event.id)}
                     settled={settled.get(event.id)}
+                    survived={survived.has(event.id)}
                     master={isMaster}
                   >
                     {event.kind === 'roll' && rerollable.has(event.id) && (
                       <LuckReroll game={game} event={event} />
+                    )}
+                    {event.kind === 'roll' && striking.has(event.id) && (
+                      <RollDamage
+                        game={game}
+                        event={event}
+                        applied={blows.get(event.id) ?? []}
+                        combat={combat}
+                        characters={characters.data ?? []}
+                        spent={spent}
+                      />
+                    )}
+                    {event.kind === 'roll' && striking.has(event.id) && ai.data?.enabled && (
+                      <BlowNarration game={game} event={event} />
                     )}
                     {event.kind === 'roll' && complicated.has(event.id) && (
                       <Complications game={game} event={event} intent={intents.get(event.id)} />
                     )}
                     {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
                       <RollRequestAction game={game} event={event} />
+                    )}
+                    {event.kind === 'damage' && isOpen && (
+                      <FallenActions
+                        game={game}
+                        event={event}
+                        characters={characters.data ?? []}
+                        spent={spent}
+                        survived={survived.has(event.id)}
+                      />
                     )}
                   </EventCard>
                 </li>
@@ -271,7 +321,12 @@ export function GamePage() {
         </section>
 
         <div className="room-extras">
-          <TableCharacters campaignId={game.campaignId} />
+          <TableCharacters
+            game={game}
+            combat={isOpen ? combat : null}
+            spent={spent}
+            master={isMaster && isOpen}
+          />
           {isMaster && game.screenToken && (
             <ScreenLink campaignId={game.campaignId} token={game.screenToken} />
           )}
@@ -355,6 +410,7 @@ function PlayerDesk({
           aria-labelledby="floor-heading"
         >
           <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+          <SceneLine events={events} />
           {combat ? (
             <>
               <CombatOrder combat={combat} characters={all} />
@@ -377,6 +433,13 @@ function PlayerDesk({
           {combat && current?.kind === 'character' && ids.includes(current.id) && (
             <EndTurn game={game} combat={combat} />
           )}
+          <LimitedAbilities
+            game={game}
+            characters={mine}
+            spent={spentAbilities(events)}
+            canUse
+            named={mine.length > 1}
+          />
         </section>
       )}
       <RollForm game={game} />
@@ -412,6 +475,8 @@ function MasterDesk({ state }: { state: GameState }) {
   const npcs = useNpcs(game.campaignId).data ?? [];
   const floor = currentFloor(events);
   const combat = currentCombat(events);
+  const spent = spentAbilities(events);
+  const ai = useAiStatus();
   const waiting = pendingInterventions(events);
   // En cuanto la intervención deja de esperar (atendida o retirada), ya no se responde a ella.
   const active =
@@ -437,11 +502,14 @@ function MasterDesk({ state }: { state: GameState }) {
     <>
       <section className="panel" aria-labelledby="floor-heading">
         <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+        <SceneLine events={events} />
         {combat ? (
           <CombatTracker
             game={game}
             combat={combat}
             characters={characters}
+            spent={spent}
+            ai={ai.data?.enabled === true}
             onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
           />
         ) : (
@@ -467,14 +535,25 @@ function MasterDesk({ state }: { state: GameState }) {
             <EndCombat game={game} />
           </>
         ) : (
-          <StartCombat
-            key={starting?.key ?? 0}
-            game={game}
-            characters={characters}
-            npcs={npcs}
-            answering={starting?.intervention}
-            onStopAnswering={stopAnswering}
-          />
+          <>
+            <StartCombat
+              key={starting?.key ?? 0}
+              game={game}
+              characters={characters}
+              npcs={npcs}
+              answering={starting?.intervention}
+              onStopAnswering={stopAnswering}
+            />
+            <SceneControl
+              game={game}
+              fighting={false}
+              onStarted={() => {
+                // Lo normal es describirla: se abre Enseñar.
+                setAction('reveal');
+                desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+              }}
+            />
+          </>
         )}
       </section>
 
@@ -496,6 +575,7 @@ function MasterDesk({ state }: { state: GameState }) {
           <RevealForm
             game={game}
             characters={characters}
+            scene={currentScene(events)?.title}
             starting={!events.some((event) => event.kind === 'reveal')}
             answering={handedTo('reveal')?.intervention}
             onStopAnswering={stopAnswering}
@@ -560,11 +640,13 @@ function showLabel(characters: CharacterView[], to: string): string {
 function RevealForm(props: {
   game: GameDetail;
   characters: CharacterView[];
+  /** El título de la escena en juego: la IA la describe con él si no hay otro. */
+  scene: string | undefined;
   starting: boolean;
   answering: InterventionEvent | undefined;
   onStopAnswering: () => void;
 }) {
-  const { game, characters, starting, answering, onStopAnswering } = props;
+  const { game, characters, scene, starting, answering, onStopAnswering } = props;
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const bodyField = useRef<HTMLTextAreaElement>(null);
@@ -596,7 +678,7 @@ function RevealForm(props: {
     const before = notes;
     setNotes(from);
     const text = await writer.write((options) =>
-      api.draftReveal(game.id, { title, notes: from }, options),
+      api.draftReveal(game.id, { title: title || scene || '', notes: from }, options),
     );
     // Si falla o se para antes de escribir nada, todo queda como estaba.
     if (!text) {
@@ -673,7 +755,7 @@ function RevealForm(props: {
                 key="describe"
                 type="button"
                 className="button"
-                disabled={!body.trim() && !title.trim()}
+                disabled={!body.trim() && !title.trim() && !scene}
                 onClick={() => void describe(body)}
               >
                 Describir con IA
@@ -1010,6 +1092,8 @@ function RollForm(props: {
   const [secret, setSecret] = useState(preset?.secret ?? answering?.visibility === 'private');
   /** El máster no tira: pide la tirada al jugador, que la hace con un botón. */
   const [ask, setAsk] = useState(preset?.ask ?? answering !== undefined);
+  /** En combate, quién ataca a quién: a quién irá el daño del golpe. */
+  const [blow, setBlow] = useState(preset?.blow);
 
   // Hasta que no se elige, tira el primer personaje disponible (o un PNJ si no hay ninguno).
   const first = available[0];
@@ -1086,6 +1170,7 @@ function RollForm(props: {
           ? { kind: 'difficulty' as const, difficulty: target }
           : { kind: 'opposed' as const, opponent: toSideRequest(opponent) },
       situation,
+      blow: blow && { attackerId: blow.attacker.id, defenderId: blow.defender.id },
     };
     if (asking) askRoll.mutate({ roll: request, secret, answers: answering?.id });
     else roll.mutate({ ...request, secret: isMaster && secret });
@@ -1101,6 +1186,15 @@ function RollForm(props: {
     >
       {answering && onStopAnswering && (
         <AnsweringNote intervention={answering} onCancel={onStopAnswering} />
+      )}
+      {blow && (
+        <p className="blow-note">
+          Golpe: <strong>{blow.attacker.name}</strong> ataca a <strong>{blow.defender.name}</strong>
+          . Si impacta, el daño se aplica desde la tirada.{' '}
+          <button type="button" className="link-button" onClick={() => setBlow(undefined)}>
+            No es un golpe
+          </button>
+        </p>
       )}
       <SideEditor
         title="Quién tira"
@@ -1353,6 +1447,11 @@ function SideEditor(props: {
               {preview?.wounded ? ': tira con desventaja en esta tirada.' : '.'}
             </p>
           )}
+          {preview?.armored && (
+            <p className="hint">
+              {character.name} lleva armadura pesada: tira con desventaja en esta tirada.
+            </p>
+          )}
         </>
       ) : draft.kind === 'free' ? (
         <>
@@ -1410,9 +1509,19 @@ function SideEditor(props: {
   );
 }
 
-/** Los personajes de la mesa, con lo que más se mira durante la partida. */
-function TableCharacters({ campaignId }: { campaignId: string }) {
-  const characters = useCharacters(campaignId);
+/**
+ * Los personajes de la mesa, con lo que más se mira durante la partida. El máster ve además sus
+ * técnicas de una vez por escena o por sesión y, fuera de combate, puede aplicarles daño a mano.
+ */
+function TableCharacters(props: {
+  game: GameDetail;
+  combat: Combat | null;
+  spent: SpentAbilities;
+  /** Quien mira es el máster, con la partida en juego. */
+  master: boolean;
+}) {
+  const { game, combat, spent, master } = props;
+  const characters = useCharacters(game.campaignId);
   if (!characters.data || characters.data.length === 0) return null;
   return (
     <section className="panel" aria-labelledby="table-heading">
@@ -1428,6 +1537,14 @@ function TableCharacters({ campaignId }: { campaignId: string }) {
           </li>
         ))}
       </ul>
+      {master && (
+        <>
+          <LimitedAbilities game={game} characters={characters.data} spent={spent} canUse named />
+          {!combat && (
+            <ManualDamage game={game} combat={null} characters={characters.data} spent={spent} />
+          )}
+        </>
+      )}
     </section>
   );
 }

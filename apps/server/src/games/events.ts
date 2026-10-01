@@ -1,3 +1,4 @@
+import type { CharacterBuild } from '@dungeon-copilot/rules';
 import type {
   CharacterRef,
   GameDetail,
@@ -150,6 +151,17 @@ export const requireMasterOf = (found: FoundGame) => {
   if (found.role !== 'master') throw forbidden(MASTER_ONLY);
 };
 
+export type CharacterRow = typeof characters.$inferSelect;
+
+/** Lo que dice el reglamento de un personaje: su reparto de atributos y habilidades. */
+export const characterBuild = (row: CharacterRow): CharacterBuild => ({
+  name: row.name,
+  background: row.background,
+  attributes: row.attributes,
+  skills: row.skills,
+  advancedSkills: row.advancedSkills,
+});
+
 /** Los personajes de la campaña que tiran, con lo que hace falta para calcular su tirada. */
 export async function findRollingCharacters(
   tx: Transaction,
@@ -168,14 +180,9 @@ export async function findRollingCharacters(
         id: row.id,
         name: row.name,
         ownerId: row.ownerId,
-        build: {
-          name: row.name,
-          background: row.background,
-          attributes: row.attributes,
-          skills: row.skills,
-          advancedSkills: row.advancedSkills,
-        },
+        build: characterBuild(row),
         wounds: { scratches: row.scratches, severity: row.severity },
+        gear: row.gear,
       },
     ]),
   );

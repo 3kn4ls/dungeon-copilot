@@ -2,6 +2,7 @@ import {
   NPC_PROFILE_IDS,
   compareInitiative,
   type DiceRoll,
+  type NpcHarm,
   type NpcProfile,
 } from '@dungeon-copilot/rules';
 import { z } from 'zod';
@@ -9,8 +10,9 @@ import { answersSchema, type Floor, type GameEvent, type GameEventKind } from '.
 
 // El combate por rondas. Empieza con `combatStarted`, que trae quién pelea en el orden de
 // iniciativa; el turno pasa con `turn`; quien se une o sale cambia el orden con `combatJoined` y
-// `combatLeft`, y `combatEnded` lo termina. Mientras dura, la palabra es de quien tiene el turno
-// (del máster, en el de los PNJ).
+// `combatLeft`, y `combatEnded` lo termina. Los golpes a los PNJ (`damage`) llevan la cuenta de
+// su daño y, si caen todos, los sacan del orden. Mientras dura, la palabra es de quien tiene el
+// turno (del máster, en el de los PNJ).
 
 /** Lo que sacó en la iniciativa quien pelea, al entrar en el combate. */
 export interface Initiative {
@@ -24,7 +26,7 @@ export interface Initiative {
 
 /**
  * Quien pelea: un personaje de la campaña (con su id) o PNJ que lleva el máster, uno solo o un
- * grupo («3 bandidos»), con el perfil con el que tiran.
+ * grupo («Bandidos», tres), con el perfil con el que tiran.
  */
 export type Combatant =
   | { kind: 'character'; id: string; name: string; initiative: Initiative }
@@ -33,12 +35,23 @@ export type Combatant =
       id: string;
       name: string;
       profile: NpcProfile;
+      /** Cuántos son, si es un grupo. Sin él, uno (así eran los combates de antes). */
+      count?: number;
       /** Si es un PNJ de la campaña. */
       npcId?: string;
       initiative: Initiative;
     };
 
 export type NpcCombatant = Combatant & { kind: 'npc' };
+
+/** Cuántos son unos PNJ que pelean. */
+export const groupSize = (combatant: NpcCombatant): number => combatant.count ?? 1;
+
+/** Quien pelea, dicho para la mesa: «Garrick» o, si es un grupo, «Bandidos (3)». */
+export function groupLabel(combatant: Combatant): string {
+  if (combatant.kind !== 'npc' || groupSize(combatant) === 1) return combatant.name;
+  return `${combatant.name} (${groupSize(combatant)})`;
+}
 
 /** Alguien del combate, con el nombre que tenía entonces. */
 export interface CombatantRef {
@@ -55,6 +68,8 @@ export interface Combat {
   turn: number;
   /** Quien pelea, de mayor a menor iniciativa. */
   order: Combatant[];
+  /** El daño de los PNJ que ya han recibido algún golpe, por su id en el combate. */
+  harm: Record<string, NpcHarm>;
 }
 
 /** Cómo queda el combate tras un cambio: el orden, la ronda y a quién le toca. */
@@ -71,6 +86,13 @@ const combatantSchema = z.discriminatedUnion('kind', [
       .min(1, 'Di quién pelea')
       .max(80, 'El nombre no puede pasar de 80 caracteres'),
     profile: z.enum(NPC_PROFILE_IDS, 'Elige su perfil: esbirro, soldado, veterano o campeón'),
+    /** Cuántos son: cada uno aguanta lo de su perfil. */
+    count: z
+      .number('Di cuántos son')
+      .int('Di cuántos son')
+      .min(1, 'Al menos tiene que ser uno')
+      .max(20, 'Un grupo es de 20 como mucho')
+      .default(1),
     /** Si es un PNJ de la campaña. */
     npcId: z.uuid('Elige un PNJ').optional(),
   }),
@@ -133,13 +155,32 @@ export const endCombatSchema = z.object({
 
 export type EndCombatRequest = z.input<typeof endCombatSchema>;
 
-/** Los eventos que cambian el combate. */
+/**
+ * Alguien recibe un golpe: un personaje de la campaña (su ficha) o PNJ del combate (el id de su
+ * sitio en el orden). `roll`: la tirada del golpe, si sale de una. Con `dodge`, el personaje gasta
+ * Esquiva prodigiosa y el daño se queda en 1.
+ */
+export const dealDamageSchema = z.object({
+  targetId: z.uuid('Elige quién recibe el golpe'),
+  amount: z
+    .number('Di cuánto daño')
+    .int('El daño es un número entero')
+    .min(1, 'El daño mínimo es 1')
+    .max(20, 'El daño no puede pasar de 20'),
+  roll: z.number().int().positive().optional(),
+  dodge: z.boolean().default(false),
+});
+
+export type DealDamageRequest = z.input<typeof dealDamageSchema>;
+
+/** Los eventos que lee el combate: los suyos y los golpes, que llevan la cuenta del daño. */
 export const COMBAT_EVENT_KINDS = [
   'combatStarted',
   'turn',
   'combatJoined',
   'combatLeft',
   'combatEnded',
+  'damage',
 ] as const satisfies GameEventKind[];
 
 export type CombatEvent = GameEvent & { kind: (typeof COMBAT_EVENT_KINDS)[number] };
@@ -147,16 +188,43 @@ export type CombatEvent = GameEvent & { kind: (typeof COMBAT_EVENT_KINDS)[number
 export const isCombatEvent = (event: GameEvent): event is CombatEvent =>
   (COMBAT_EVENT_KINDS as readonly GameEventKind[]).includes(event.kind);
 
+/**
+ * Si el evento cambia de quién es el turno o quién pelea: entonces la palabra pasa a quien tiene
+ * el turno. Un golpe solo la cambia si con él caen todos y salen del orden.
+ */
+function changesTurn(event: GameEvent): boolean {
+  if (event.kind === 'damage') return event.position !== undefined;
+  return isCombatEvent(event);
+}
+
+const without = (harm: Combat['harm'], id: string): Combat['harm'] =>
+  Object.fromEntries(Object.entries(harm).filter(([other]) => other !== id));
+
 /** El combate tras un evento más; los que no son del combate no lo cambian. */
 function stepCombat(combat: Combat | null, event: GameEvent): Combat | null {
   switch (event.kind) {
     case 'combatStarted':
-      return { startedAt: event.id, order: event.order, round: 1, turn: 0 };
+      return { startedAt: event.id, order: event.order, round: 1, turn: 0, harm: {} };
     case 'turn':
       return combat && { ...combat, round: event.round, turn: event.turn };
     case 'combatJoined':
-    case 'combatLeft':
       return combat && { ...combat, order: event.order, round: event.round, turn: event.turn };
+    case 'combatLeft':
+      return (
+        combat && {
+          ...combat,
+          order: event.order,
+          round: event.round,
+          turn: event.turn,
+          harm: without(combat.harm, event.left.id),
+        }
+      );
+    case 'damage': {
+      const { target, position } = event;
+      if (!combat || target.kind !== 'npc') return combat;
+      if (position) return { ...combat, ...position, harm: without(combat.harm, target.id) };
+      return { ...combat, harm: { ...combat.harm, [target.id]: target.harm } };
+    }
     case 'combatEnded':
       return null;
     default:
@@ -186,7 +254,8 @@ function turnFloor(combat: Combat): Floor {
 
 /**
  * Quién tiene la palabra tras estos eventos: a quien se la dio el máster la última vez o, si
- * después ha cambiado el combate, quien tiene el turno. Al acabar el combate, vuelve al máster.
+ * después ha cambiado el turno o quién pelea, quien tiene el turno. Al acabar el combate, vuelve
+ * al máster.
  */
 export function currentFloor(events: readonly GameEvent[]): Floor {
   let floor: Floor = { kind: 'master' };
@@ -194,7 +263,7 @@ export function currentFloor(events: readonly GameEvent[]): Floor {
   for (const event of events) {
     combat = stepCombat(combat, event);
     if (event.kind === 'floor') floor = event.floor;
-    else if (isCombatEvent(event)) floor = combat ? turnFloor(combat) : { kind: 'master' };
+    else if (changesTurn(event)) floor = combat ? turnFloor(combat) : { kind: 'master' };
   }
   return floor;
 }

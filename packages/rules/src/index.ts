@@ -3,6 +3,7 @@ export * from './attributes';
 export * from './character';
 export * from './combat';
 export * from './dice';
+export * from './gear';
 export * from './guides';
 export * from './npc';
 export * from './probabilities';

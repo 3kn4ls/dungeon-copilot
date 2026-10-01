@@ -13,11 +13,13 @@ import {
   type Check,
   type CharacterBuild,
   type DifficultyLevel,
+  type Gear,
   type OpposedSide,
   type Random,
   type WoundState,
 } from '@dungeon-copilot/rules';
 import type {
+  Blow,
   GameRoll,
   GameRollPreview,
   GameRollSide,
@@ -27,8 +29,11 @@ import type {
 import type { z } from 'zod';
 import { HttpError } from '../http/errors';
 
-/** Una tirada de partida tal como llega, ya validada: al momento o pedida por el máster. */
-type RollRequest = Omit<z.output<typeof gameRollSchema>, 'secret'>;
+/**
+ * Una tirada de partida tal como llega, ya validada: al momento o pedida por el máster. El golpe
+ * (quién ataca a quién) se resuelve aparte, con el combate.
+ */
+type RollRequest = Omit<z.output<typeof gameRollSchema>, 'secret' | 'blow'>;
 type RollSide = RollRequest['actor'];
 
 /** Lo que hace falta de un personaje para tirar por él. */
@@ -37,6 +42,7 @@ export interface RollingCharacter {
   name: string;
   build: CharacterBuild;
   wounds: WoundState;
+  gear: Gear;
 }
 
 interface ResolvedSide {
@@ -73,27 +79,27 @@ function resolveCharacterSide(
     attribute,
     modifier: side.modifier,
   });
-  const imposed = conditionEdges(
-    character.build,
-    { attribute, skill: skill?.id },
-    { wounds: character.wounds },
-  );
+  const check = { attribute, skill: skill?.id };
+  const wounded = conditionEdges(character.build, check, { wounds: character.wounds });
+  const armored = conditionEdges(character.build, check, { armor: character.gear.armor });
 
   const notes: string[] = [];
-  // Sin armadura en la ficha, la única desventaja impuesta es la de la herida grave.
-  if (imposed.includes('disadvantage')) {
+  if (wounded.includes('disadvantage')) {
     notes.push(`${character.name} tira con desventaja por su herida grave`);
+  }
+  if (armored.includes('disadvantage')) {
+    notes.push(`${character.name} tira con desventaja por su armadura pesada`);
   }
   if (character.wounds.severity === 'down') notes.push(`${character.name} está fuera de combate`);
 
   const attributeLabel = ATTRIBUTE_INFO[attribute].label;
-  let check = attributeLabel;
+  let label = attributeLabel;
   if (skill)
-    check = attribute === skill.attribute ? skill.name : `${skill.name} con ${attributeLabel}`;
+    label = attribute === skill.attribute ? skill.name : `${skill.name} con ${attributeLabel}`;
 
   return {
-    view: { label: character.name, characterId: character.id, check },
-    check: { bonus: breakdown.bonus, edge: combineEdges(side.edge, ...imposed) },
+    view: { label: character.name, characterId: character.id, check: label },
+    check: { bonus: breakdown.bonus, edge: combineEdges(side.edge, ...wounded, ...armored) },
     notes,
   };
 }
@@ -124,14 +130,17 @@ export interface PlannedRoll {
 
 /**
  * Prepara una tirada de partida sin tirar los dados: valida lo que se tira y calcula los
- * bonificadores con la ficha de los personajes, con las desventajas por heridas ya puestas.
- * `characters` trae los personajes que aparecen. Sirve también para pedir una tirada.
+ * bonificadores con la ficha de los personajes, con las desventajas por heridas y armadura ya
+ * puestas. `characters` trae los personajes que aparecen; `blow`, en combate, quién ataca a quién.
+ * Sirve también para pedir una tirada.
  */
 export function planGameRoll(
   request: RollRequest,
   characters: ReadonlyMap<string, RollingCharacter>,
+  blow?: Blow,
 ): PlannedRoll {
   const actor = resolveSide(request.actor, characters);
+  const combat = blow ? { blow } : {};
   if (request.target.kind === 'difficulty') {
     const { difficulty } = request.target;
     return {
@@ -139,6 +148,7 @@ export function planGameRoll(
         actor: actor.view,
         target: { kind: 'difficulty', label: difficultyLabel(difficulty) },
         situation: request.situation,
+        ...combat,
       },
       notes: actor.notes,
       roll: (random) => ({ kind: 'test', ...resolveTest(actor.check, difficulty, random) }),
@@ -150,6 +160,7 @@ export function planGameRoll(
       actor: actor.view,
       target: { kind: 'opposed', ...opponent.view },
       situation: request.situation,
+      ...combat,
     },
     notes: [...actor.notes, ...opponent.notes],
     roll: (random) => ({
@@ -167,8 +178,9 @@ export function resolveGameRoll(
   request: RollRequest,
   characters: ReadonlyMap<string, RollingCharacter>,
   random: Random,
+  blow?: Blow,
 ): GameRoll {
-  const plan = planGameRoll(request, characters);
+  const plan = planGameRoll(request, characters, blow);
   return { ...plan.preview, notes: plan.notes, result: plan.roll(random) };
 }
 

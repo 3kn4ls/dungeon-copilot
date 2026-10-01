@@ -112,6 +112,17 @@ Qué hace cada técnica:
 - **Entrenamiento con armaduras**: la armadura pesada no te da desventaja en Sigilo ni en Acrobacias.
 - **Imparable**: ignoras la desventaja de una herida grave. Una vez por sesión, al quedar fuera de combate, aguantas en pie hasta el final de tu siguiente turno.
 
+### Equipo
+
+La ficha apunta con qué pelea el personaje:
+
+- **Arma cuerpo a cuerpo**: ligera, media o pesada (ver [Daño](#daño)). Decide con qué ataca y para: las ligeras con Destreza + Esgrima; las medias y pesadas con Fuerza + Armas cuerpo a cuerpo.
+- **Arma a distancia**, si lleva: también ligera, media o pesada.
+- **Armadura**: ninguna, ligera o pesada. Resta daño, y la pesada estorba en Sigilo y Acrobacias.
+- **Escudo**: +1 al parar y +1 a la dificultad de acertarle a distancia.
+
+Cada ambientación pone los nombres: una espada larga es un arma media y una ballesta pesada, una pesada. **Al crear el personaje** se elige lo que lleva; si no se elige nada, lleva un arma media y nada más.
+
 ### Ejemplo: Kael
 
 Mercenario de la Compañía Libre.
@@ -119,9 +130,18 @@ Mercenario de la Compañía Libre.
 - **Atributos**: Fuerza 4, Destreza 3, Carisma 1, Inteligencia 2, Aguante 2 (12 puntos).
 - **Habilidades**: Armas cuerpo a cuerpo 2, Atletismo 1, Intimidación 1, Supervivencia 1, Percepción 1 (6 rangos).
 - **Avanzada**: Carga brutal.
+- **Equipo**: espada (arma media) y cota de malla (armadura ligera).
 - **Rasguños**: 2. **Suerte**: 3.
 
-Con la espada tira 2d6 + 6. Contra un soldado (+4) impacta en tres de cada cuatro ataques.
+Con la espada tira 2d6 + 6 y hace 2 de daño. Contra un soldado (+4) impacta en tres de cada cuatro ataques.
+
+## Escenas y sesiones
+
+Una **escena** es un tramo de la partida con unidad de lugar y de acción: la posada, la emboscada del camino, la cripta. La abre el máster cuando cambia el lugar o pasa el tiempo, y un combate ocurre dentro de una escena. Una **sesión** es una partida, de principio a fin.
+
+- Lo que se usa **una vez por escena**, como Esquiva prodigiosa o Voz de mando, vuelve con la escena siguiente.
+- Lo que se usa **una vez por sesión**, como Lengua de plata, Erudito o Imparable, vuelve con la sesión siguiente, como la Suerte.
+- Al acabar una escena, los personajes recuperan el aliento: se borran sus rasguños (ver [Heridas](#heridas)).
 
 ## Combate
 
@@ -203,6 +223,8 @@ Los PNJ importantes llevan ficha completa. Los secundarios usan un perfil: el m�
 | Campeón  | +8          | 4        | 6       | 3    | Un rival para todo el grupo: campeones, monstruos, hechiceros. |
 
 "Aguanta" es el daño total que soporta antes de caer. La **Destreza** es la mitad del bonificador: con ella tira la iniciativa y es la que cuenta para dispararle.
+
+**Grupos**: unos enemigos iguales, como tres bandidos, comparten perfil y tiran juntos la iniciativa, pero cada uno aguanta lo suyo. Un impacto alcanza a uno solo: cae al llegar a su aguante, y el daño que sobra no pasa al siguiente. El grupo deja de pelear cuando caen todos.
 
 ## Magia
 

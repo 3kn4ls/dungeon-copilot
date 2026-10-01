@@ -3,6 +3,7 @@ import {
   INTERVENTION_LABELS,
   currentCombat,
   currentFloor,
+  currentScene,
   gameName,
   pendingInterventions,
   pendingRollRequests,
@@ -16,7 +17,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { ApiError, api } from '../api';
-import { RollView, requestedText } from '../components/GameEvents';
+import { harmText } from '../components/Combat';
+import { RollView, blowLine, blowResult, requestedText } from '../components/GameEvents';
 import { useDocumentTitle } from '../components/ui';
 import { LIVE_STATUS_LABELS, useLiveEvents } from '../live';
 import { keys } from '../queries';
@@ -93,13 +95,16 @@ export function ScreenPage() {
   }
 
   const { campaignName, game, events } = screen.data;
-  const reveal = events.findLast((event) => event.kind === 'reveal');
+  // Lo último que ha enseñado el máster en la escena en juego: al empezar otra, se ve su título
+  // hasta que la describa.
+  const scene = currentScene(events);
+  const reveal = events.findLast((event) => event.kind === 'reveal' && event.id > (scene?.id ?? 0));
   // Lo que dicen los PNJ y los personajes (si lo escriben) se ve bajo la escena en la que lo
   // dijeron, hasta que el máster enseñe otra. Las preguntas al máster no son de la escena.
   const dialogue = events
     .filter(
       (event): event is DialogueLine =>
-        event.id > (reveal?.id ?? 0) &&
+        event.id > (reveal?.id ?? scene?.id ?? 0) &&
         (event.kind === 'speech' ||
           (event.kind === 'intervention' && event.intent !== 'ask' && event.text !== '')),
     )
@@ -116,6 +121,13 @@ export function ScreenPage() {
     .filter((event) => event.kind === 'roll' && !superseded.has(event.id))
     .slice(-3)
     .reverse();
+  // El último golpe del combate en juego.
+  const blow = combat
+    ? events.findLast(
+        (event): event is GameEvent & { kind: 'damage' } =>
+          event.kind === 'damage' && event.id > combat.startedAt,
+      )
+    : undefined;
 
   return (
     <div className="screen">
@@ -141,17 +153,26 @@ export function ScreenPage() {
                   <div className="screen-combat">
                     <p className="screen-floor">Combate · Ronda {combat.round}</p>
                     <ol className="screen-order" aria-label="Orden de iniciativa">
-                      {combat.order.map((combatant, index) => (
-                        <li
-                          key={combatant.id}
-                          className={index === combat.turn ? 'current' : undefined}
-                          aria-current={index === combat.turn ? 'step' : undefined}
-                        >
-                          {combatant.name}{' '}
-                          <span className="screen-initiative">{combatant.initiative.total}</span>
-                        </li>
-                      ))}
+                      {combat.order.map((combatant, index) => {
+                        const harm = combatant.kind === 'npc' && harmText(combat, combatant, false);
+                        return (
+                          <li
+                            key={combatant.id}
+                            className={index === combat.turn ? 'current' : undefined}
+                            aria-current={index === combat.turn ? 'step' : undefined}
+                          >
+                            {combatant.name}{' '}
+                            <span className="screen-initiative">{combatant.initiative.total}</span>
+                            {harm && <span className="screen-harm">{harm}</span>}
+                          </li>
+                        );
+                      })}
                     </ol>
+                    {blow && (
+                      <p className="screen-blow">
+                        {blowLine(blow)} {blowResult(blow, false)}
+                      </p>
+                    )}
                   </div>
                 )}
                 {floor.kind === 'table' && (
@@ -181,6 +202,8 @@ export function ScreenPage() {
               </section>
             )}
           <section className="screen-reveal" aria-live="polite">
+            {scene && reveal && <p className="screen-scene">{scene.title}</p>}
+            {scene && !reveal && <h1>{scene.title}</h1>}
             {reveal?.kind === 'reveal' && (
               <>
                 {reveal.title && <h1>{reveal.title}</h1>}
@@ -207,7 +230,7 @@ export function ScreenPage() {
                 <blockquote className="prewrap">{line.text}</blockquote>
               </figure>
             ))}
-            {!reveal && dialogue.length === 0 && (
+            {!reveal && !scene && dialogue.length === 0 && (
               <p className="screen-waiting">Aquí aparecerá lo que enseñe el máster.</p>
             )}
             {game.status === 'closed' && <p className="screen-banner">La partida ha terminado</p>}

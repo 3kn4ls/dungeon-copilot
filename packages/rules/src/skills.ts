@@ -31,6 +31,14 @@ export interface SkillRequirements {
   skills?: Readonly<Record<string, number>>;
 }
 
+/** Cada cuánto vuelve a estar disponible una técnica que se gasta al usarla. */
+export type UseLimit = 'scene' | 'session';
+
+export const USE_LIMIT_LABELS: Record<UseLimit, string> = {
+  scene: 'Una vez por escena',
+  session: 'Una vez por sesión',
+};
+
 /**
  * Habilidad avanzada: una técnica con requisitos. No tiene rango ni suma a la tirada;
  * cambia lo que puedes hacer o lo que significa un resultado.
@@ -38,7 +46,12 @@ export interface SkillRequirements {
 export interface AdvancedSkill extends SkillBase {
   tier: 'advanced';
   requires: SkillRequirements;
+  /** Si se gasta al usarla: vuelve con la escena o con la sesión siguiente. */
+  limit?: UseLimit;
 }
+
+/** Una técnica que se gasta al usarla. */
+export type LimitedSkill = AdvancedSkill & { limit: UseLimit };
 
 export type Skill = BasicSkill | AdvancedSkill;
 
@@ -106,6 +119,17 @@ export function createSkillCatalog(skills: readonly Skill[]): SkillCatalog {
       ),
     }),
   };
+}
+
+/** Las técnicas de un personaje que se gastan al usarlas, en el orden del catálogo. */
+export function limitedSkills(
+  advancedSkills: readonly string[],
+  catalog: SkillCatalog = defaultSkillCatalog,
+): LimitedSkill[] {
+  return catalog.skills.filter(
+    (skill): skill is LimitedSkill =>
+      skill.tier === 'advanced' && skill.limit !== undefined && advancedSkills.includes(skill.id),
+  );
 }
 
 export function skillRank(holder: SkillHolder, skillId: string): number {
@@ -248,6 +272,7 @@ export const DEFAULT_SKILLS: readonly Skill[] = [
     name: 'Esquiva prodigiosa',
     description: 'Una vez por escena, cuando te impactan, reduces el daño a 1.',
     requires: { attributes: { dexterity: 4 }, skills: { acrobatics: 2 } },
+    limit: 'scene',
   },
 
   // Carisma
@@ -287,6 +312,7 @@ export const DEFAULT_SKILLS: readonly Skill[] = [
     description:
       'Una vez por escena, das una orden y un aliado que te oiga tiene ventaja en su siguiente tirada.',
     requires: { attributes: { charisma: 4 }, skills: { persuasion: 2 } },
+    limit: 'scene',
   },
   {
     id: 'dreadful-presence',
@@ -304,6 +330,7 @@ export const DEFAULT_SKILLS: readonly Skill[] = [
     description:
       'Una vez por sesión, repites una tirada fallida de Persuasión o Engaño sin gastar Suerte.',
     requires: { attributes: { charisma: 4 }, skills: { deception: 2 } },
+    limit: 'session',
   },
 
   // Inteligencia
@@ -351,6 +378,7 @@ export const DEFAULT_SKILLS: readonly Skill[] = [
     description:
       'Una vez por sesión, haces una pregunta al máster sobre el mundo y te responde con la verdad, aunque sea parcial.',
     requires: { attributes: { intelligence: 3 }, skills: { lore: 2 } },
+    limit: 'session',
   },
   {
     id: 'sorcery',
@@ -408,6 +436,7 @@ export const DEFAULT_SKILLS: readonly Skill[] = [
     description:
       'Ignoras la desventaja de una herida grave. Una vez por sesión, al quedar fuera de combate, aguantas en pie hasta el final de tu siguiente turno.',
     requires: { attributes: { endurance: 4 }, skills: { willpower: 2 } },
+    limit: 'session',
   },
 ];
 

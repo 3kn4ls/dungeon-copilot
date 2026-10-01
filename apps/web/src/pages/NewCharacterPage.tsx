@@ -3,6 +3,7 @@ import {
   ATTRIBUTE_INFO,
   ATTRIBUTE_MIN,
   CREATION,
+  DEFAULT_GEAR,
   SKILL_RANK_LABELS,
   defaultSkillCatalog,
   scratchBoxes,
@@ -10,11 +11,13 @@ import {
   validateNewCharacter,
   type Attributes,
   type CharacterBuild,
+  type Gear,
 } from '@dungeon-copilot/rules';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
+import { GearEditor, GearSummary } from '../components/Gear';
 import { ErrorNote, QueryState, Stepper, useDocumentTitle } from '../components/ui';
 import { keys, useCampaign, useStoreCharacter } from '../queries';
 import { requirementText, signed, sum } from '../rules-text';
@@ -29,6 +32,7 @@ export function NewCharacterPage() {
   const [attributes, setAttributes] = useState<Attributes>(START);
   const [skills, setSkills] = useState<Record<string, number>>({});
   const [advanced, setAdvanced] = useState<string | null>(null);
+  const [gear, setGear] = useState<Gear>(DEFAULT_GEAR);
   const queryClient = useQueryClient();
   const storeCharacter = useStoreCharacter();
   const navigate = useNavigate();
@@ -50,7 +54,7 @@ export function NewCharacterPage() {
   const chosenAdvanced = advanced ? defaultSkillCatalog.get(advanced) : undefined;
 
   const create = useMutation({
-    mutationFn: () => api.createCharacter(campaignId, build),
+    mutationFn: () => api.createCharacter(campaignId, { ...build, gear }),
     onSuccess: async (character) => {
       storeCharacter(character);
       await queryClient.invalidateQueries({ queryKey: keys.characters(campaignId) });
@@ -100,6 +104,15 @@ export function NewCharacterPage() {
                 Una frase. Cuando encaje con lo que intentas, el máster te da ventaja.
               </span>
             </label>
+          </section>
+
+          <section className="panel" aria-labelledby="gear-heading">
+            <h2 id="gear-heading">Qué lleva</h2>
+            <p className="muted">
+              Con esto se preparan sus ataques, sus defensas y el daño que hace y recibe. Se puede
+              cambiar después en su ficha.
+            </p>
+            <GearEditor value={gear} onChange={setGear} />
           </section>
 
           <div className="creation-counter" aria-hidden="true">
@@ -233,6 +246,7 @@ export function NewCharacterPage() {
               <dd className="num">{scratchBoxes(build)}</dd>
             </div>
           </dl>
+          <GearSummary gear={gear} />
 
           {problems.length > 0 ? (
             <ul className="problems">

@@ -7,3 +7,4 @@ export * from './combat';
 export * from './games';
 export * from './npcs';
 export * from './rolls';
+export * from './scenes';

@@ -4,7 +4,9 @@ import {
   byInitiative,
   currentCombat,
   currentFloor,
+  dealDamageSchema,
   endCombatSchema,
+  groupLabel,
   joinCombat,
   leaveCombat,
   nextTurn,
@@ -14,7 +16,7 @@ import {
   type Combat,
   type Combatant,
 } from './combat';
-import { settledEvents, type GameEvent, type GameEventPayload } from './games';
+import { settledEvents, type DamageTarget, type GameEvent, type GameEventPayload } from './games';
 
 const KAEL = '8b9f2a4e-1c2d-4e5f-9a8b-7c6d5e4f3a2b';
 const MIRA = '1f0e2d3c-4b5a-4968-8776-655443322110';
@@ -49,11 +51,13 @@ const npc = (
   name: string,
   total: number,
   profile: NpcProfile = 'minion',
+  count?: number,
 ): Combatant => ({
   kind: 'npc',
   id,
   name,
   profile,
+  ...(count === undefined ? {} : { count }),
   initiative: initiative(total, NPC_PROFILES[profile].dexterity),
 });
 
@@ -67,6 +71,7 @@ const fight = (round = 1, turn = 0): Combat => ({
   round,
   turn,
   order: [mira, bandits, kael],
+  harm: {},
 });
 
 const names = (combatants: readonly Combatant[]) => combatants.map((c) => c.name);
@@ -79,7 +84,12 @@ describe('empezar un combate', () => {
         { kind: 'npc', name: ' 3 bandidos ', profile: 'minion' },
       ],
     });
-    expect(parsed.combatants[1]).toEqual({ kind: 'npc', name: '3 bandidos', profile: 'minion' });
+    expect(parsed.combatants[1]).toEqual({
+      kind: 'npc',
+      name: '3 bandidos',
+      profile: 'minion',
+      count: 1,
+    });
 
     const alone = startCombatSchema.safeParse({
       combatants: [{ kind: 'character', characterId: KAEL }],
@@ -117,6 +127,23 @@ describe('empezar un combate', () => {
     expect(nameless.error?.issues.map((issue) => issue.message)).toEqual([
       'Di quién pelea',
       'Elige su perfil: esbirro, soldado, veterano o campeón',
+    ]);
+  });
+
+  it('un grupo dice cuántos son, de 1 a 20', () => {
+    const group = (count: unknown) =>
+      startCombatSchema.safeParse({
+        combatants: [
+          { kind: 'character', characterId: KAEL },
+          { kind: 'npc', name: 'Bandidos', profile: 'minion', count },
+        ],
+      });
+    expect(group(3).data?.combatants[1]).toMatchObject({ count: 3 });
+    expect(group(0).error?.issues.map((issue) => issue.message)).toEqual([
+      'Al menos tiene que ser uno',
+    ]);
+    expect(group(21).error?.issues.map((issue) => issue.message)).toEqual([
+      'Un grupo es de 20 como mucho',
     ]);
   });
 
@@ -159,6 +186,7 @@ describe('el combate en juego', () => {
       round: 1,
       turn: 0,
       order: fight().order,
+      harm: {},
     });
     expect(currentFloor(events)).toEqual({ kind: 'character', characterId: MIRA, name: 'Mira' });
   });
@@ -205,6 +233,7 @@ describe('el combate en juego', () => {
       round: 1,
       turn: 0,
       order: [wolves, bandits, kael],
+      harm: {},
     });
     expect(currentFloor(events)).toEqual({ kind: 'master' });
   });
@@ -258,5 +287,93 @@ describe('los turnos', () => {
   it('si sale otro, el turno sigue con quien lo tenía', () => {
     expect(leaveCombat(fight(1, 1), MIRA)).toEqual({ order: [bandits, kael], round: 1, turn: 0 });
     expect(leaveCombat(fight(1, 1), KAEL)).toEqual({ order: [mira, bandits], round: 1, turn: 1 });
+  });
+});
+
+describe('los golpes', () => {
+  const trio = npc(BANDITS, 'Bandidos', 9, 'minion', 3);
+  const started = event(2, { kind: 'combatStarted', order: [mira, trio, kael] });
+  const hitBandits = (id: number, down: number, extra: Partial<GameEventPayload> = {}) =>
+    event(id, {
+      kind: 'damage',
+      amount: 2,
+      target: {
+        kind: 'npc',
+        id: BANDITS,
+        name: 'Bandidos',
+        count: 3,
+        toughness: 1,
+        harm: { down, damage: 0 },
+        fell: true,
+      },
+      ...extra,
+    } as GameEventPayload);
+
+  it('un grupo dice cuántos son', () => {
+    expect(groupLabel(trio)).toBe('Bandidos (3)');
+    expect(groupLabel(bandits)).toBe('3 bandidos');
+    expect(groupLabel(kael)).toBe('Kael');
+  });
+
+  it('llevan la cuenta del daño de los PNJ', () => {
+    const events = [started, hitBandits(3, 1), hitBandits(4, 2)];
+    expect(currentCombat(events)?.harm).toEqual({ [BANDITS]: { down: 2, damage: 0 } });
+    expect(names(currentCombat(events)!.order)).toEqual(['Mira', 'Bandidos', 'Kael']);
+  });
+
+  it('un golpe a un personaje no cambia el combate ni quita la palabra', () => {
+    const kaelHit: DamageTarget = {
+      kind: 'character',
+      id: KAEL,
+      name: 'Kael',
+      before: { scratches: 0, severity: 'none' },
+      after: { scratches: 2, severity: 'none' },
+      lethal: false,
+    };
+    const events = [
+      started,
+      event(3, { kind: 'floor', floor: { kind: 'character', characterId: KAEL, name: 'Kael' } }),
+      event(4, { kind: 'damage', amount: 2, target: kaelHit }),
+      hitBandits(5, 1),
+    ];
+    expect(currentCombat(events)?.harm).toEqual({ [BANDITS]: { down: 1, damage: 0 } });
+    expect(currentFloor(events)).toEqual({ kind: 'character', characterId: KAEL, name: 'Kael' });
+  });
+
+  it('si caen todos, salen del orden y la palabra pasa a quien tiene el turno', () => {
+    const position = { order: [mira, kael], round: 1, turn: 1 };
+    const events = [
+      started,
+      event(3, { kind: 'turn', round: 1, turn: 1, combatant: { id: BANDITS, name: 'Bandidos' } }),
+      hitBandits(4, 3, { position }),
+    ];
+    expect(currentCombat(events)).toMatchObject({ ...position, harm: {} });
+    expect(currentFloor(events)).toEqual({ kind: 'character', characterId: KAEL, name: 'Kael' });
+  });
+
+  it('quien sale del combate ya no lleva la cuenta', () => {
+    const events = [
+      started,
+      hitBandits(3, 1),
+      event(4, {
+        kind: 'combatLeft',
+        left: { id: BANDITS, name: 'Bandidos' },
+        order: [mira, kael],
+        round: 1,
+        turn: 0,
+      }),
+    ];
+    expect(currentCombat(events)?.harm).toEqual({});
+  });
+
+  it('el golpe dice a quién, cuánto y, si hace falta, que gasta Esquiva prodigiosa', () => {
+    expect(dealDamageSchema.parse({ targetId: KAEL, amount: 2 })).toEqual({
+      targetId: KAEL,
+      amount: 2,
+      dodge: false,
+    });
+    const wrong = dealDamageSchema.safeParse({ targetId: KAEL, amount: 0 });
+    expect(wrong.error?.issues.map((issue) => issue.message)).toEqual(['El daño mínimo es 1']);
+    expect(dealDamageSchema.safeParse({ targetId: 'Kael', amount: 1 }).success).toBe(false);
   });
 });

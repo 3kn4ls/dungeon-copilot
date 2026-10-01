@@ -8,6 +8,7 @@ import {
   cleanReply,
   cleanScene,
   complicationMessages,
+  damageText,
   fit,
   hasLog,
   ideaMessages,
@@ -502,6 +503,90 @@ describe('resumen de una partida', () => {
       ].join('\n'),
     );
     expect(hasLog([events[1]!])).toBe(false);
+  });
+
+  it('cuenta los golpes, quién se salva con Suerte, las escenas y las técnicas', () => {
+    const wounds = (scratches: number, severity: 'none' | 'wounded' | 'grave' | 'down') => ({
+      scratches,
+      severity,
+    });
+    const kael = (after: ReturnType<typeof wounds>, lethal = false) => ({
+      kind: 'character' as const,
+      id: 'kael',
+      name: 'Kael',
+      before: wounds(2, 'none'),
+      after,
+      lethal,
+    });
+    const bandits = (down: number, fell: boolean) => ({
+      kind: 'npc' as const,
+      id: 'bandidos',
+      name: 'Bandidos',
+      count: 3,
+      toughness: 1,
+      harm: { down, damage: 0 },
+      fell,
+    });
+    const garrick = { id: 'garrick', name: 'Garrick' };
+    const events: GameEventPayload[] = [
+      { kind: 'scene', title: 'El puente', recovered: [] },
+      { kind: 'damage', amount: 1, target: bandits(1, true), by: { id: 'kael', name: 'Kael' } },
+      { kind: 'damage', amount: 1, target: bandits(3, true) },
+      {
+        kind: 'damage',
+        amount: 2,
+        by: { id: 'kael', name: 'Kael' },
+        target: {
+          kind: 'npc',
+          id: 'garrick',
+          name: 'Garrick',
+          count: 1,
+          toughness: 4,
+          harm: { down: 0, damage: 2 },
+          fell: false,
+        },
+      },
+      { kind: 'damage', amount: 2, by: garrick, target: kael(wounds(2, 'wounded')) },
+      { kind: 'damage', amount: 1, dodged: true, target: kael(wounds(2, 'none')) },
+      { kind: 'damage', amount: 4, by: garrick, target: kael(wounds(2, 'down'), true) },
+      { kind: 'survived', of: 7, characterId: 'kael', name: 'Kael' },
+      {
+        kind: 'ability',
+        characterId: 'mira',
+        name: 'Mira',
+        skill: 'commanding-voice',
+        label: 'Voz de mando',
+      },
+    ];
+    const [, user] = recapMessages({
+      campaign,
+      characters: [],
+      game: { number: 1, title: '' },
+      events,
+      hint: '',
+    });
+    expect(user?.content).toContain(
+      [
+        'lo más antiguo a lo más reciente:',
+        '- Empieza una escena: El puente.',
+        '- Golpe de Kael a Bandidos (1 de daño): cae uno y quedan 2.',
+        '- Golpe a Bandidos (1 de daño): caen todos.',
+        '- Golpe de Kael a Garrick (2 de daño).',
+        '- Golpe de Garrick a Kael (2 de daño): queda herido.',
+        '- Golpe a Kael (1 de daño, con Esquiva prodigiosa).',
+        '- Golpe de Garrick a Kael (4 de daño): queda fuera de combate, golpe mortal.',
+        '- Kael gasta un punto de Suerte y sigue con vida.',
+        '- Mira usa Voz de mando.',
+        '',
+      ].join('\n'),
+    );
+    expect(
+      damageText({
+        kind: 'damage',
+        amount: 4,
+        target: { ...bandits(1, true), name: 'Garrick', count: 1 },
+      }),
+    ).toBe('Golpe a Garrick (4 de daño): cae.');
   });
 
   it('dice quién ha repetido una tirada con Suerte', () => {

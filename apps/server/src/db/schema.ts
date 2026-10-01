@@ -1,4 +1,10 @@
-import type { Attributes, NpcProfile, Severity } from '@dungeon-copilot/rules';
+import {
+  DEFAULT_GEAR,
+  type Attributes,
+  type Gear,
+  type NpcProfile,
+  type Severity,
+} from '@dungeon-copilot/rules';
 import type {
   GameEventPayload,
   GameEventVisibility,
@@ -98,6 +104,8 @@ export const characters = pgTable(
     advancedSkills: jsonb('advanced_skills').$type<string[]>().notNull(),
     scratches: integer('scratches').notNull().default(0),
     severity: text('severity').$type<Severity>().notNull().default('none'),
+    /** Lo que lleva para pelear: arma cuerpo a cuerpo, arma a distancia, armadura y escudo. */
+    gear: jsonb('gear').$type<Gear>().notNull().default(DEFAULT_GEAR),
     luck: integer('luck').notNull(),
     xp: integer('xp').notNull().default(0),
     createdAt: createdAt(),
