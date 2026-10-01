@@ -43,7 +43,7 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('cliente de la IA que decide', () => {
-  it('manda el modelo, el texto y las preguntas, y lee cada respuesta según su tipo', async () => {
+  it('manda cada pregunta en su petición, con el modelo y el texto, y lee cada respuesta según su tipo', async () => {
     ollama.queueDecision({
       kind: 'answers',
       answers: {
@@ -62,9 +62,22 @@ describe('cliente de la IA que decide', () => {
       difficulty: { score: 1.4 },
     });
 
-    const [request] = ollama.decisions;
-    expect(request?.body).toEqual({ model: 'nimble', state, questions });
-    expect(request?.headers.authorization).toBeUndefined();
+    // Juntas, unas preguntas estorban a otras: van de una en una, en orden.
+    expect(ollama.decisions.map((request) => request.body)).toEqual([
+      { model: 'nimble', state, questions: { skill: questions.skill } },
+      { model: 'nimble', state, questions: { opposed: questions.opposed } },
+      { model: 'nimble', state, questions: { difficulty: questions.difficulty } },
+    ]);
+    expect(ollama.decisions[0]?.headers.authorization).toBeUndefined();
+  });
+
+  it('las preguntas que faltan no se hacen', async () => {
+    const answers = await decider.decide({
+      state,
+      questions: { opposed: questions.opposed, background: undefined },
+    });
+    expect(answers).toEqual({ opposed: { probability: 0 } });
+    expect(ollama.decisions).toHaveLength(1);
   });
 
   it('manda la clave de Ollama si la hay', async () => {
@@ -129,29 +142,37 @@ describe('cliente de la IA que decide', () => {
     const replies = [
       'esto no es JSON',
       JSON.stringify({ model: 'nimble' }),
-      // Falta una respuesta.
-      JSON.stringify({
-        answers: {
-          skill: { type: 'choice', choice: 'stealth', probabilities: { stealth: 1 } },
-          opposed: { type: 'noul', noul: 0.2 },
-        },
-      }),
-      // Una probabilidad que no es un número.
-      JSON.stringify({
-        answers: {
-          skill: { type: 'choice', choice: 'stealth', probabilities: { stealth: 1 } },
-          opposed: { type: 'noul', noul: 'mucho' },
-          difficulty: { type: 'score', score: 1 },
-        },
-      }),
+      // Falta la respuesta.
+      JSON.stringify({ answers: { otra: { type: 'noul', noul: 0.2 } } }),
+      // Una probabilidad que no es un número, o que no es una probabilidad.
+      JSON.stringify({ answers: { opposed: { type: 'noul', noul: 'mucho' } } }),
+      JSON.stringify({ answers: { opposed: { type: 'noul', noul: 1.5 } } }),
     ];
     for (const body of replies) {
       ollama.queueDecision({ kind: 'raw', body });
-      expect(await failure(decider.decide({ state, questions }))).toMatchObject({
+      const asking = decider.decide({ state, questions: { opposed: questions.opposed } });
+      expect(await failure(asking)).toMatchObject({
         statusCode: 502,
         message: 'Ollama ha respondido algo que no se entiende',
       });
     }
+
+    // Un choice sin sus probabilidades.
+    ollama.queueDecision({
+      kind: 'raw',
+      body: JSON.stringify({ answers: { skill: { type: 'choice', choice: 'stealth' } } }),
+    });
+    const asking = decider.decide({ state, questions: { skill: questions.skill } });
+    expect(await failure(asking)).toMatchObject({ statusCode: 502 });
+  });
+
+  it('si falla una pregunta, no hace las siguientes', async () => {
+    ollama.queueDecision({ kind: 'error', status: 500, error: 'out of memory' });
+    expect(await failure(decider.decide({ state, questions }))).toMatchObject({
+      statusCode: 502,
+      message: 'Ollama ha fallado: out of memory',
+    });
+    expect(ollama.decisions).toHaveLength(1);
   });
 
   it('solo exige lo que usa: el resto de la respuesta puede cambiar', async () => {

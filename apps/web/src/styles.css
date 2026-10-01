@@ -2242,6 +2242,26 @@ h1 .badge {
   font-size: 14px;
 }
 
+/* Lo que sugiere la IA que decide (Nimble): una nota discreta, que no manda. */
+.suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+}
+
+.suggestion .hint,
+.suggestion .actions {
+  margin: 0;
+}
+
+.suggestion-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 /* Las escenas y las técnicas que se gastan. */
 .scene-line {
   margin: 0;

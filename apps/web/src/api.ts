@@ -9,6 +9,7 @@ import type {
   AuthResponse,
   AwardXpRequest,
   CampaignDetail,
+  CheckSuggestion,
   CampaignSummary,
   CharacterView,
   CloseGameRequest,
@@ -74,15 +75,23 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  url: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
       method,
       headers: body === undefined ? {} : { 'content-type': 'application/json' },
       body: body === undefined ? null : JSON.stringify(body),
+      signal: signal ?? null,
     });
-  } catch {
+  } catch (error) {
+    // Quien la pidió ya no espera la respuesta: no es un fallo de conexión.
+    if (signal?.aborted) throw error;
     throw new ApiError(0, { error: 'No hay conexión con el servidor' });
   }
   if (response.status === 204) return undefined as T;
@@ -239,6 +248,14 @@ export const api = {
   /** Un jugador interviene o pide la palabra con su personaje. */
   intervene: (id: string, body: InterventionRequest) =>
     post<EventResponse>(`/api/games/${id}/interventions`, body).then((r) => r.event),
+  /** La IA sugiere qué tirada pedir para una intervención. No escribe nada en la partida. */
+  checkSuggestion: (id: string, eventId: number, signal?: AbortSignal) =>
+    request<{ suggestion: CheckSuggestion }>(
+      'POST',
+      `/api/games/${id}/interventions/${eventId}/check`,
+      undefined,
+      signal,
+    ).then((r) => r.suggestion),
   answerIntervention: (id: string, eventId: number, body: AnswerInterventionRequest) =>
     post<EventResponse>(`/api/games/${id}/interventions/${eventId}/answer`, body).then(
       (r) => r.event,

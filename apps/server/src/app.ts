@@ -14,6 +14,7 @@ import { registerCampaignRoutes } from './routes/campaigns';
 import { registerCharacterRoutes } from './routes/characters';
 import { registerCombatRoutes } from './routes/combat';
 import { registerDamageRoutes } from './routes/damage';
+import { registerDecisionRoutes } from './routes/decisions';
 import { registerGameRoutes } from './routes/games';
 import { registerNpcRoutes } from './routes/npcs';
 import { registerRollRoutes } from './routes/rolls';
@@ -83,6 +84,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerCombatRoutes(app, ctx);
   registerDamageRoutes(app, ctx);
   registerSceneRoutes(app, ctx);
+  registerDecisionRoutes(app, ctx);
   registerNpcRoutes(app, ctx);
   registerAiRoutes(app, ctx);
   registerRollRoutes(app, ctx.random);

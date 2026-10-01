@@ -2,6 +2,7 @@ import type {
   CharacterView,
   GameEvent,
   GameState,
+  InterventionEvent,
   MeResponse,
   NpcView,
 } from '@dungeon-copilot/shared';
@@ -20,6 +21,7 @@ export const keys = {
   npcs: (campaignId: string) => ['campaigns', campaignId, 'npcs'] as const,
   npc: (id: string) => ['npcs', id] as const,
   ai: ['ai'] as const,
+  check: (gameId: string, eventId: number) => ['games', gameId, 'check', eventId] as const,
 };
 
 export function createQueryClient(): QueryClient {
@@ -141,6 +143,19 @@ export function useStoreGameEvent(gameId: string) {
 /** Si el servidor tiene IA. Solo cambia al reiniciarlo con otra configuración. */
 export const useAiStatus = () =>
   useQuery({ queryKey: keys.ai, queryFn: api.ai, staleTime: Infinity });
+
+/**
+ * Qué tirada sugiere la IA para atender una intervención, si se pide (`intervention`). Se guarda:
+ * volver a la misma intervención no vuelve a preguntar. Si nadie la espera ya, se corta.
+ */
+export const useCheckSuggestion = (gameId: string, intervention: InterventionEvent | undefined) =>
+  useQuery({
+    queryKey: keys.check(gameId, intervention?.id ?? 0),
+    queryFn: ({ signal }) => api.checkSuggestion(gameId, intervention?.id ?? 0, signal),
+    enabled: intervention !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  });
 
 /** Los PNJ de una campaña. Solo el máster puede verlos: a los jugadores ni se les piden. */
 export const useNpcs = (campaignId: string, enabled = true) =>

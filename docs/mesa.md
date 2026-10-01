@@ -61,6 +61,9 @@ Las intervenciones esperan en una cola, de la más antigua a la última. Con cad
   - Para atacar cuerpo a cuerpo, con lo que mejor se le dé (Armas cuerpo a cuerpo o Esgrima), contra el perfil del rival.
   - A distancia, Puntería contra la dificultad del disparo, calculada con la Destreza del rival.
   - Un hechizo, Arcano contra un efecto moderado (10).
+
+  Con las sugerencias de la IA (Nimble, ver [La IA que sugiere](#la-ia-que-sugiere)), si el jugador escribió lo que intenta, la IA lo lee y sugiere con qué tira (las tres habilidades más probables, con su probabilidad), la dificultad (en un hechizo, la del efecto: menor, moderado, mayor o portentoso), si alguien se opone (entonces es enfrentada, contra un rival), si encaja su trasfondo (entonces tira con ventaja) y si hace falta tirar; en un disparo, la distancia y si el objetivo está a cubierto. Con qué se ataca cuerpo a cuerpo lo sigue diciendo el reglamento. Tirar no espera por ella: se abre al momento con lo de siempre y, cuando llega la sugerencia, se aplica sola si el máster aún no ha tocado la tirada; si la ha tocado, la aplica con un botón. Un toque en otra de las habilidades sugeridas cambia a esa.
+
 - **Responder como PNJ**: lo que escribió el jugador pasa a la charla con el PNJ, y la IA responde por él (o lo escribe el máster). La frase que enseñe atiende la intervención.
 - **Responder** con una descripción, como a una pregunta. Si la intervención era secreta, la respuesta va en secreto a ese personaje.
 - **Empezar combate**, si alguien ataca en plena narración, o **meterlo en el combate**, si ya hay uno y ese personaje no estaba peleando.
@@ -176,6 +179,14 @@ Hay tres visibilidades:
 
 Lo secreto no sale en la pantalla, no llega al resumen de la partida ni a las escenas que lee la IA. Una tirada en secreto se puede repetir con Suerte, porque su jugador la ve; las tiradas secretas del máster, no. El combate, los golpes, las escenas y las técnicas son siempre de toda la mesa.
 
+## La IA que sugiere
+
+Además de la IA que escribe, el servidor puede tener otra que decide: Nimble (`OLLAMA_DECISION_MODEL`). No escribe nada: lee lo que pasa y responde a unas preguntas concretas con su probabilidad. Lo usa para sugerir al máster donde antes elegía a ojo:
+
+- **Qué tirada pedir** para una intervención (ver [Cómo las atiende el máster](#cómo-las-atiende-el-máster)).
+
+Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni lo ve la mesa. Es solo del máster, con la partida en juego. Nada espera por ella: si tarda o falla, todo sigue como sin ella, y sin Nimble la sala es la de siempre.
+
 ## Un ejemplo
 
 1. El máster pulsa **Nueva escena**, «El Ciervo Blanco»: Kael recupera el aliento. Describe la posada y da la palabra a la mesa: «¿Qué hacéis?».
@@ -190,7 +201,6 @@ Lo secreto no sale en la pantalla, no llega al resumen de la partida ni a las es
 ## Lo que viene
 
 - Una fase de descanso, para recuperarse de las heridas y gastar experiencia.
-- Más ayuda de la IA en la mesa: qué tirada pedir para una intervención.
 - Lengua de plata en la repetición de una tirada, sin gastar Suerte.
 - Deshacer un golpe aplicado por error; por ahora, la ficha se arregla a mano y un enemigo que cayó se vuelve a añadir.
 - Volver a tirar la iniciativa de todos a mitad de combate.
@@ -213,3 +223,4 @@ Lo secreto no sale en la pantalla, no llega al resumen de la partida ni a las es
 - La iniciativa la tira el servidor (`apps/server/src/games/combat.ts`) con las reglas de `packages/rules` (`initiativeEdge`, `compareInitiative` y la Destreza de los perfiles). El daño se calcula con `hitDamage`, `attackExtras` y `combatBlows`, y el de los grupos, con `damageNpcs`.
 - Las rutas están en `apps/server/src/routes/table.ts`, `combat.ts`, `damage.ts` y `scenes.ts`; las de la IA en combate, con el resto de la ayuda para narrar, en `routes/games.ts`. `addEvent` y la lectura del registro según quién mira están en `apps/server/src/games/events.ts`.
 - Lo secreto es la visibilidad `private`, con el jugador en `game_events.player_id`.
+- Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`.

@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { aiError, connectOllama, type ModelConfig, type OllamaCall } from './connection';
+import { aiError, connectOllama, type CallOptions, type ModelConfig } from './connection';
 
 // La IA que decide: Nimble, en el Ollama de siempre pero por su propio endpoint. No escribe:
 // recibe un texto (`state`) y unas preguntas, y de cada una devuelve la respuesta con sus
-// probabilidades. Ollama la sirve desde la 0.35.
+// probabilidades. Ollama la sirve desde la 0.35. La forma de las respuestas es la de esa versión.
 
 /** Una pregunta con opciones: de 2 a 26, de su id a lo que significa. */
 export interface ChoiceQuestion {
@@ -51,18 +51,22 @@ type AnswerTo<Q extends DecisionQuestion> = Q extends ChoiceQuestion
     ? NoulAnswer
     : ScoreAnswer;
 
-export type DecisionQuestions = Record<string, DecisionQuestion>;
+/** Las preguntas, cada una con su clave. Las que faltan (undefined) no se hacen. */
+export type DecisionQuestions = Record<string, DecisionQuestion | undefined>;
 
-export type DecisionAnswers<Q extends DecisionQuestions> = { [K in keyof Q]: AnswerTo<Q[K]> };
+/** La respuesta a cada pregunta, con la misma clave: también falta si faltaba la pregunta. */
+export type DecisionAnswers<Q extends DecisionQuestions> = {
+  [K in keyof Q]: AnswerTo<NonNullable<Q[K]>>;
+};
 
 export interface DecisionRequest<Q extends DecisionQuestions> {
   /** De qué va: lo que el modelo lee para responder. */
   state: string;
-  /** Hasta 64, cada una con su clave. */
+  /** Cada una con su clave. */
   questions: Q;
   /** Corta la petición cuando quien la pidió ya no espera la respuesta. */
   signal?: AbortSignal | undefined;
-  /** Cuánto se espera como mucho, si no vale lo de siempre. */
+  /** Cuánto se espera como mucho a cada pregunta, si no vale lo de siempre. */
   timeoutMs?: number;
 }
 
@@ -109,8 +113,10 @@ export function createDecider(config: ModelConfig): Decider {
     },
   });
 
-  /** Lee las respuestas a las preguntas que se hicieron, cada una según su tipo. */
-  function answersOf<Q extends DecisionQuestions>(text: string, questions: Q): DecisionAnswers<Q> {
+  type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer;
+
+  /** Lee la respuesta a la pregunta `key`, según su tipo. */
+  function answerOf(text: string, key: string, question: DecisionQuestion): Answer {
     let data: unknown;
     try {
       data = JSON.parse(text);
@@ -119,53 +125,62 @@ export function createDecider(config: ModelConfig): Decider {
     }
     const parsed = responseSchema.safeParse(data);
     if (!parsed.success) throw aiError(502, NOT_UNDERSTOOD, parsed.error);
-    const answers: Record<string, ChoiceAnswer | NoulAnswer | ScoreAnswer> = {};
-    for (const [key, question] of Object.entries(questions)) {
-      const raw = parsed.data.answers[key];
-      switch (question.type) {
-        case 'choice': {
-          const answer = ANSWER_SCHEMAS.choice.safeParse(raw);
-          if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
-          answers[key] = answer.data;
-          break;
-        }
-        case 'noul': {
-          const answer = ANSWER_SCHEMAS.noul.safeParse(raw);
-          if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
-          answers[key] = { probability: answer.data.noul };
-          break;
-        }
-        case 'score': {
-          const answer = ANSWER_SCHEMAS.score.safeParse(raw);
-          if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
-          answers[key] = answer.data;
-          break;
-        }
+    const raw = parsed.data.answers[key];
+    switch (question.type) {
+      case 'choice': {
+        const answer = ANSWER_SCHEMAS.choice.safeParse(raw);
+        if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
+        return answer.data;
+      }
+      case 'noul': {
+        const answer = ANSWER_SCHEMAS.noul.safeParse(raw);
+        if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
+        return { probability: answer.data.noul };
+      }
+      case 'score': {
+        const answer = ANSWER_SCHEMAS.score.safeParse(raw);
+        if (!answer.success) throw aiError(502, NOT_UNDERSTOOD, answer.error);
+        return answer.data;
       }
     }
-    return answers as DecisionAnswers<Q>;
+  }
+
+  async function ask(
+    state: string,
+    key: string,
+    question: DecisionQuestion,
+    options: CallOptions,
+  ): Promise<Answer> {
+    const call = await connection.post(
+      '/v1/systemone',
+      { model: config.model, state, questions: { [key]: question } },
+      options,
+    );
+    try {
+      let text: string;
+      try {
+        text = await call.response.text();
+      } catch (error) {
+        throw connection.interrupted(call, error);
+      }
+      return answerOf(text, key, question);
+    } finally {
+      call.finish();
+    }
   }
 
   return {
     model: config.model,
 
     async decide(request) {
-      const call: OllamaCall = await connection.post(
-        '/v1/systemone',
-        { model: config.model, state: request.state, questions: request.questions },
-        request,
-      );
-      try {
-        let text: string;
-        try {
-          text = await call.response.text();
-        } catch (error) {
-          throw connection.interrupted(call, error);
-        }
-        return answersOf(text, request.questions);
-      } finally {
-        call.finish();
+      // Cada pregunta va sola. Juntas, el modelo ve las de las demás y se estorban: con el mismo
+      // texto, «¿encaja su trasfondo?» pasa de 0,29 a 0,90 si se pregunta además con qué tira. Y
+      // tarda lo mismo, o poco más, porque cada una lee entonces solo lo suyo.
+      const answers: Record<string, Answer> = {};
+      for (const [key, question] of Object.entries(request.questions)) {
+        if (question) answers[key] = await ask(request.state, key, question, request);
       }
+      return answers as DecisionAnswers<typeof request.questions>;
     },
 
     close() {

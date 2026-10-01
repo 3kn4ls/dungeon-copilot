@@ -27,7 +27,10 @@ export type FakeAnswer = { choice: Record<string, number> } | { noul: number } |
 
 /** Cómo contesta el Ollama de mentira a una pregunta para la IA que decide. */
 export type FakeDecision =
-  /** Estas respuestas; las preguntas que no estén, como sin nada en cola. */
+  /**
+   * Las respuestas a estas preguntas, por su clave. Como cada pregunta llega en su petición, sirve
+   * a las siguientes hasta que se han hecho todas; a las demás se responde como sin nada en cola.
+   */
   | { kind: 'answers'; answers: Record<string, FakeAnswer> }
   /** Un error HTTP con el cuerpo que manda Ollama: {"error": "..."}. */
   | { kind: 'error'; status: number; error: string }
@@ -56,8 +59,8 @@ export interface FakeOllama {
   /** Respuestas para las próximas peticiones, en orden. Sin ninguna, contesta "Hola.". */
   queue(...replies: FakeReply[]): void;
   /**
-   * Respuestas para las próximas preguntas, en orden. Sin ninguna, elige la primera opción de
-   * cada `choice`, dice que no a cada `noul` y el primer nivel de cada `score`.
+   * Respuestas para las próximas peticiones de decisión, en orden. Sin ninguna, elige la primera
+   * opción de cada `choice`, dice que no a cada `noul` y el primer nivel de cada `score`.
    */
   queueDecision(...replies: FakeDecision[]): void;
   /** Se resuelve cuando alguien corta una petición antes de que termine. */
@@ -112,6 +115,21 @@ export async function startFakeOllama(): Promise<FakeOllama> {
     ...(done ? { done_reason: 'stop' } : {}),
   });
 
+  /** Cómo se contesta una petición con estas preguntas. */
+  function nextDecision(keys: string[]): FakeDecision {
+    const head = pendingDecisions[0];
+    if (!head) return { kind: 'answers', answers: {} };
+    if (head.kind !== 'answers') {
+      pendingDecisions.shift();
+      return head;
+    }
+    const asked = Object.entries(head.answers).filter(([key]) => keys.includes(key));
+    const rest = Object.entries(head.answers).filter(([key]) => !keys.includes(key));
+    if (rest.length === 0) pendingDecisions.shift();
+    else pendingDecisions[0] = { kind: 'answers', answers: Object.fromEntries(rest) };
+    return { kind: 'answers', answers: Object.fromEntries(asked) };
+  }
+
   const server = createServer((req, res) => {
     let raw = '';
     req.setEncoding('utf8');
@@ -125,7 +143,7 @@ export async function startFakeOllama(): Promise<FakeOllama> {
       if (req.method === 'POST' && req.url === '/v1/systemone') {
         const body = JSON.parse(raw) as OllamaDecisionBody;
         decisions.push({ body, headers: req.headers });
-        const reply = pendingDecisions.shift() ?? { kind: 'answers', answers: {} };
+        const reply = nextDecision(Object.keys(body.questions));
         switch (reply.kind) {
           case 'silence':
             return;

@@ -22,6 +22,7 @@ import {
 import {
   GAME_STATUS_LABELS,
   currentCombat,
+  isCheckedIntent,
   currentFloor,
   currentScene,
   gameName,
@@ -33,6 +34,7 @@ import {
   turnOf,
   type AskRollRequest,
   type CharacterView,
+  type CheckSuggestion,
   type Combat,
   type GameDetail,
   type GameEvent,
@@ -60,6 +62,7 @@ import {
 } from '../components/Combat';
 import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
+import { CheckHint } from '../components/Decisions';
 import { FallenActions, ManualDamage, RollDamage, type DamageEvent } from '../components/Damage';
 import { FloorControl, FloorStatus, holdsFloor } from '../components/Floor';
 import { EventCard } from '../components/GameEvents';
@@ -97,6 +100,7 @@ import {
   refreshCharacters,
   useAiStatus,
   useCharacters,
+  useCheckSuggestion,
   useGame,
   useGames,
   useMe,
@@ -458,6 +462,8 @@ interface Handoff {
   intervention?: InterventionEvent | undefined;
   /** La tirada ya preparada, si va a Tirar. */
   roll?: RollPreset | undefined;
+  /** Si se pide a la IA qué tirada sugiere: la tirada preparada con su sugerencia. */
+  suggest?: ((suggestion: CheckSuggestion) => RollPreset | undefined) | undefined;
 }
 
 /**
@@ -525,6 +531,15 @@ function MasterDesk({ state }: { state: GameState }) {
               intervention,
               roll:
                 to === 'roll' ? interventionPreset(intervention, characters, combat) : undefined,
+              // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
+              // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
+              suggest:
+                to === 'roll' &&
+                ai.data?.decisions &&
+                isCheckedIntent(intervention.intent) &&
+                intervention.text.trim()
+                  ? (suggestion) => interventionPreset(intervention, characters, combat, suggestion)
+                  : undefined,
             })
           }
         />
@@ -597,6 +612,7 @@ function MasterDesk({ state }: { state: GameState }) {
             game={game}
             embedded
             preset={rolling?.roll}
+            suggest={rolling?.suggest}
             answering={rolling?.intervention}
             onStopAnswering={stopAnswering}
             onDone={rolling ? stopAnswering : undefined}
@@ -1062,17 +1078,20 @@ function SpeechForm(props: {
  * Tirar en la partida. El máster tira con cualquiera, también en secreto, o pide la tirada al
  * jugador del personaje que tira (o que se defiende). Con `preset`, la tirada llega preparada
  * (para atender la intervención `answering` o para el turno de unos PNJ): se monta de nuevo con
- * cada una, y al hacerla o pedirla se avisa con `onDone`.
+ * cada una, y al hacerla o pedirla se avisa con `onDone`. Con `suggest`, se pregunta a la IA qué
+ * tirada pedir para `answering`: cuando llega, se aplica sola si el máster aún no ha tocado la
+ * tirada; si la ha tocado, la aplica él si quiere.
  */
 function RollForm(props: {
   game: GameDetail;
   embedded?: boolean;
   preset?: RollPreset | undefined;
+  suggest?: ((suggestion: CheckSuggestion) => RollPreset | undefined) | undefined;
   answering?: InterventionEvent | undefined;
   onStopAnswering?: () => void;
   onDone?: (() => void) | undefined;
 }) {
-  const { game, embedded = false, preset, answering, onStopAnswering, onDone } = props;
+  const { game, embedded = false, preset, suggest, answering, onStopAnswering, onDone } = props;
   const { data: me } = useMe();
   const characters = useCharacters(game.campaignId);
   const storeEvent = useStoreGameEvent(game.id);
@@ -1094,6 +1113,36 @@ function RollForm(props: {
   const [ask, setAsk] = useState(preset?.ask ?? answering !== undefined);
   /** En combate, quién ataca a quién: a quién irá el daño del golpe. */
   const [blow, setBlow] = useState(preset?.blow);
+
+  const suggestion = useCheckSuggestion(game.id, suggest ? answering : undefined);
+  /** El máster ya ha cambiado algo de lo que cambia la sugerencia: no se aplica sola. */
+  const [touched, setTouched] = useState(false);
+  /** La última sugerencia que ha llegado, y si se ha aplicado. */
+  const [arrived, setArrived] = useState<CheckSuggestion | undefined>(undefined);
+  const [applied, setApplied] = useState(false);
+  const edit =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      setTouched(true);
+      set(value);
+    };
+
+  function applySuggestion(next: CheckSuggestion) {
+    const suggested = suggest?.(next);
+    if (!suggested) return;
+    setActor(suggested.actor);
+    setAgainst(suggested.against);
+    setDifficulty(suggested.difficulty);
+    setOpponent(suggested.opponent);
+    setSituation(suggested.situation);
+    setShot(suggested.shot);
+    setApplied(true);
+  }
+  // Llega la sugerencia: se aplica sola si el máster aún no ha tocado la tirada.
+  if (suggestion.data && suggestion.data !== arrived) {
+    setArrived(suggestion.data);
+    if (!touched) applySuggestion(suggestion.data);
+  }
 
   // Hasta que no se elige, tira el primer personaje disponible (o un PNJ si no hay ninguno).
   const first = available[0];
@@ -1196,13 +1245,27 @@ function RollForm(props: {
           </button>
         </p>
       )}
+      {suggest && (
+        <CheckHint
+          asked={suggestion}
+          intent={answering?.intent ?? 'act'}
+          check={actorDraft.kind === 'character' ? actorDraft.check : undefined}
+          applied={applied}
+          onSkill={(skill) => {
+            if (actorDraft.kind === 'character') {
+              edit(setActor)({ ...actorDraft, check: `skill:${skill}` });
+            }
+          }}
+          onApply={() => suggestion.data && applySuggestion(suggestion.data)}
+        />
+      )}
       <SideEditor
         title="Quién tira"
         draft={actorDraft}
         characters={available}
         npcs={npcs}
         allowFree={isMaster}
-        onChange={setActor}
+        onChange={edit(setActor)}
       />
 
       {isMaster && (
@@ -1214,6 +1277,7 @@ function RollForm(props: {
             ['opposed', 'Rival'],
           ]}
           onChange={(next) => {
+            setTouched(true);
             setAgainst(next);
             setSituation(next === 'opposed' ? 'melee' : 'test');
           }}
@@ -1228,7 +1292,7 @@ function RollForm(props: {
               value={shot.dexterity}
               min={0}
               max={6}
-              onChange={(dexterity) => setShot({ ...shot, dexterity })}
+              onChange={(dexterity) => edit(setShot)({ ...shot, dexterity })}
               hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
             />
           </div>
@@ -1236,13 +1300,13 @@ function RollForm(props: {
             label="Distancia"
             value={shot.range}
             options={RANGES}
-            onChange={(range) => setShot({ ...shot, range })}
+            onChange={(range) => edit(setShot)({ ...shot, range })}
           />
           <label className="check">
             <input
               type="checkbox"
               checked={shot.cover}
-              onChange={(event) => setShot({ ...shot, cover: event.target.checked })}
+              onChange={(event) => edit(setShot)({ ...shot, cover: event.target.checked })}
             />
             Cobertura parcial (+2)
           </label>
@@ -1250,7 +1314,7 @@ function RollForm(props: {
             <input
               type="checkbox"
               checked={shot.shield}
-              onChange={(event) => setShot({ ...shot, shield: event.target.checked })}
+              onChange={(event) => edit(setShot)({ ...shot, shield: event.target.checked })}
             />
             Lleva escudo (+1)
           </label>
@@ -1265,7 +1329,7 @@ function RollForm(props: {
           <span className="field-label">Dificultad</span>
           <select
             value={difficulty}
-            onChange={(event) => setDifficulty(event.target.value as DifficultyLevel)}
+            onChange={(event) => edit(setDifficulty)(event.target.value as DifficultyLevel)}
           >
             {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
               <option key={level} value={level}>
@@ -1281,7 +1345,7 @@ function RollForm(props: {
           characters={characters.data}
           npcs={npcs}
           allowFree
-          onChange={setOpponent}
+          onChange={edit(setOpponent)}
         />
       )}
 
@@ -1291,6 +1355,7 @@ function RollForm(props: {
           value={situation}
           onChange={(event) => {
             const next = event.target.value as Situation;
+            setTouched(true);
             setSituation(next);
             // A distancia se tira contra una dificultad, que sale del objetivo.
             if (next === 'ranged') setAgainst('difficulty');
