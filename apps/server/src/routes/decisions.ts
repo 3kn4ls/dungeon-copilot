@@ -1,4 +1,10 @@
-import { enemyDecisionSchema, isCheckedIntent, type PublicUser } from '@dungeon-copilot/shared';
+import {
+  LEAK_NPCS,
+  enemyDecisionSchema,
+  isCheckedIntent,
+  revealCheckSchema,
+  type PublicUser,
+} from '@dungeon-copilot/shared';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -6,12 +12,15 @@ import {
   checkSuggestion,
   enemyDecision,
   enemyQuestions,
+  leakQuestions,
+  secretLeaks,
   type CheckPrompt,
   type EnemyPrompt,
+  type LeakPrompt,
 } from '../ai/decisions';
 import { askDecider, requireDecider } from '../ai/respond';
 import type { AppContext } from '../context';
-import { characters } from '../db/schema';
+import { characters, npcs } from '../db/schema';
 import {
   GAME_CLOSED,
   GAME_NOT_FOUND,
@@ -25,6 +34,7 @@ import {
   findCombatBlows,
   findFighters,
   findNpcKnown,
+  findNpcSecrets,
   findScenes,
   npcFighter,
 } from '../games/prompt-context';
@@ -137,5 +147,39 @@ export function registerDecisionRoutes(app: FastifyInstance, ctx: AppContext): v
     const answers = await askDecider(request, reply, nimble, enemyQuestions(prompt));
     if (!answers) return reply;
     return { decision: enemyDecision(prompt, answers) };
+  });
+
+  /**
+   * Si lo que va a enseñar el máster (una descripción o lo que dice un PNJ, a la mesa o en
+   * secreto) desvela lo que oculta algún PNJ de la campaña. Responde quiénes, no sus secretos: los
+   * secretos solo llegan a la IA.
+   */
+  app.post<{ Params: IdParams }>('/api/games/:id/reveals/check', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const body = parseBody(revealCheckSchema, request.body, 'Revisa lo que vas a enseñar');
+    const { found, nimble } = await findDecidedGame(user, gameId);
+    const { campaignId } = found.game;
+    let speaker: string | undefined;
+    if (body.npcId) {
+      const [npc] = await db
+        .select({ name: npcs.name })
+        .from(npcs)
+        .where(and(eq(npcs.id, body.npcId), eq(npcs.campaignId, campaignId)));
+      if (!npc) throw notFound('Ese PNJ no está en esta campaña');
+      speaker = npc.name;
+    }
+    const prompt: LeakPrompt = {
+      title: body.title,
+      body: body.body,
+      speaker,
+      npcs: await findNpcSecrets(db, campaignId, LEAK_NPCS, body.npcId),
+    };
+    const { state, questions } = leakQuestions(prompt);
+    // Si nadie oculta nada, no hay nada que preguntar.
+    if (!questions.leak) return { leaks: [] };
+    const answers = await askDecider(request, reply, nimble, { state, questions });
+    if (!answers) return reply;
+    return { leaks: secretLeaks(prompt, answers) };
   });
 }

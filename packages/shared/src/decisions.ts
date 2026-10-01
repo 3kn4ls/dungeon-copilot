@@ -1,6 +1,6 @@
 import type { DifficultyLevel, Range } from '@dungeon-copilot/rules';
 import { z } from 'zod';
-import type { InterventionIntent } from './games';
+import { REVEAL_MAX, type InterventionIntent } from './games';
 
 // Lo que sugiere la IA que decide (Nimble) al máster. Solo sugiere: no escribe nada en la partida,
 // y el máster aplica lo que quiera.
@@ -71,6 +71,8 @@ export const SUGGESTION_THRESHOLDS = {
   cover: 0.5,
   /** Por debajo, «Quizá no haga falta tirar». */
   needsRoll: 0.4,
+  /** Avisar de que lo que se va a enseñar puede desvelar un secreto. */
+  leak: 0.5,
 } as const;
 
 /** Qué hacen unos enemigos según como va el combate: siguen, huyen o se rinden. */
@@ -109,4 +111,34 @@ export interface EnemyDecision {
    */
   targets: TargetOdds[];
   morale: { choice: Morale; probabilities: Record<Morale, number> };
+}
+
+/**
+ * Cuántos PNJ con secretos mira el guardián, como mucho: Nimble elige entre 26 opciones, y una es
+ * «ninguno».
+ */
+export const LEAK_NPCS = 25;
+
+/**
+ * Lo que va a enseñar el máster, para que la IA mire si desvela lo que oculta algún PNJ: una
+ * descripción (con su título) o lo que dice un PNJ (`npcId`), a la mesa o en secreto.
+ */
+export const revealCheckSchema = z.object({
+  title: z.string().trim().max(120, 'El título no puede pasar de 120 caracteres').default(''),
+  body: z
+    .string()
+    .trim()
+    .min(1, 'Escribe lo que quieres enseñar')
+    .max(REVEAL_MAX, `El texto no puede pasar de ${REVEAL_MAX} caracteres`),
+  /** El PNJ que lo dice, si es una frase suya: se mira el primero. */
+  npcId: z.uuid('Elige un PNJ').optional(),
+});
+
+export type RevealCheckRequest = z.input<typeof revealCheckSchema>;
+
+/** Un PNJ cuyo secreto puede desvelar un texto, con lo probable que lo ve la IA. Sin el secreto. */
+export interface SecretLeak {
+  npcId: string;
+  name: string;
+  probability: number;
 }

@@ -7,7 +7,7 @@ import {
   createCharacterSchema,
   updateCharacterSchema,
 } from './characters';
-import { enemyDecisionSchema } from './decisions';
+import { enemyDecisionSchema, revealCheckSchema } from './decisions';
 import {
   complicationsSchema,
   gameRollSchema,
@@ -225,5 +225,18 @@ describe('sugerencias de la IA', () => {
     });
     expect(enemyDecisionSchema.safeParse({}).success).toBe(false);
     expect(enemyDecisionSchema.safeParse({ combatantId: 'bandidos' }).success).toBe(false);
+  });
+
+  it('lo que va a enseñar el máster, con los mismos topes que al enseñarlo', () => {
+    expect(revealCheckSchema.parse({ body: ' Mi hermano manda en este valle. ' })).toEqual({
+      title: '',
+      body: 'Mi hermano manda en este valle.',
+    });
+    expect(revealCheckSchema.safeParse({ body: '   ' }).success).toBe(false);
+    expect(revealCheckSchema.safeParse({ body: 'a'.repeat(5001) }).success).toBe(false);
+    expect(revealCheckSchema.safeParse({ title: 't'.repeat(121), body: 'Hola' }).success).toBe(
+      false,
+    );
+    expect(revealCheckSchema.safeParse({ body: 'Hola', npcId: 'brunilda' }).success).toBe(false);
   });
 });

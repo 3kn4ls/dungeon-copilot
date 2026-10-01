@@ -5,6 +5,8 @@ import {
   checkSuggestion,
   enemyDecision,
   enemyQuestions,
+  leakQuestions,
+  secretLeaks,
   type CheckPrompt,
   type EnemyPrompt,
 } from './decisions';
@@ -283,5 +285,73 @@ describe('qué hacen los enemigos: lo que sugiere', () => {
       targets: [],
       morale: { choice: 'fight', probabilities: { fight: 0.9, flee: 0.1, surrender: 0 } },
     });
+  });
+});
+
+const secrets = [
+  { id: 'brunilda-id', name: 'Brunilda', secrets: 'Es la hermana del barón.' },
+  { id: 'odo-id', name: 'Odo', secrets: 'Robó el anillo del templo.' },
+];
+
+describe('el guardián de secretos: la pregunta', () => {
+  it('qué secreto desvela, con un PNJ en cada opción y «ninguno»', () => {
+    const { state, questions } = leakQuestions({
+      title: 'El taller',
+      body: 'Odo mira de reojo la tarima.',
+      npcs: secrets,
+    });
+    expect(state).toBe('El taller\nOdo mira de reojo la tarima.');
+    expect(questions.leak?.criteria).toEqual({
+      'brunilda-id': 'Lo que oculta Brunilda: Es la hermana del barón.',
+      'odo-id': 'Lo que oculta Odo: Robó el anillo del templo.',
+      none: 'Ninguno: no desvela ni deja adivinar ningún secreto',
+    });
+  });
+
+  it('lo que dice un PNJ, con su nombre', () => {
+    const { state } = leakQuestions({
+      title: '',
+      body: 'Mi hermano manda en este valle.',
+      speaker: 'Brunilda',
+      npcs: secrets,
+    });
+    expect(state).toBe('Brunilda dice: «Mi hermano manda en este valle.»');
+  });
+
+  it('25 PNJ como mucho, que con «ninguno» son las 26 opciones de Nimble, y secretos recortados', () => {
+    const many = Array.from({ length: 30 }, (_, index) => ({
+      id: `npc-${index}`,
+      name: `PNJ ${index}`,
+      secrets: 's'.repeat(1000),
+    }));
+    const { questions } = leakQuestions({ title: '', body: 'Hola', npcs: many });
+    const options = Object.keys(questions.leak?.criteria ?? {});
+    expect(options).toHaveLength(26);
+    expect(options.at(-1)).toBe('none');
+    expect(questions.leak?.criteria['npc-0']?.length).toBeLessThan(400);
+  });
+
+  it('si nadie oculta nada, no hay nada que preguntar', () => {
+    expect(leakQuestions({ title: '', body: 'Hola', npcs: [] }).questions).toEqual({});
+  });
+});
+
+describe('el guardián de secretos: lo que avisa', () => {
+  it('los PNJ que pasan de 0,5, de más a menos probable, sin «ninguno»', () => {
+    const prompt = { title: '', body: 'Hola', npcs: secrets };
+    expect(
+      secretLeaks(prompt, {
+        leak: {
+          choice: 'odo-id',
+          probabilities: { 'brunilda-id': 0.3, 'odo-id': 0.65, none: 0.05 },
+        },
+      }),
+    ).toEqual([{ npcId: 'odo-id', name: 'Odo', probability: 0.65 }]);
+    expect(
+      secretLeaks(prompt, {
+        leak: { choice: 'none', probabilities: { 'brunilda-id': 0.01, none: 0.99 } },
+      }),
+    ).toEqual([]);
+    expect(secretLeaks(prompt, {})).toEqual([]);
   });
 });

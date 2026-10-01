@@ -6,12 +6,15 @@ import {
 } from '@dungeon-copilot/rules';
 import {
   INTERVENTION_LABELS,
+  LEAK_NPCS,
   MORALES,
   SPELL_EFFECT_LABELS,
+  SUGGESTION_THRESHOLDS,
   type CheckSuggestion,
   type CheckedIntent,
   type EnemyDecision,
   type Morale,
+  type SecretLeak,
   type SkillOdds,
   type SpellEffect,
   type TargetOdds,
@@ -349,4 +352,74 @@ export function enemyDecision(
     probabilities[morale] > probabilities[best] ? morale : best,
   );
   return { targets, morale: { choice, probabilities } };
+}
+
+/** Lo que se le cuenta a la IA de cada secreto: uno largo se recorta. */
+const SECRET_CHARS = 300;
+/** La opción de que no desvela nada. No puede ser el id de un PNJ, que son UUID. */
+const NO_LEAK = 'none';
+
+/** Un PNJ de la campaña con lo que oculta. */
+export interface SecretNpc {
+  id: string;
+  name: string;
+  secrets: string;
+}
+
+export interface LeakPrompt {
+  /** Lo que va a enseñar el máster: una descripción o lo que dice un PNJ. */
+  title: string;
+  body: string;
+  /** Quién lo dice, si es una frase de un PNJ. */
+  speaker?: string | undefined;
+  /** Los PNJ que ocultan algo, como mucho LEAK_NPCS: quien habla, el primero. */
+  npcs: SecretNpc[];
+}
+
+/**
+ * Si un texto desvela un secreto se pregunta de una vez, con un PNJ en cada opción y «ninguno»: un
+ * `noul` por PNJ tarda un segundo por cada uno y, probado con Nimble, se equivoca más.
+ */
+export type LeakQuestions = { leak?: ChoiceQuestion };
+
+export function leakQuestions(prompt: LeakPrompt): DecisionPrompt<LeakQuestions> {
+  const title = prompt.title.trim();
+  const body = prompt.body.trim();
+  const state = prompt.speaker
+    ? `${prompt.speaker} dice: «${body}»`
+    : [title, body].filter(Boolean).join('\n');
+  const npcs = prompt.npcs.slice(0, LEAK_NPCS);
+  if (npcs.length === 0) return { state, questions: {} };
+  return {
+    state,
+    questions: {
+      leak: {
+        type: 'choice',
+        instructions:
+          '¿Qué secreto desvela este texto, o deja adivinar, si desvela alguno? Solo cuenta si lo dice o lo da a entender, no si habla de otra cosa.',
+        criteria: {
+          ...Object.fromEntries(
+            npcs.map((npc) => [
+              npc.id,
+              `Lo que oculta ${npc.name}: ${fit(npc.secrets, SECRET_CHARS)}`,
+            ]),
+          ),
+          [NO_LEAK]: 'Ninguno: no desvela ni deja adivinar ningún secreto',
+        },
+      },
+    },
+  };
+}
+
+/** Los PNJ cuyo secreto puede desvelar el texto, de más a menos probable. Sin el secreto. */
+export function secretLeaks(
+  prompt: LeakPrompt,
+  answers: DecisionAnswers<LeakQuestions>,
+): SecretLeak[] {
+  const { leak } = answers;
+  if (!leak) return [];
+  return prompt.npcs
+    .map((npc) => ({ npcId: npc.id, name: npc.name, probability: leak.probabilities[npc.id] ?? 0 }))
+    .filter((found) => found.probability > SUGGESTION_THRESHOLDS.leak)
+    .sort((a, b) => b.probability - a.probability);
 }

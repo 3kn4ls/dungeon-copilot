@@ -1,6 +1,7 @@
 import { UNHARMED } from '@dungeon-copilot/rules';
 import { groupSize, type Combat, type NpcCombatant } from '@dungeon-copilot/shared';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import type { SecretNpc } from '../ai/decisions';
 import {
   IDEA_NPCS,
   damageText,
@@ -148,4 +149,27 @@ export async function findCombatBlows(
   return rows
     .flatMap(({ payload }) => (payload.kind === 'damage' ? [damageText(payload)] : []))
     .reverse();
+}
+
+/**
+ * Los PNJ de la campaña que ocultan algo, con lo que ocultan: primero `first`, si es uno de
+ * ellos, y después los que el máster ha tocado hace menos. Solo para la IA que decide si un texto
+ * los desvela: nunca para la que escribe.
+ */
+export async function findNpcSecrets(
+  db: Executor,
+  campaignId: string,
+  limit: number,
+  first?: string,
+): Promise<SecretNpc[]> {
+  return db
+    .select({ id: npcs.id, name: npcs.name, secrets: npcs.secrets })
+    .from(npcs)
+    .where(and(eq(npcs.campaignId, campaignId), sql`btrim(${npcs.secrets}) <> ''`))
+    .orderBy(
+      ...(first ? [sql`${npcs.id} = ${first} desc`] : []),
+      desc(npcs.updatedAt),
+      asc(npcs.id),
+    )
+    .limit(limit);
 }

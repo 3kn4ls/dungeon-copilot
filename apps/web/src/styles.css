@@ -2262,8 +2262,15 @@ h1 .badge {
   color: var(--muted);
 }
 
-.suggestion.morale p {
+.suggestion.morale p,
+.suggestion.leak p {
   margin: 0;
+}
+
+/* El guardián de secretos avisa antes de enseñar: más visible que una sugerencia. */
+.suggestion.leak {
+  border-style: solid;
+  border-color: var(--partial);
 }
 
 /* El objetivo que sugiere la IA en el turno de los enemigos, y la probabilidad de cada uno. */

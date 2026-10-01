@@ -186,12 +186,19 @@ Hay tres visibilidades:
 
 Lo secreto no sale en la pantalla, no llega al resumen de la partida ni a las escenas que lee la IA. Una tirada en secreto se puede repetir con Suerte, porque su jugador la ve; las tiradas secretas del máster, no. El combate, los golpes, las escenas y las técnicas son siempre de toda la mesa.
 
+### El guardián de secretos
+
+Con las sugerencias de la IA (Nimble), antes de enseñar algo (una descripción o lo que dice un PNJ, a toda la mesa o en secreto a un jugador), la IA mira si desvela o deja adivinar lo que oculta algún PNJ de la campaña. Si puede, no lo enseña y avisa: «Puede desvelar lo que oculta Brunilda (78 %)», con **Enseñar igualmente** y **Retocar**. Si no, o si la comprobación falla o tarda más de 5 s, se enseña sin más: el guardián avisa, no bloquea.
+
+Es lo más útil cuando la frase la ha escrito la IA que habla por el PNJ, porque ella conoce sus secretos. Mira los 25 PNJ con secretos que el máster ha tocado hace menos (el que habla, el primero), en una sola pregunta: cuál desvela, o ninguno. La respuesta dice quién, nunca el secreto.
+
 ## La IA que sugiere
 
 Además de la IA que escribe, el servidor puede tener otra que decide: Nimble (`OLLAMA_DECISION_MODEL`). No escribe nada: lee lo que pasa y responde a unas preguntas concretas con su probabilidad. Lo usa para sugerir al máster donde antes elegía a ojo:
 
 - **Qué tirada pedir** para una intervención (ver [Cómo las atiende el máster](#cómo-las-atiende-el-máster)).
 - **Qué hacen los enemigos**: a quién atacan en su turno y si huyen o se rinden (ver [La IA en combate](#la-ia-en-combate)).
+- **El guardián de secretos**: si lo que va a enseñar el máster desvela lo que oculta un PNJ (ver [El guardián de secretos](#el-guardián-de-secretos)).
 
 Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni lo ve la mesa. Es solo del máster, con la partida en juego. Nada espera por ella: si tarda o falla, todo sigue como sin ella, y sin Nimble la sala es la de siempre.
 
@@ -231,4 +238,4 @@ Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni
 - La iniciativa la tira el servidor (`apps/server/src/games/combat.ts`) con las reglas de `packages/rules` (`initiativeEdge`, `compareInitiative` y la Destreza de los perfiles). El daño se calcula con `hitDamage`, `attackExtras` y `combatBlows`, y el de los grupos, con `damageNpcs`.
 - Las rutas están en `apps/server/src/routes/table.ts`, `combat.ts`, `damage.ts` y `scenes.ts`; las de la IA en combate, con el resto de la ayuda para narrar, en `routes/games.ts`. `addEvent` y la lectura del registro según quién mira están en `apps/server/src/games/events.ts`.
 - Lo secreto es la visibilidad `private`, con el jugador en `game_events.player_id`.
-- Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`. Qué hacen los enemigos es `EnemyDecision`, y lo que se cuenta del combate (quién pelea, lo que se sabe de un PNJ y los últimos golpes) lo montan `findFighters`, `findNpcKnown` y `findCombatBlows` (`apps/server/src/games/prompt-context.ts`), que comparte con las ideas para los PNJ.
+- Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`. Qué hacen los enemigos es `EnemyDecision`, y lo que se cuenta del combate (quién pelea, lo que se sabe de un PNJ y los últimos golpes) lo montan `findFighters`, `findNpcKnown` y `findCombatBlows` (`apps/server/src/games/prompt-context.ts`), que comparte con las ideas para los PNJ. El guardián es `SecretLeak`, con los PNJ y sus secretos de `findNpcSecrets`: es lo único que manda lo que ocultan los PNJ a la IA que decide.

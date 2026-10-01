@@ -62,7 +62,7 @@ import {
 } from '../components/Combat';
 import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
-import { CheckHint } from '../components/Decisions';
+import { CheckHint, LeakWarning, useLeakGuard } from '../components/Decisions';
 import {
   FallenActions,
   ManualDamage,
@@ -703,6 +703,7 @@ function RevealForm(props: {
   });
   const recall = starting && !title && !body ? previous : undefined;
   const aiEnabled = ai.data?.enabled === true;
+  const leaks = useLeakGuard(game.id);
 
   async function describe(from: string) {
     const before = notes;
@@ -725,7 +726,12 @@ function RevealForm(props: {
         className="stack tight"
         onSubmit={(event) => {
           event.preventDefault();
-          reveal.mutate();
+          // Antes de enseñarlo, la IA mira si desvela lo que oculta algún PNJ.
+          void leaks.guard(
+            { title, body },
+            () => reveal.mutate(),
+            () => bodyField.current?.focus(),
+          );
         }}
       >
         {answering && <AnsweringNote intervention={answering} onCancel={onStopAnswering} />}
@@ -826,12 +832,13 @@ function RevealForm(props: {
         )}
         <RecipientSelect characters={characters} value={to} onChange={setTo} />
         <ErrorNote error={reveal.error ?? writer.error} />
+        {leaks.alert && <LeakWarning alert={leaks.alert} onDismiss={leaks.dismiss} />}
         <button
           type="submit"
           className="button primary"
-          disabled={reveal.isPending || writer.writing}
+          disabled={reveal.isPending || writer.writing || leaks.checking}
         >
-          {showLabel(characters, to)}
+          {leaks.checking ? 'Comprobando…' : showLabel(characters, to)}
         </button>
       </form>
       {aiEnabled && (
@@ -1048,6 +1055,8 @@ function SpeechForm(props: {
   const [text, setText] = useState('');
   const [to, setTo, toEveryone] = useRecipient(answering);
   const storeEvent = useStoreGameEvent(gameId);
+  const textField = useRef<HTMLTextAreaElement>(null);
+  const leaks = useLeakGuard(gameId);
   const speak = useMutation({
     mutationFn: () =>
       api.speech(gameId, { npcId: npc.id, text, to: to || undefined, answers: answering?.id }),
@@ -1063,12 +1072,18 @@ function SpeechForm(props: {
       className="stack tight"
       onSubmit={(event) => {
         event.preventDefault();
-        speak.mutate();
+        // Antes de enseñarla, la IA mira si desvela lo que oculta algún PNJ.
+        void leaks.guard(
+          { body: text, npcId: npc.id },
+          () => speak.mutate(),
+          () => textField.current?.focus(),
+        );
       }}
     >
       <label className="field">
         <span className="field-label">Lo que dice {npc.name}</span>
         <textarea
+          ref={textField}
           required
           rows={3}
           maxLength={2000}
@@ -1081,8 +1096,9 @@ function SpeechForm(props: {
       </p>
       <RecipientSelect characters={characters} value={to} onChange={setTo} />
       <ErrorNote error={speak.error} />
-      <button type="submit" className="button primary" disabled={speak.isPending}>
-        {showLabel(characters, to)}
+      {leaks.alert && <LeakWarning alert={leaks.alert} onDismiss={leaks.dismiss} />}
+      <button type="submit" className="button primary" disabled={speak.isPending || leaks.checking}>
+        {leaks.checking ? 'Comprobando…' : showLabel(characters, to)}
       </button>
     </form>
   );

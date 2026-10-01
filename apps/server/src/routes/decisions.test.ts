@@ -341,6 +341,81 @@ describe('qué hacen los enemigos', () => {
   });
 });
 
+describe('el guardián de secretos', () => {
+  async function npc(master: TestClient, campaignId: string, name: string, secrets: string) {
+    const response = await master.post(`/api/campaigns/${campaignId}/npcs`, { name, secrets });
+    expect(response.statusCode).toBe(201);
+    return response.json().npc;
+  }
+
+  it('avisa de los PNJ cuyo secreto puede desvelar el texto, sin decir el secreto ni escribir nada', async () => {
+    const { master, campaign, url } = await table();
+    const brunilda = await npc(master, campaign.id, 'Brunilda', 'Es la hermana del barón');
+    const odo = await npc(master, campaign.id, 'Odo', 'Robó el anillo del templo');
+    await npc(master, campaign.id, 'Sela', '   ');
+    const before = await eventsOf(master, url);
+
+    ollama.queueDecision({
+      kind: 'answers',
+      answers: { leak: { choice: { [brunilda.id]: 0.78, [odo.id]: 0.12, none: 0.1 } } },
+    });
+    const response = await master.post(`${url}/reveals/check`, {
+      body: ' Mi hermano manda en este valle. ',
+      npcId: brunilda.id,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      leaks: [{ npcId: brunilda.id, name: 'Brunilda', probability: 0.78 }],
+    });
+    // Los secretos solo llegan a Nimble: ni en la respuesta ni en la partida.
+    expect(response.body).not.toContain('barón');
+    expect(await eventsOf(master, url)).toEqual(before);
+
+    const [request] = ollama.decisions;
+    expect(request?.body.state).toBe('Brunilda dice: «Mi hermano manda en este valle.»');
+    // Quien habla va primero, y quien no oculta nada no está.
+    expect(Object.keys(request?.body.questions.leak?.criteria ?? {})).toEqual([
+      brunilda.id,
+      odo.id,
+      'none',
+    ]);
+  });
+
+  it('una descripción, con su título; sin nadie que oculte algo, no pregunta', async () => {
+    const { master, campaign, url } = await table();
+    const empty = await master.post(`${url}/reveals/check`, { title: 'El taller', body: 'Hola' });
+    expect(empty.json()).toEqual({ leaks: [] });
+    expect(ollama.decisions).toHaveLength(0);
+
+    await npc(master, campaign.id, 'Odo', 'Robó el anillo del templo');
+    ollama.queueDecision({ kind: 'answers', answers: { leak: { choice: { none: 0.97 } } } });
+    const quiet = await master.post(`${url}/reveals/check`, {
+      title: 'El taller',
+      body: 'Huele a hierro.',
+    });
+    expect(quiet.json()).toEqual({ leaks: [] });
+    expect(ollama.decisions[0]?.body.state).toBe('El taller\nHuele a hierro.');
+  });
+
+  it('solo para el máster, con la partida en juego y con algo que enseñar', async () => {
+    const { master, ana, bruno, url } = await table();
+    const check = `${url}/reveals/check`;
+    expect((await bruno.post(check, { body: 'Hola' })).statusCode).toBe(404);
+    expect((await ana.post(check, { body: 'Hola' })).statusCode).toBe(403);
+    expect((await master.post(check, { body: '   ' })).statusCode).toBe(400);
+    const stranger = await master.post(check, { body: 'Hola', npcId: crypto.randomUUID() });
+    expect(stranger.statusCode).toBe(404);
+
+    const other = (await ana.post('/api/campaigns', { name: 'Otra' })).json().campaign;
+    const foreign = await npc(ana, other.id, 'Ajeno', 'Un secreto de otra campaña');
+    expect((await master.post(check, { body: 'Hola', npcId: foreign.id })).statusCode).toBe(404);
+
+    await master.post(`${url}/close`, {});
+    expect((await master.post(check, { body: 'Hola' })).statusCode).toBe(409);
+    expect(ollama.decisions).toHaveLength(0);
+  });
+});
+
 describe('sin Nimble', () => {
   it('la web lo sabe y las sugerencias responden 503', async () => {
     const { master, ana, kael: sheet, url } = await table();
@@ -362,6 +437,11 @@ describe('sin Nimble', () => {
       const check = await client.post(`${url}/interventions/${intervention.id}/check`);
       expect(check.statusCode).toBe(503);
       expect(check.json().error).toContain('OLLAMA_DECISION_MODEL');
+      expect((await client.post(`${url}/reveals/check`, { body: 'Hola' })).statusCode).toBe(503);
+      const combat = await client.post(`${url}/combat/decision`, {
+        combatantId: crypto.randomUUID(),
+      });
+      expect(combat.statusCode).toBe(503);
     } finally {
       await withoutNimble.close();
     }

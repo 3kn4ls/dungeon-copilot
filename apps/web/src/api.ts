@@ -48,11 +48,13 @@ import type {
   RecoverRequest,
   RegisterRequest,
   RerollRequest,
+  RevealCheckRequest,
   RevealDraftRequest,
   RevealRequest,
   RollRequest,
   RollResponse,
   ScreenState,
+  SecretLeak,
   SpeechRequest,
   StartCombatRequest,
   StartSceneRequest,
@@ -222,6 +224,11 @@ export const api = {
     post<{ game: GameDetail; event: GameEvent }>(`/api/games/${id}/close`, body),
   reveal: (id: string, body: RevealRequest) =>
     post<EventResponse>(`/api/games/${id}/reveals`, body).then((r) => r.event),
+  /** La IA mira si lo que va a enseñar el máster desvela lo que oculta algún PNJ. */
+  checkReveal: (id: string, body: RevealCheckRequest, signal?: AbortSignal) =>
+    request<{ leaks: SecretLeak[] }>('POST', `/api/games/${id}/reveals/check`, body, signal).then(
+      (r) => r.leaks,
+    ),
   /** La IA convierte las notas del máster en la descripción de una escena, sin enseñarla. */
   draftReveal: (id: string, body: RevealDraftRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/reveals/draft`, body, options),

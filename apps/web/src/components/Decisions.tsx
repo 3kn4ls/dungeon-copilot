@@ -8,7 +8,12 @@ import {
   type EnemyDecision as Decision,
   type InterventionIntent,
   type NpcCombatant,
+  type RevealCheckRequest,
+  type SecretLeak,
 } from '@dungeon-copilot/shared';
+import { useState } from 'react';
+import { api } from '../api';
+import { useAiStatus } from '../queries';
 import { percent } from '../rolling';
 import { ConfirmButton } from './ui';
 
@@ -161,4 +166,85 @@ export function EnemyDecision(props: {
     return <p className="suggestion-note">La IA está pensando qué hace {enemy.name}…</p>;
   }
   return <MoraleAdvice {...props} decision={asked.data} />;
+}
+
+/** Cuánto se espera al guardián de secretos antes de enseñar sin él. */
+const LEAK_CHECK_MS = 5000;
+
+interface LeakAlert {
+  leaks: SecretLeak[];
+  /** Enseñar igualmente. */
+  show: () => void;
+  /** Retocar lo que se iba a enseñar. */
+  edit: () => void;
+}
+
+/**
+ * El guardián de secretos: antes de enseñar algo (con `guard`), la IA mira si desvela lo que oculta
+ * algún PNJ. Si puede, no lo enseña y avisa (`alert`); si no, o si falla o tarda más de 5 s, lo
+ * enseña sin más. Sin IA que decide, o fuera de la sala (sin `gameId`), enseña directamente.
+ */
+export function useLeakGuard(gameId: string | undefined) {
+  const ai = useAiStatus();
+  const [checking, setChecking] = useState(false);
+  const [alert, setAlert] = useState<LeakAlert | null>(null);
+
+  async function guard(text: RevealCheckRequest, show: () => void, edit: () => void) {
+    setAlert(null);
+    if (!gameId || !ai.data?.decisions) {
+      show();
+      return;
+    }
+    setChecking(true);
+    let leaks: SecretLeak[] = [];
+    try {
+      leaks = await api.checkReveal(gameId, text, AbortSignal.timeout(LEAK_CHECK_MS));
+    } catch {
+      // El guardián solo avisa: si falla o tarda, no bloquea.
+    } finally {
+      setChecking(false);
+    }
+    if (leaks.length > 0) setAlert({ leaks, show, edit });
+    else show();
+  }
+
+  return { guard, checking, alert, dismiss: () => setAlert(null) };
+}
+
+const listText = (items: string[]) =>
+  new Intl.ListFormat('es', { style: 'long', type: 'conjunction' }).format(items);
+
+/** El aviso del guardián: «Puede desvelar lo que oculta Brunilda (78 %)», y qué hacer. */
+export function LeakWarning({ alert, onDismiss }: { alert: LeakAlert; onDismiss: () => void }) {
+  const who = listText(alert.leaks.map((leak) => `${leak.name} (${percent(leak.probability)})`));
+  return (
+    <div className="suggestion leak" role="alert">
+      <p>
+        Puede desvelar lo que {alert.leaks.length > 1 ? 'ocultan' : 'oculta'} <strong>{who}</strong>
+        .
+      </p>
+      <div className="actions">
+        <button
+          type="button"
+          className="button small"
+          onClick={() => {
+            onDismiss();
+            alert.show();
+          }}
+        >
+          Enseñar igualmente
+        </button>
+        <button
+          type="button"
+          className="button small"
+          onClick={() => {
+            onDismiss();
+            alert.edit();
+          }}
+        >
+          Retocar
+        </button>
+      </div>
+    </div>
+  );
 }
