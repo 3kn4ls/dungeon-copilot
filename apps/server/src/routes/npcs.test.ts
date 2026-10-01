@@ -2,6 +2,7 @@ import { Agent, request } from 'node:http';
 import { kael } from '@dungeon-copilot/rules/testing';
 import type { AiTextChunk, GameEvent, NpcRequest, NpcView } from '@dungeon-copilot/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDecider } from '../ai/decide';
 import { startFakeOllama, type FakeOllama } from '../ai/fake-ollama';
 import { createOllama, type Ai } from '../ai/ollama';
 import { buildApp } from '../app';
@@ -455,13 +456,23 @@ describe('hablar con un PNJ', () => {
   it('sin Ollama configurado, la web lo sabe y la IA responde 503', async () => {
     const { master, campaign } = await table();
     const npc = await createNpc(master, campaign.id);
-    expect((await master.get('/api/ai')).json()).toEqual({ enabled: true, model: 'fake' });
+    expect((await master.get('/api/ai')).json()).toEqual({
+      enabled: true,
+      model: 'fake',
+      decisions: false,
+      decisionModel: null,
+    });
     expect((await t.anonymous().get('/api/ai')).statusCode).toBe(401);
 
     const withoutAi = await buildApp({ db: t.db, passwordParams: TEST_PASSWORD_PARAMS });
     try {
       const client = createClient(withoutAi, master.cookie);
-      expect((await client.get('/api/ai')).json()).toEqual({ enabled: false, model: null });
+      expect((await client.get('/api/ai')).json()).toEqual({
+        enabled: false,
+        model: null,
+        decisions: false,
+        decisionModel: null,
+      });
       const talk = await client.post(`/api/npcs/${npc.id}/talk`, { input: 'Hola' });
       expect(talk.statusCode).toBe(503);
       expect(talk.json().error).toContain('OLLAMA_URL');
@@ -471,6 +482,29 @@ describe('hablar con un PNJ', () => {
       expect((await client.get(`/api/npcs/${npc.id}`)).statusCode).toBe(200);
     } finally {
       await withoutAi.close();
+    }
+  });
+
+  it('con solo la IA que decide, la web lo sabe y la que escribe responde 503', async () => {
+    const { master, campaign } = await table();
+    const npc = await createNpc(master, campaign.id);
+    const onlyDecisions = await buildApp({
+      db: t.db,
+      passwordParams: TEST_PASSWORD_PARAMS,
+      decider: createDecider({ url: ollama.url, model: 'nimble' }),
+    });
+    try {
+      const client = createClient(onlyDecisions, master.cookie);
+      expect((await client.get('/api/ai')).json()).toEqual({
+        enabled: false,
+        model: null,
+        decisions: true,
+        decisionModel: 'nimble',
+      });
+      const talk = await client.post(`/api/npcs/${npc.id}/talk`, { input: 'Hola' });
+      expect(talk.statusCode).toBe(503);
+    } finally {
+      await onlyDecisions.close();
     }
   });
 });

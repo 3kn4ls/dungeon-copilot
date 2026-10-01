@@ -45,18 +45,19 @@ En producción, `pnpm build` y después `pnpm --filter @dungeon-copilot/server s
 
 El servidor se configura con variables de entorno:
 
-| Variable             | Por defecto   | Qué hace                                                                                                                |
-| -------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`       |               | PostgreSQL, por ejemplo `postgres://dungeon:clave@postgres:5432/dungeon`. Sin ella se usa PGlite                        |
-| `DATA_DIR`           | `data/pglite` | Carpeta de datos de PGlite, relativa a donde arranca el servidor                                                        |
-| `PORT`               | `3000`        | Puerto del servidor                                                                                                     |
-| `HOST`               | `0.0.0.0`     | Interfaz en la que escucha                                                                                              |
-| `ALLOW_REGISTRATION` | `true`        | Con `false` nadie puede crear cuentas nuevas                                                                            |
-| `COOKIE_SECURE`      | `auto`        | Con `auto`, la cookie de sesión es solo HTTPS cuando la petición llega por HTTPS (o con `X-Forwarded-Proto: https`)     |
-| `WEB_DIST`           | `../web/dist` | Web compilada que sirve el servidor. Si no existe, solo sirve la API                                                    |
-| `OLLAMA_URL`         |               | Dirección de Ollama, como `http://ollama:11434`, o `https://ollama.com` para sus modelos en la nube. Sin ella no hay IA |
-| `OLLAMA_MODEL`       |               | Modelo que usará la IA, como `qwen2.5:7b`. Obligatorio si hay `OLLAMA_URL`                                              |
-| `OLLAMA_API_KEY`     |               | Clave para los modelos en la nube de Ollama. Con un Ollama propio no hace falta                                         |
+| Variable                | Por defecto   | Qué hace                                                                                                                |
+| ----------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`          |               | PostgreSQL, por ejemplo `postgres://dungeon:clave@postgres:5432/dungeon`. Sin ella se usa PGlite                        |
+| `DATA_DIR`              | `data/pglite` | Carpeta de datos de PGlite, relativa a donde arranca el servidor                                                        |
+| `PORT`                  | `3000`        | Puerto del servidor                                                                                                     |
+| `HOST`                  | `0.0.0.0`     | Interfaz en la que escucha                                                                                              |
+| `ALLOW_REGISTRATION`    | `true`        | Con `false` nadie puede crear cuentas nuevas                                                                            |
+| `COOKIE_SECURE`         | `auto`        | Con `auto`, la cookie de sesión es solo HTTPS cuando la petición llega por HTTPS (o con `X-Forwarded-Proto: https`)     |
+| `WEB_DIST`              | `../web/dist` | Web compilada que sirve el servidor. Si no existe, solo sirve la API                                                    |
+| `OLLAMA_URL`            |               | Dirección de Ollama, como `http://ollama:11434`, o `https://ollama.com` para sus modelos en la nube. Sin ella no hay IA |
+| `OLLAMA_MODEL`          |               | Modelo que escribe, como `qwen2.5:7b`. Con `OLLAMA_URL` hace falta este, `OLLAMA_DECISION_MODEL` o los dos              |
+| `OLLAMA_DECISION_MODEL` |               | Modelo que sugiere decisiones al máster: `nimble`. Necesita Ollama 0.35 o posterior (ver [IA](#ia))                     |
+| `OLLAMA_API_KEY`        |               | Clave para los modelos en la nube de Ollama. Con un Ollama propio no hace falta                                         |
 
 ## IA
 
@@ -65,6 +66,14 @@ La IA es opcional: sin `OLLAMA_URL` todo funciona igual, pero el máster escribe
 Vale cualquier Ollama al que llegue el servidor: el del cluster, otro servidor con GPU o los modelos en la nube de Ollama (`OLLAMA_URL=https://ollama.com` y la clave en `OLLAMA_API_KEY`). El modelo tiene que estar descargado (`ollama pull qwen2.5:7b`); si no, la web lo dice con el comando para descargarlo. Un modelo pequeño en una máquina lenta puede tardar: cada petición espera como mucho 3 minutos, y 5 el resumen de una partida, que tiene que leerla entera.
 
 A Ollama le llega la ficha del PNJ, con lo que oculta, la descripción de la campaña, el nombre y trasfondo de los personajes, lo último que el máster ha enseñado a la mesa y los resúmenes de las tres últimas partidas. Para describir una escena le llega además lo que el máster apunta para ella, también lo que va entre corchetes; para las complicaciones, la tirada, aunque sea secreta, y lo que intentaba quien tiró, si el máster lo cuenta o lo escribió su jugador al intervenir; para las ideas, el nombre de los PNJ de la campaña y quién es cada uno (no lo que ocultan) y lo que busca el máster, si lo dice; para narrar un golpe, la tirada, quién ataca a quién, el equipo de los personajes y el daño que ha causado; para lo que hacen los enemigos, cómo va cada uno que pelea (heridas y equipo de los personajes, cuántos enemigos quedan) y, de un PNJ de la campaña, su concepto, su carácter y lo que quiere, no lo que oculta; y para el resumen, el registro de la partida, con lo que escriben los jugadores al intervenir y quién pelea en cada combate, y sin nada secreto: ni las tiradas secretas del máster ni lo que se dice en secreto con un jugador. Lo que el máster anota solo para él sale del servidor únicamente para escribir el resumen, y puede dejarlo fuera. La charla con el PNJ no se guarda en la base de datos: vive en el navegador del máster hasta que la borra o cierra la pestaña, y a la partida solo pasa la frase que enseña a la mesa. Tampoco se guarda lo que la IA propone (descripciones, complicaciones, ideas o el resumen) hasta que el máster lo enseña o lo acepta. Lo que escribe un jugador al intervenir solo llega a la IA si el máster lo pasa a la charla con un PNJ, en las complicaciones de la tirada que pidió para atenderlo y en el resumen, si no era en secreto.
+
+### Las sugerencias (Nimble)
+
+Con `OLLAMA_DECISION_MODEL=nimble`, el servidor usa además [Nimble](https://ollama.com/library/nimble), un modelo que no escribe: decide. Recibe un texto y unas preguntas, y de cada una devuelve la respuesta con su probabilidad. Lo usa para sugerir al máster, que es quien decide; no escribe nada en la partida, y sin él la web funciona igual. Habla con Ollama por su propio endpoint, `/v1/systemone`, que tiene desde la 0.35: con uno anterior, la web lo dice.
+
+- Se descarga con `ollama pull nimble` (9,5 GB). Puede ir solo, sin `OLLAMA_MODEL`, o junto al modelo que escribe en el mismo Ollama.
+- Los dos a la vez ocupan unos 15 GB. Si no caben en la memoria de la GPU, Ollama reparte con la CPU y va más lento; si tampoco caben en la de la máquina, o `OLLAMA_MAX_LOADED_MODELS` es 1, los alterna, y cada cambio tarda lo que tarde en cargarse.
+- Cada pregunta tarda poco con una GPU en la que quepa entero y alrededor de un segundo si no: en una de 8 GB, cerca de un minuto la primera vez, mientras se carga, y unos 7 s en sugerir una tirada. Nada espera a Nimble: si tarda, la web sigue sin la sugerencia.
 
 ## Desplegar
 
@@ -86,7 +95,7 @@ Se configura con las variables de [Configuración](#configuración), pasadas con
 
 En `deploy/k3s` están los manifiestos: el servidor, detrás del Traefik de k3s, y un PostgreSQL con sus datos en un volumen.
 
-1. En `deploy/k3s/kustomization.yaml`, cambia `rol.example.com` por la dirección de la web y pon la de tu Ollama con su modelo. Si Ollama está en el cluster, su dirección es `http://<servicio>.<namespace>.svc.cluster.local:11434` (`kubectl get svc -A | grep -i ollama` te dice cuál). Sin IA, borra esas dos líneas.
+1. En `deploy/k3s/kustomization.yaml`, cambia `rol.example.com` por la dirección de la web y pon la de tu Ollama con sus modelos. Si Ollama está en el cluster, su dirección es `http://<servicio>.<namespace>.svc.cluster.local:11434` (`kubectl get svc -A | grep -i ollama` te dice cuál). Sin IA, borra esas tres líneas; sin las sugerencias, la de `OLLAMA_DECISION_MODEL`.
 2. Una sola vez, crea el namespace y la contraseña de la base de datos:
 
    ```sh

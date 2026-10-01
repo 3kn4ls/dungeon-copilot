@@ -1,5 +1,4 @@
-import type { OllamaConfig } from '../config';
-import { HttpError } from '../http/errors';
+import { aiError, connectOllama, type ModelConfig, type OllamaCall } from './connection';
 
 /** Un mensaje de la conversación con el modelo. */
 export interface AiMessage {
@@ -46,127 +45,31 @@ interface OllamaChunk {
   error?: string;
 }
 
-type AbortReason = 'caller' | 'timeout' | 'closing' | null;
+export function createOllama(config: ModelConfig): Ai {
+  const connection = connectOllama({
+    ...config,
+    timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    modelVariable: 'OLLAMA_MODEL',
+  });
 
-interface Call {
-  response: Response;
-  /** Por qué se cortó: quien preguntó se fue, se agotó el tiempo o se apaga el servidor. */
-  abortReason(): AbortReason;
-  finish(): void;
-}
-
-const aiError = (status: number, message: string, cause?: unknown) =>
-  Object.assign(new HttpError(status, message), { cause });
-
-export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai {
-  const endpoint = `${config.url.replace(/\/+$/, '')}/api/chat`;
-  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const inFlight = new Set<AbortController>();
-
-  /** Traduce un fallo de la conexión a un error que entienda el máster. */
-  function connectionError(reason: AbortReason, cause: unknown): unknown {
-    switch (reason) {
-      case 'caller':
-        return cause;
-      case 'timeout':
-        return aiError(
-          504,
-          'Ollama ha tardado demasiado en responder. Puede que el modelo sea demasiado grande para su máquina.',
-          cause,
-        );
-      case 'closing':
-        return aiError(503, 'El servidor se está apagando', cause);
-      default:
-        return aiError(
-          502,
-          'No se pudo conectar con Ollama. Revisa que esté en marcha y la dirección de OLLAMA_URL.',
-          cause,
-        );
-    }
-  }
-
-  /** Un corte a mitad de respuesta: por un motivo conocido o porque se cayó la conexión. */
-  function interrupted(call: Call, cause: unknown): unknown {
-    const reason = call.abortReason();
-    return reason
-      ? connectionError(reason, cause)
-      : aiError(502, 'Se cortó la conexión con Ollama', cause);
-  }
-
-  async function responseError(response: Response): Promise<HttpError> {
-    const text = await response.text().catch(() => '');
-    let message = '';
-    try {
-      message = (JSON.parse(text) as OllamaChunk).error ?? '';
-    } catch {
-      // No es JSON: puede que OLLAMA_URL apunte a otra cosa.
-    }
-    if (response.status === 404 && /model/i.test(message)) {
-      return aiError(
-        502,
-        `Ollama no tiene el modelo «${config.model}». Descárgalo con «ollama pull ${config.model}» o cambia OLLAMA_MODEL.`,
-      );
-    }
-    if (response.status === 401 || response.status === 403) {
-      return aiError(502, 'Ollama no acepta la clave: revisa OLLAMA_API_KEY.');
-    }
-    if (!message) {
-      return aiError(
-        502,
-        `Ollama respondió con un error (${response.status}). Revisa que OLLAMA_URL sea la dirección de Ollama.`,
-      );
-    }
-    return aiError(502, `Ollama ha fallado: ${message}`);
-  }
-
-  async function start(request: AiRequest, stream: boolean): Promise<Call> {
-    const closing = new AbortController();
-    const timeout = AbortSignal.timeout(request.timeoutMs ?? timeoutMs);
-    const signals = [closing.signal, timeout];
-    if (request.signal) signals.push(request.signal);
-    inFlight.add(closing);
-    const finish = () => void inFlight.delete(closing);
-    // Si quien preguntó se va antes de leer la respuesta, nadie llegará a llamar a finish.
-    request.signal?.addEventListener('abort', finish, { once: true });
-    const abortReason = (): AbortReason => {
-      if (request.signal?.aborted) return 'caller';
-      if (closing.signal.aborted) return 'closing';
-      if (timeout.aborted) return 'timeout';
-      return null;
-    };
-
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`;
-    let response: Response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        signal: AbortSignal.any(signals),
-        body: JSON.stringify({
-          model: config.model,
-          messages: request.messages,
-          stream,
-          // Pensar antes de hablar solo hace esperar más al máster.
-          think: false,
-          ...(request.format ? { format: request.format } : {}),
-          options: {
-            num_ctx: CONTEXT_TOKENS,
-            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-            ...(request.maxTokens === undefined ? {} : { num_predict: request.maxTokens }),
-          },
-        }),
-      });
-    } catch (error) {
-      finish();
-      throw connectionError(abortReason(), error);
-    }
-    if (!response.ok) {
-      const error = await responseError(response);
-      finish();
-      throw error;
-    }
-    return { response, abortReason, finish };
+  function start(request: AiRequest, stream: boolean): Promise<OllamaCall> {
+    return connection.post(
+      '/api/chat',
+      {
+        model: config.model,
+        messages: request.messages,
+        stream,
+        // Pensar antes de hablar solo hace esperar más al máster.
+        think: false,
+        ...(request.format ? { format: request.format } : {}),
+        options: {
+          num_ctx: CONTEXT_TOKENS,
+          ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          ...(request.maxTokens === undefined ? {} : { num_predict: request.maxTokens }),
+        },
+      },
+      request,
+    );
   }
 
   function contentOf(line: string): { text: string; done: boolean } {
@@ -181,7 +84,7 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
   }
 
   /** Lee la respuesta de Ollama: un objeto JSON por línea con el siguiente trozo de texto. */
-  async function* read(call: Call): AsyncGenerator<string> {
+  async function* read(call: OllamaCall): AsyncGenerator<string> {
     const body = call.response.body;
     if (!body) {
       call.finish();
@@ -197,7 +100,7 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
         try {
           result = await reader.read();
         } catch (error) {
-          throw interrupted(call, error);
+          throw connection.interrupted(call, error);
         }
         if (result.done) {
           buffer += decoder.decode();
@@ -235,7 +138,7 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
         try {
           text = await call.response.text();
         } catch (error) {
-          throw interrupted(call, error);
+          throw connection.interrupted(call, error);
         }
         return contentOf(text).text;
       } finally {
@@ -244,8 +147,7 @@ export function createOllama(config: OllamaConfig & { timeoutMs?: number }): Ai 
     },
 
     close() {
-      for (const controller of inFlight) controller.abort();
-      inFlight.clear();
+      connection.close();
     },
   };
 }

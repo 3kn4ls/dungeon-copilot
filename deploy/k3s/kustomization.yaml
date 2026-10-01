@@ -15,9 +15,12 @@ configMapGenerator:
   - name: dungeon-copilot
     literals:
       # Tu Ollama: el del cluster (servicio.namespace.svc.cluster.local:puerto), otro servidor
-      # o https://ollama.com. Sin estas dos líneas no hay IA y todo lo demás funciona igual.
+      # o https://ollama.com. Sin estas líneas no hay IA y todo lo demás funciona igual.
       - OLLAMA_URL=http://ollama.ollama.svc.cluster.local:11434
+      # El modelo que escribe: los PNJ, las escenas, las ideas.
       - OLLAMA_MODEL=qwen2.5:7b
+      # El que sugiere decisiones al máster (Ollama 0.35 o posterior, «ollama pull nimble»).
+      - OLLAMA_DECISION_MODEL=nimble
       # Con false nadie puede crear cuentas nuevas.
       - ALLOW_REGISTRATION=true
 

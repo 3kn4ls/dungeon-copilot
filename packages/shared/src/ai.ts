@@ -1,7 +1,12 @@
-/** Si el servidor tiene IA (Ollama) y con qué modelo. */
+/**
+ * Si el servidor tiene IA (Ollama) y con qué modelos: el que escribe (`enabled`) y el que sugiere
+ * decisiones al máster (`decisions`, Nimble). Puede tener los dos, uno o ninguno.
+ */
 export interface AiStatus {
   enabled: boolean;
   model: string | null;
+  decisions: boolean;
+  decisionModel: string | null;
 }
 
 /**

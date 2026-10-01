@@ -1,9 +1,11 @@
+import { createDecider } from './ai/decide';
 import { createOllama } from './ai/ollama';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { openDatabase } from './db';
 
 const config = loadConfig();
+const { ollama } = config;
 // Hasta que exista el servidor, con su registro, los avisos de la base de datos van a la consola.
 let warnIdleError = (error: Error) => console.warn(error);
 const database = await openDatabase({
@@ -18,7 +20,8 @@ const app = await buildApp({
   cookieSecure: config.cookieSecure,
   allowRegistration: config.allowRegistration,
   webDist: config.webDist,
-  ai: config.ollama ? createOllama(config.ollama) : null,
+  ai: ollama?.model ? createOllama({ ...ollama, model: ollama.model }) : null,
+  decider: ollama?.decisionModel ? createDecider({ ...ollama, model: ollama.decisionModel }) : null,
 });
 app.addHook('onClose', () => database.close());
 warnIdleError = (error) =>
@@ -34,9 +37,14 @@ app.log.info(
 );
 if (!config.webDist) app.log.info('No hay web compilada: solo se sirve la API');
 app.log.info(
-  config.ollama
-    ? `IA: modelo ${config.ollama.model} en ${config.ollama.url}`
+  ollama?.model
+    ? `IA: modelo ${ollama.model} en ${ollama.url}`
     : 'IA desactivada: para los PNJ con IA, pon OLLAMA_URL y OLLAMA_MODEL',
+);
+app.log.info(
+  ollama?.decisionModel
+    ? `Sugerencias de la IA: modelo ${ollama.decisionModel} en ${ollama.url}`
+    : 'Sugerencias de la IA desactivadas: para ellas, pon OLLAMA_URL y OLLAMA_DECISION_MODEL (Nimble)',
 );
 
 // Cierra la base de datos con calma al parar (Ctrl+C, o k3s al reiniciar el pod).
