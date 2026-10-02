@@ -6,6 +6,7 @@ export * from './characters';
 export * from './combat';
 export * from './decisions';
 export * from './games';
+export * from './maps';
 export * from './npcs';
 export * from './rolls';
 export * from './scenes';

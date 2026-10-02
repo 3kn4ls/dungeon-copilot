@@ -465,14 +465,16 @@ export function damageText(event: GameEventPayload & { kind: 'damage' }): string
 /** Una línea del registro, con lo que importa para el resumen por si hay que recortar. */
 function logLine(event: GameEventPayload): { text: string; weight: number } | null {
   switch (event.kind) {
-    // Quién tiene la palabra, qué tirada se pide o de quién es el turno no es la historia: lo es
-    // lo que pasa después.
+    // Quién tiene la palabra, qué tirada se pide, de quién es el turno o dónde está cada uno en
+    // el mapa no es la historia: lo es lo que pasa después.
     case 'opened':
     case 'closed':
     case 'floor':
     case 'rollRequest':
     case 'settled':
     case 'turn':
+    case 'map':
+    case 'token':
       return null;
     case 'intervention': {
       const text = fit(event.text, LOG_LINE_CHARS);

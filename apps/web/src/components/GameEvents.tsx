@@ -376,6 +376,19 @@ export function EventCard({
     case 'settled':
       // Solo cambia cómo se ven la intervención o la tirada pedida que cierra.
       return null;
+    case 'map':
+      return line(
+        event.map ? (
+          <>
+            El máster pone el mapa <strong>{event.map.name}</strong>.
+          </>
+        ) : (
+          'El máster quita el mapa.'
+        ),
+      );
+    case 'token':
+      // Dónde está cada uno se ve en el mapa, no en el registro.
+      return null;
     case 'combatStarted':
       return (
         <article className="feed-item feed-combat">
