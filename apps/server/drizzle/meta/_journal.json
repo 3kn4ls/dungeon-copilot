@@ -43,6 +43,13 @@
       "when": 1790796872883,
       "tag": "0005_equipo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790979643955,
+      "tag": "0006_mapas",
+      "breakpoints": true
     }
   ]
 }
