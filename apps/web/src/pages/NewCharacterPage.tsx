@@ -18,15 +18,23 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { GearEditor, GearSummary } from '../components/Gear';
+import { Icon } from '../components/Icon';
 import { ErrorNote, QueryState, Stepper, useDocumentTitle } from '../components/ui';
 import { keys, useCampaign, useStoreCharacter } from '../queries';
 import { requirementText, signed, sum } from '../rules-text';
 
 const START: Attributes = { strength: 2, dexterity: 2, charisma: 2, intelligence: 2, endurance: 2 };
 
+const STEPS = ['Quién es', 'Atributos', 'Habilidades', 'Técnica y equipo'] as const;
+
+/**
+ * Crear un personaje en cuatro pasos, con el reparto del reglamento: lo que falta o sobra se ve
+ * en cada paso y en el resumen, que deja crearlo en cuanto todo cuadra.
+ */
 export function NewCharacterPage() {
   const { campaignId = '' } = useParams();
   const campaign = useCampaign(campaignId);
+  const [step, setStep] = useState(0);
   const [name, setName] = useState('');
   const [background, setBackground] = useState('');
   const [attributes, setAttributes] = useState<Attributes>(START);
@@ -51,6 +59,8 @@ export function NewCharacterPage() {
     ...(build.name ? [] : ['Ponle un nombre']),
     ...validateNewCharacter(build).map((issue) => issue.message),
   ];
+  // Un paso está listo cuando lo suyo cuadra; la técnica es opcional.
+  const ready = [build.name !== '', pointsLeft === 0, ranksLeft === 0, problems.length === 0];
   const chosenAdvanced = advanced ? defaultSkillCatalog.get(advanced) : undefined;
 
   const create = useMutation({
@@ -67,120 +77,158 @@ export function NewCharacterPage() {
   return (
     <>
       <header className="masthead">
-        <Link to={`/campanas/${campaignId}`} className="eyebrow back">
+        <Link to={`/campanas/${campaignId}/personajes`} className="eyebrow back">
           ← {campaign.data.name}
         </Link>
         <h1>Nuevo personaje</h1>
-        <p className="lede">
-          Reparte {CREATION.attributePoints} puntos entre los atributos (máximo{' '}
-          {CREATION.attributeMaxAtCreation}), {CREATION.skillRanks} rangos entre las habilidades
-          básicas (máximo {CREATION.skillRankMaxAtCreation}) y, si cumples sus requisitos, elige{' '}
-          {CREATION.advancedSkills} habilidad avanzada.
-        </p>
       </header>
 
-      <div className="creation">
-        <div className="stack">
-          <section className="panel" aria-labelledby="identity-heading">
-            <h2 id="identity-heading">Quién es</h2>
-            <label className="field">
-              <span className="field-label">Nombre</span>
-              <input
-                required
-                maxLength={80}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Trasfondo</span>
-              <input
-                maxLength={200}
-                placeholder="Mercenaria de la Compañía Libre"
-                value={background}
-                onChange={(e) => setBackground(e.target.value)}
-              />
-              <span className="hint">
-                Una frase. Cuando encaje con lo que intentas, el máster te da ventaja.
+      <ol className="steps" aria-label="Pasos">
+        {STEPS.map((title, index) => (
+          <li key={title}>
+            <button
+              type="button"
+              aria-current={index === step ? 'step' : undefined}
+              className={ready[index] ? 'done' : undefined}
+              onClick={() => setStep(index)}
+            >
+              <span className="step-mark" aria-hidden="true">
+                {ready[index] ? <Icon name="check" size={16} /> : index + 1}
               </span>
-            </label>
-          </section>
+              {title}
+            </button>
+          </li>
+        ))}
+      </ol>
 
-          <section className="panel" aria-labelledby="gear-heading">
-            <h2 id="gear-heading">Qué lleva</h2>
-            <p className="muted">
-              Con esto se preparan sus ataques, sus defensas y el daño que hace y recibe. Se puede
-              cambiar después en su ficha.
-            </p>
-            <GearEditor value={gear} onChange={setGear} />
-          </section>
+      <div className="creation">
+        <section className="panel" aria-label={STEPS[step]}>
+          {step === 0 && (
+            <div className="stack">
+              <label className="field">
+                <span className="field-label">Nombre</span>
+                <input
+                  required
+                  maxLength={80}
+                  value={name}
+                  placeholder="Kael"
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Trasfondo</span>
+                <input
+                  maxLength={200}
+                  placeholder="Mercenario de la Compañía Libre"
+                  value={background}
+                  onChange={(e) => setBackground(e.target.value)}
+                />
+                <span className="hint">
+                  De dónde viene, en una frase. Cuando encaje con lo que intenta, el máster le da
+                  ventaja.
+                </span>
+              </label>
+            </div>
+          )}
 
-          <div className="creation-counter" aria-hidden="true">
-            <span className={pointsLeft === 0 ? undefined : 'pending'}>
-              Atributos: {pointsLeft === 0 ? 'repartidos' : `quedan ${pointsLeft}`}
-            </span>
-            <span className={ranksLeft === 0 ? undefined : 'pending'}>
-              Rangos: {ranksLeft === 0 ? 'repartidos' : `quedan ${ranksLeft}`}
-            </span>
-          </div>
+          {step === 1 && (
+            <div className="stack tight">
+              <p className={pointsLeft === 0 ? 'points done' : 'points'}>
+                <strong className="num">{pointsLeft}</strong> de {CREATION.attributePoints} puntos
+                por repartir · de {ATTRIBUTE_MIN} a {CREATION.attributeMaxAtCreation} en cada uno
+              </p>
+              <ul className="allocation">
+                {ATTRIBUTES.map((attribute) => {
+                  const info = ATTRIBUTE_INFO[attribute];
+                  const value = attributes[attribute];
+                  return (
+                    <li key={attribute}>
+                      <span>
+                        <span className="skill-name">
+                          {info.label} <span className="abbr">{info.abbreviation}</span>
+                        </span>
+                        <span className="hint">{info.description}</span>
+                      </span>
+                      <Stepper
+                        label={info.label}
+                        hideLabel
+                        value={value}
+                        min={ATTRIBUTE_MIN}
+                        max={Math.min(
+                          CREATION.attributeMaxAtCreation,
+                          value + Math.max(0, pointsLeft),
+                        )}
+                        onChange={(next) => setAttributes({ ...attributes, [attribute]: next })}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
-          <div className="attribute-grid">
-            {ATTRIBUTES.map((attribute) => {
-              const info = ATTRIBUTE_INFO[attribute];
-              const value = attributes[attribute];
-              const { basic, advanced: advancedSkills } =
-                defaultSkillCatalog.byAttribute(attribute);
-              return (
-                <section key={attribute} className="panel attribute-card" aria-label={info.label}>
-                  <div className="attribute-head">
-                    <div>
-                      <h2>
-                        {info.label} <span className="abbr">{info.abbreviation}</span>
-                      </h2>
-                      <p className="hint">{info.description}</p>
-                    </div>
-                    <Stepper
-                      label={info.label}
-                      hideLabel
-                      value={value}
-                      min={ATTRIBUTE_MIN}
-                      max={Math.min(
-                        CREATION.attributeMaxAtCreation,
-                        value + Math.max(0, pointsLeft),
-                      )}
-                      onChange={(next) => setAttributes({ ...attributes, [attribute]: next })}
-                    />
-                  </div>
+          {step === 2 && (
+            <div className="stack tight">
+              <p className={ranksLeft === 0 ? 'points done' : 'points'}>
+                <strong className="num">{ranksLeft}</strong> de {CREATION.skillRanks} rangos por
+                repartir · como mucho {CREATION.skillRankMaxAtCreation} en cada habilidad
+              </p>
+              <div className="allocation-groups">
+                {ATTRIBUTES.map((attribute) => {
+                  const info = ATTRIBUTE_INFO[attribute];
+                  const value = attributes[attribute];
+                  return (
+                    <section key={attribute} aria-label={info.label}>
+                      <h3>
+                        {info.label} <span className="num">{value}</span>
+                      </h3>
+                      <ul className="allocation">
+                        {defaultSkillCatalog.byAttribute(attribute).basic.map((skill) => {
+                          const rank = skills[skill.id] ?? 0;
+                          return (
+                            <li key={skill.id}>
+                              <span>
+                                <span className="skill-name">{skill.name}</span>
+                                <span className="hint">
+                                  {SKILL_RANK_LABELS[rank]} · tira con {signed(value + rank)}
+                                </span>
+                              </span>
+                              <RankControl
+                                label={skill.name}
+                                value={rank}
+                                max={Math.min(
+                                  CREATION.skillRankMaxAtCreation,
+                                  rank + Math.max(0, ranksLeft),
+                                )}
+                                onChange={(next) => setSkills({ ...skills, [skill.id]: next })}
+                              />
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-                  <ul className="skill-list">
-                    {basic.map((skill) => {
-                      const rank = skills[skill.id] ?? 0;
-                      return (
-                        <li key={skill.id} className="skill-row">
-                          <span>
-                            <span className="skill-name">{skill.name}</span>
-                            <span className="hint">
-                              {SKILL_RANK_LABELS[rank]} · tirada {signed(value + rank)}
-                            </span>
-                          </span>
-                          <RankControl
-                            label={skill.name}
-                            value={rank}
-                            max={Math.min(
-                              CREATION.skillRankMaxAtCreation,
-                              rank + Math.max(0, ranksLeft),
-                            )}
-                            onChange={(next) => setSkills({ ...skills, [skill.id]: next })}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
-
-                  <fieldset className="advanced-list">
-                    <legend className="field-label">Avanzadas</legend>
-                    {advancedSkills.map((skill) => {
-                      const unmet = unmetRequirements(skill, build, defaultSkillCatalog);
+          {step === 3 && (
+            <div className="stack">
+              <fieldset className="advanced-list">
+                <legend className="field-label">
+                  Una técnica, si cumple sus requisitos (opcional)
+                </legend>
+                <div className="technique-options">
+                  {/* Primero las que ya cumple; las demás, con lo que les falta. */}
+                  {defaultSkillCatalog.skills
+                    .filter((skill) => skill.tier === 'advanced')
+                    .map((skill) => ({
+                      skill,
+                      unmet: unmetRequirements(skill, build, defaultSkillCatalog),
+                    }))
+                    .sort((a, b) => Number(a.unmet.length > 0) - Number(b.unmet.length > 0))
+                    .map(({ skill, unmet }) => {
                       const chosen = advanced === skill.id;
                       return (
                         <label
@@ -204,42 +252,66 @@ export function NewCharacterPage() {
                         </label>
                       );
                     })}
-                  </fieldset>
-                </section>
-              );
-            })}
+                </div>
+                {advanced && (
+                  <button type="button" className="link-button" onClick={() => setAdvanced(null)}>
+                    Sin técnica
+                  </button>
+                )}
+              </fieldset>
+              <section className="stack tight" aria-labelledby="gear-heading">
+                <h3 id="gear-heading">Qué lleva</h3>
+                <p className="hint">
+                  Con esto se preparan sus ataques, sus defensas y el daño que hace y recibe. Se
+                  puede cambiar después en su ficha.
+                </p>
+                <GearEditor value={gear} onChange={setGear} />
+              </section>
+            </div>
+          )}
+
+          <div className="wizard-nav">
+            {step > 0 && (
+              <button type="button" className="button" onClick={() => setStep(step - 1)}>
+                Atrás
+              </button>
+            )}
+            {step < STEPS.length - 1 && (
+              <button type="button" className="button primary" onClick={() => setStep(step + 1)}>
+                Siguiente: {STEPS[step + 1]}
+              </button>
+            )}
           </div>
-        </div>
+        </section>
 
         <aside className="panel summary" aria-labelledby="summary-heading">
+          <p className="eyebrow">Así queda</p>
           <h2 id="summary-heading">{build.name || 'Tu personaje'}</h2>
+          {build.background && <p className="muted">{build.background}</p>}
+          <dl className="attribute-row">
+            {ATTRIBUTES.map((attribute) => (
+              <div key={attribute}>
+                <dt>
+                  <abbr title={ATTRIBUTE_INFO[attribute].label}>
+                    {ATTRIBUTE_INFO[attribute].abbreviation}
+                  </abbr>
+                </dt>
+                <dd>{attributes[attribute]}</dd>
+              </div>
+            ))}
+          </dl>
           <dl className="tally">
             <div>
-              <dt>Puntos de atributo</dt>
-              <dd className={pointsLeft === 0 ? 'num' : 'num pending'}>
-                {pointsLeft === 0 ? 'Repartidos' : `Quedan ${pointsLeft}`}
-              </dd>
-            </div>
-            <div>
-              <dt>Rangos de habilidad</dt>
-              <dd className={ranksLeft === 0 ? 'num' : 'num pending'}>
-                {ranksLeft === 0 ? 'Repartidos' : `Quedan ${ranksLeft}`}
-              </dd>
-            </div>
-            <div>
-              <dt>Habilidad avanzada</dt>
+              <dt>Habilidades</dt>
               <dd>
-                {chosenAdvanced ? (
-                  <>
-                    {chosenAdvanced.name}{' '}
-                    <button type="button" className="link-button" onClick={() => setAdvanced(null)}>
-                      quitar
-                    </button>
-                  </>
-                ) : (
-                  <span className="muted">Ninguna todavía</span>
-                )}
+                {Object.entries(build.skills)
+                  .map(([id, rank]) => `${defaultSkillCatalog.get(id)?.name ?? id} ${rank}`)
+                  .join(', ') || <span className="muted">Ninguna todavía</span>}
               </dd>
+            </div>
+            <div>
+              <dt>Técnica</dt>
+              <dd>{chosenAdvanced?.name ?? <span className="muted">Ninguna</span>}</dd>
             </div>
             <div>
               <dt>Rasguños que aguanta</dt>

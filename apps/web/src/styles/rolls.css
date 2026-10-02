@@ -44,16 +44,32 @@
 }
 
 /* Probabilidades: las cinco bandas, de pifia a crítico, en una sola barra a escala. */
-.odds-summary {
-  margin: 0;
-  color: var(--muted);
+.odds {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
-.odds-summary strong {
+/* Cada resultado con su probabilidad, del mejor al peor. */
+.odds-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.odds-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.odds-legend strong {
   color: var(--ink);
-  font-family: var(--display);
-  font-size: 30px;
-  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .odds-bar {
@@ -71,7 +87,6 @@
   transition: flex-grow 0.2s ease;
 }
 
-.odds-list,
 .history {
   list-style: none;
   margin: 0;
@@ -81,15 +96,10 @@
   font-size: 15px;
 }
 
-.odds-list li,
 .history li {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.odds-list .num {
-  margin-left: auto;
 }
 
 .swatch {
@@ -258,4 +268,54 @@
     transform: rotate(-90deg) scale(0.6);
     opacity: 0;
   }
+}
+
+/* El tirador: el compositor a la izquierda, el resultado a la derecha. */
+.roller {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .roller {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Preparar una tirada: quién, con qué, contra qué y con qué ventaja; abajo, la probabilidad. */
+.composer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 16px 20px;
+  align-items: start;
+}
+
+.composer-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.composer-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.composer-summary {
+  display: grid;
+  flex: 1 1 320px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-summary p {
+  margin: 0;
+}
+
+.composer-summary strong {
+  font-size: 18px;
 }
