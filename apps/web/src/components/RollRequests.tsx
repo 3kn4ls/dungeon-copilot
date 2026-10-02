@@ -5,6 +5,7 @@ import { api } from '../api';
 import { useCharacters, useMe, useStoreGameEvent } from '../queries';
 import { percent, rollOdds } from '../rolling';
 import { requestedText } from './GameEvents';
+import { OddsBar } from './Odds';
 import { ErrorNote } from './ui';
 
 /** Hacer una tirada pedida: la hace su jugador o, si hace falta, el máster por él. */
@@ -40,6 +41,8 @@ export function RequestedRollCard({
         {event.visibility === 'private' && <span className="badge secret">En secreto</span>}
       </p>
       <p>{requestedText(event)}</p>
+      {/* En una defensa, la barra sería la de quien ataca: solo se dice la probabilidad. */}
+      {odds && !defending && <OddsBar odds={odds} />}
       <div className="roll-bar">
         <p className="bonus">
           {odds ? (

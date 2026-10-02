@@ -94,7 +94,7 @@ export function CombatOrder({
             {sheet && sheet.wounds.severity !== 'none' && (
               <span className="badge">{SEVERITY_LABELS[sheet.wounds.severity]}</span>
             )}
-            {current && <span className="badge live">Su turno</span>}
+            {current && <span className="badge turn">Su turno</span>}
             {actions?.(combatant)}
           </li>
         );
