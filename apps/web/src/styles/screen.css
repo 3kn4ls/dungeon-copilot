@@ -162,75 +162,10 @@
   font-size: clamp(18px, 2vw, 32px);
 }
 
-/* Quién tiene la palabra, quién la pide y qué tiradas faltan. */
-.screen-table {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 32px;
-  padding: 12px 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: clamp(16px, 1.6vw, 26px);
-}
-
-.screen-table p {
-  margin: 0;
-}
-
-.screen-table strong,
-.screen-floor {
-  color: var(--ember);
-}
-
-.screen-floor {
-  font-family: var(--display);
-  font-size: clamp(20px, 2.2vw, 36px);
-  font-weight: 800;
-}
-
-/* El orden de iniciativa, con quien tiene el turno destacado. */
-.screen-combat {
-  display: grid;
-  flex-basis: 100%;
-  gap: 8px;
-}
-
-.screen-order {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.screen-order li {
-  padding: 4px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-
-.screen-order li.current {
-  border-color: var(--ember);
-  background: var(--ember-soft);
-  color: var(--ember);
-  font-weight: 700;
-}
-
-.screen-initiative {
-  font-variant-numeric: lining-nums tabular-nums;
-  opacity: 0.7;
-}
-
 /* Cómo van los enemigos, el último golpe y la escena. */
 .screen-harm {
-  margin-left: 8px;
+  color: var(--muted);
   font-size: 0.8em;
-  opacity: 0.8;
 }
 
 .screen-blow {
@@ -244,4 +179,93 @@
   font-family: var(--caps);
   font-size: 0.85em;
   letter-spacing: 0.08em;
+}
+
+/* La columna de la derecha: el combate, lo que pasa en la mesa y las últimas tiradas. */
+.screen-side {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.screen-combat {
+  display: grid;
+  gap: 10px;
+}
+
+/* El orden de iniciativa, con quien tiene el turno en ámbar. */
+.screen-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.screen-order li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  font-size: clamp(16px, 1.6vw, 22px);
+}
+
+.screen-order li.current {
+  border-color: var(--ember);
+  background: var(--ember-soft);
+  box-shadow: 0 0 0 1px var(--ember);
+}
+
+.screen-order .avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+
+.screen-who {
+  display: grid;
+  line-height: 1.2;
+}
+
+.screen-initiative {
+  color: var(--ink-2);
+  font-family: var(--display);
+  font-size: 1.3em;
+  font-weight: 800;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* Quién tiene la palabra, quién la pide y qué tiradas faltan. */
+.screen-table {
+  display: grid;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: clamp(16px, 1.5vw, 22px);
+}
+
+.screen-table p {
+  margin: 0;
+}
+
+.screen-table strong {
+  color: var(--ink);
+}
+
+.screen-floor {
+  color: var(--ember);
+  font-family: var(--display);
+  font-size: clamp(20px, 2.2vw, 32px);
+  font-weight: 800;
+}
+
+.screen-asked {
+  color: var(--ember);
 }

@@ -1,11 +1,9 @@
 import {
-  ARMOR_CLASSES,
   ATTRIBUTES,
   ATTRIBUTE_INFO,
   DIFFICULTIES,
   DIFFICULTY_LABELS,
   EDGE_LABELS,
-  LUCK_PER_SESSION,
   NPC_PROFILES,
   SEVERITY_LABELS,
   SITUATION_LABELS,
@@ -16,7 +14,6 @@ import {
   rangedDifficulty,
   successChance,
   testOdds,
-  weaponLabel,
   type DifficultyLevel,
   type Edge,
   type Range,
@@ -99,6 +96,7 @@ import {
 } from '../components/RollRequests';
 import { LimitedAbilities, SceneControl, SceneLine } from '../components/Scenes';
 import { ScreenLink } from '../components/ScreenLink';
+import { LuckPips, MiniSheet, WoundsMini, gearLine } from '../components/Sheet';
 import {
   ConfirmButton,
   ErrorNote,
@@ -355,11 +353,11 @@ export function GamePage() {
         scene={scene}
         waiting={0}
       />
-      <div className="room">
-        <div className="room-actions">
-          {isOpen ? (
-            <PlayerDesk state={state.data} settled={settled} />
-          ) : (
+      {isOpen ? (
+        <PlayerDesk state={state.data} settled={settled} feed={feed} />
+      ) : (
+        <div className="room">
+          <div className="room-actions">
             <>
               <section className="panel">
                 <h2>Partida terminada</h2>
@@ -374,22 +372,22 @@ export function GamePage() {
               </section>
               <RecapPanel game={game} />
             </>
-          )}
+          </div>
+          <div className="room-feed">{feed}</div>
+          <div className="room-extras">
+            <TableCharacters
+              game={game}
+              combat={isOpen ? combat : null}
+              floor={floor}
+              spent={spent}
+              master={false}
+            />
+            {isMaster && game.screenToken && (
+              <ScreenLink campaignId={game.campaignId} token={game.screenToken} />
+            )}
+          </div>
         </div>
-        <div className="room-feed">{feed}</div>
-        <div className="room-extras">
-          <TableCharacters
-            game={game}
-            combat={isOpen ? combat : null}
-            floor={floor}
-            spent={spent}
-            master={false}
-          />
-          {isMaster && game.screenToken && (
-            <ScreenLink campaignId={game.campaignId} token={game.screenToken} />
-          )}
-        </div>
-      </div>
+      )}
     </>
   );
 }
@@ -523,21 +521,46 @@ function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaig
   void queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
 }
 
+type PlayerTab = 'table' | 'sheet' | 'log';
+
+const PLAYER_TABS: [PlayerTab, string][] = [
+  ['table', 'Mesa'],
+  ['sheet', 'Ficha'],
+  ['log', 'Registro'],
+];
+
+/** Si la pantalla es ancha: la sala del jugador enseña entonces todo a la vez. */
+function useWide(query = '(min-width: 1000px)') {
+  const [wide, setWide] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setWide(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [query]);
+  return wide;
+}
+
 /**
- * La sala del jugador: quién tiene la palabra (en combate, el orden y de quién es el turno), las
- * tiradas que le pide el máster y sus botones para intervenir. Debajo, por si hace falta, su
- * formulario para tirar por su cuenta.
+ * La sala del jugador, pensada para el móvil: en pestañas, la mesa (quién tiene la palabra o el
+ * turno, las tiradas que le piden, sus botones para intervenir, sus técnicas y lo último que ha
+ * enseñado el máster), su ficha y el registro. En una pantalla ancha, todo a la vista en dos
+ * columnas. Arriba, si le toca, «¡Te toca!» y por qué.
  */
 function PlayerDesk({
   state,
   settled,
+  feed,
 }: {
   state: GameState;
   settled: ReadonlyMap<number, SettledHow>;
+  feed: ReactNode;
 }) {
   const { game, events } = state;
   const { data: me } = useMe();
   const characters = useCharacters(game.campaignId);
+  const [tab, setTab] = useState<PlayerTab>('table');
+  const wide = useWide();
   const all = characters.data ?? [];
   const mine = all.filter((character) => character.ownerId === me?.user?.id);
   const ids = mine.map((character) => character.id);
@@ -545,14 +568,28 @@ function PlayerDesk({
   const combat = currentCombat(events);
   const current = combat ? turnOf(combat) : undefined;
   const asked = pendingRollRequests(events).filter((event) => ids.includes(event.characterId));
+  const spent = spentAbilities(events);
+  // Lo último que ha enseñado el máster a la mesa o, en secreto, a uno de sus personajes.
+  const reveal = events.findLast((event) => event.kind === 'reveal');
 
-  return (
-    <>
+  let why: string | null = null;
+  if (asked.length > 0) {
+    why =
+      asked.length === 1
+        ? 'El máster te pide una tirada.'
+        : `El máster te pide ${asked.length} tiradas.`;
+  } else if (current?.kind === 'character' && ids.includes(current.id)) {
+    why = `Es el turno de ${current.name}: di qué hace.`;
+  } else if (floor.kind === 'character' && ids.includes(floor.characterId)) {
+    why = `Tienes la palabra: ${floor.name}.`;
+  } else if (floor.kind === 'table' && mine.length > 0) {
+    why = 'La palabra es de la mesa: ¿qué hacéis?';
+  }
+
+  const table = (
+    <div className="player-pane pane-table">
       {(mine.length > 0 || combat) && (
-        <section
-          className={holdsFloor(floor, ids) || asked.length > 0 ? 'panel your-turn' : 'panel'}
-          aria-labelledby="floor-heading"
-        >
+        <section className="panel" aria-labelledby="floor-heading">
           <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
           <SceneLine events={events} />
           {combat ? (
@@ -580,14 +617,80 @@ function PlayerDesk({
           <LimitedAbilities
             game={game}
             characters={mine}
-            spent={spentAbilities(events)}
+            spent={spent}
             canUse
             named={mine.length > 1}
           />
         </section>
       )}
-      <RollForm game={game} />
-    </>
+      {reveal?.kind === 'reveal' && (
+        <section className="panel last-reveal" aria-label="Lo último que ha enseñado el máster">
+          <p className="eyebrow">
+            {reveal.visibility === 'private'
+              ? 'Solo para ti'
+              : 'Lo último que ha enseñado el máster'}
+          </p>
+          {reveal.title && <h2>{reveal.title}</h2>}
+          <p className="prewrap">{reveal.body}</p>
+        </section>
+      )}
+      <details className="panel own-roll">
+        <summary>
+          <h2>Tirar por tu cuenta</h2>
+        </summary>
+        <RollForm game={game} embedded />
+      </details>
+      <TableCharacters game={game} combat={combat} floor={floor} spent={spent} master={false} />
+    </div>
+  );
+  const sheet = (
+    <div className="player-pane pane-sheet">
+      {mine.length > 0 ? (
+        mine.map((character) => <MiniSheet key={character.id} character={character} />)
+      ) : (
+        <section className="panel">
+          <p className="muted">No tienes personaje en esta campaña.</p>
+          <Link to={`/campanas/${game.campaignId}/personajes/nuevo`} className="button primary">
+            Crear personaje
+          </Link>
+        </section>
+      )}
+    </div>
+  );
+  const log = <div className="player-pane pane-log">{feed}</div>;
+
+  return (
+    <div className={wide ? 'player-room wide' : 'player-room'}>
+      {why && (
+        <p className="turn-banner" role="status">
+          <strong>¡Te toca!</strong> {why}
+        </p>
+      )}
+      {wide ? (
+        <>
+          {table}
+          {sheet}
+          {log}
+        </>
+      ) : (
+        <>
+          <div className="player-tabs" role="group" aria-label="Qué ver">
+            {PLAYER_TABS.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={tab === value}
+                onClick={() => setTab(value)}
+              >
+                {label}
+                {value === 'table' && why && <span className="count">!</span>}
+              </button>
+            ))}
+          </div>
+          {tab === 'table' ? table : tab === 'sheet' ? sheet : log}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1792,37 +1895,10 @@ function TableCharacters(props: {
                     {speaking && ' · tiene la palabra'}
                   </span>
                 </span>
-                <span
-                  className="pips small"
-                  role="img"
-                  aria-label={`Suerte: ${character.luck} de ${LUCK_PER_SESSION}`}
-                >
-                  {Array.from({ length: LUCK_PER_SESSION }, (_, i) => (
-                    <i key={i} className={i < character.luck ? 'pip filled' : 'pip'} />
-                  ))}
-                </span>
+                <LuckPips luck={character.luck} />
               </div>
-              <div className="party-state">
-                <span
-                  className="mini-boxes"
-                  role="img"
-                  aria-label={`Rasguños: ${wounds.scratches} de ${wounds.scratchBoxes}`}
-                >
-                  {Array.from({ length: wounds.scratchBoxes }, (_, i) => (
-                    <i key={i} className={i < wounds.scratches ? 'marked' : undefined} />
-                  ))}
-                </span>
-                <span className={wounds.severity === 'none' ? 'severity' : 'severity hurt'}>
-                  {SEVERITY_LABELS[wounds.severity]}
-                </span>
-              </div>
-              <p className="party-gear">
-                {weaponLabel(gear.melee)}
-                {gear.ranged && ` · ${weaponLabel(gear.ranged)}`}
-                {gear.armor !== 'none' &&
-                  ` · armadura ${ARMOR_CLASSES[gear.armor].label.toLowerCase()}`}
-                {gear.shield && ' · escudo'}
-              </p>
+              <WoundsMini wounds={wounds} />
+              <p className="party-gear">{gearLine(gear)}</p>
             </li>
           );
         })}

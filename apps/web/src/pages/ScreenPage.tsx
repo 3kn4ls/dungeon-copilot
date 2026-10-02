@@ -5,6 +5,7 @@ import {
   currentFloor,
   currentScene,
   gameName,
+  groupLabel,
   pendingInterventions,
   pendingRollRequests,
   supersededRolls,
@@ -17,6 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { ApiError, api } from '../api';
+import { Avatar } from '../components/Avatar';
 import { harmText } from '../components/Combat';
 import { RollView, blowLine, blowResult, requestedText } from '../components/GameEvents';
 import { useDocumentTitle } from '../components/ui';
@@ -129,15 +131,20 @@ export function ScreenPage() {
       )
     : undefined;
 
+  const status =
+    playing && (floor.kind !== 'master' || hands.length > 0 || asked.length > 0) && !combat;
+
   return (
     <div className="screen">
       <header className="screen-header">
         <span className="screen-campaign">{campaignName}</span>
         {game && (
           <span>
-            {gameName(game)} · {GAME_STATUS_LABELS[game.status]}
+            {gameName(game)}
+            {game.status === 'closed' && ` · ${GAME_STATUS_LABELS[game.status]}`}
           </span>
         )}
+        {combat && <span className="badge turn">Combate · Ronda {combat.round}</span>}
         <span className={`live-status live-${live}`}>{LIVE_STATUS_LABELS[live]}</span>
         <FullscreenButton />
       </header>
@@ -146,61 +153,6 @@ export function ScreenPage() {
         <p className="screen-waiting">Esperando a que empiece la partida…</p>
       ) : (
         <main className="screen-main">
-          {playing &&
-            (combat || floor.kind !== 'master' || hands.length > 0 || asked.length > 0) && (
-              <section className="screen-table" aria-live="polite">
-                {combat && (
-                  <div className="screen-combat">
-                    <p className="screen-floor">Combate · Ronda {combat.round}</p>
-                    <ol className="screen-order" aria-label="Orden de iniciativa">
-                      {combat.order.map((combatant, index) => {
-                        const harm = combatant.kind === 'npc' && harmText(combat, combatant, false);
-                        return (
-                          <li
-                            key={combatant.id}
-                            className={index === combat.turn ? 'current' : undefined}
-                            aria-current={index === combat.turn ? 'step' : undefined}
-                          >
-                            {combatant.name}{' '}
-                            <span className="screen-initiative">{combatant.initiative.total}</span>
-                            {harm && <span className="screen-harm">{harm}</span>}
-                          </li>
-                        );
-                      })}
-                    </ol>
-                    {blow && (
-                      <p className="screen-blow">
-                        {blowLine(blow)} {blowResult(blow, false)}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {floor.kind === 'table' && (
-                  <p className="screen-floor">¿Qué hacéis? La palabra es de la mesa</p>
-                )}
-                {!combat && floor.kind === 'character' && (
-                  <p className="screen-floor">
-                    Tiene la palabra <strong>{floor.name}</strong>
-                  </p>
-                )}
-                {hands.length > 0 && (
-                  <p>
-                    Piden la palabra:{' '}
-                    {hands
-                      .map(
-                        (hand) =>
-                          `${hand.name} (${INTERVENTION_LABELS[hand.intent].toLowerCase()})`,
-                      )
-                      .join(' · ')}
-                  </p>
-                )}
-                {asked.map((request) => (
-                  <p key={request.id}>
-                    Tira <strong>{request.name}</strong> · {requestedText(request)}
-                  </p>
-                ))}
-              </section>
-            )}
           <section className="screen-reveal" aria-live="polite">
             {scene && reveal && <p className="screen-scene">{scene.title}</p>}
             {scene && !reveal && <h1>{scene.title}</h1>}
@@ -235,20 +187,82 @@ export function ScreenPage() {
             )}
             {game.status === 'closed' && <p className="screen-banner">La partida ha terminado</p>}
           </section>
-          {rolls.length > 0 && (
-            <aside className="screen-rolls" aria-label="Últimas tiradas">
-              {rolls.map((event, index) =>
-                event.kind === 'roll' ? (
-                  <div
-                    key={event.id}
-                    className={index === 0 ? 'screen-roll latest' : 'screen-roll'}
-                  >
-                    <RollView roll={event.roll} big={index === 0} />
-                  </div>
-                ) : null,
-              )}
-            </aside>
-          )}
+
+          <aside className="screen-side" aria-live="polite">
+            {combat && (
+              <section className="screen-combat" aria-label="Orden de iniciativa">
+                <ol className="screen-order">
+                  {combat.order.map((combatant, index) => {
+                    const harm = combatant.kind === 'npc' && harmText(combat, combatant, false);
+                    return (
+                      <li
+                        key={combatant.id}
+                        className={index === combat.turn ? 'current' : undefined}
+                        aria-current={index === combat.turn ? 'step' : undefined}
+                      >
+                        <Avatar
+                          name={combatant.name}
+                          {...(combatant.kind === 'character' ? { id: combatant.id } : {})}
+                        />
+                        <span className="screen-who">
+                          <strong>{groupLabel(combatant)}</strong>
+                          {harm && <span className="screen-harm">{harm}</span>}
+                        </span>
+                        <span className="screen-initiative">{combatant.initiative.total}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {blow && (
+                  <p className="screen-blow">
+                    {blowLine(blow)} {blowResult(blow, false)}
+                  </p>
+                )}
+              </section>
+            )}
+            {(status || (combat && (hands.length > 0 || asked.length > 0))) && (
+              <section className="screen-table">
+                {!combat && floor.kind === 'table' && (
+                  <p className="screen-floor">¿Qué hacéis? La palabra es de la mesa</p>
+                )}
+                {!combat && floor.kind === 'character' && (
+                  <p className="screen-floor">
+                    Tiene la palabra <strong>{floor.name}</strong>
+                  </p>
+                )}
+                {hands.length > 0 && (
+                  <p>
+                    Piden la palabra:{' '}
+                    {hands
+                      .map(
+                        (hand) =>
+                          `${hand.name} (${INTERVENTION_LABELS[hand.intent].toLowerCase()})`,
+                      )
+                      .join(' · ')}
+                  </p>
+                )}
+                {asked.map((request) => (
+                  <p key={request.id} className="screen-asked">
+                    Tira <strong>{request.name}</strong> · {requestedText(request)}
+                  </p>
+                ))}
+              </section>
+            )}
+            {rolls.length > 0 && (
+              <div className="screen-rolls" aria-label="Últimas tiradas">
+                {rolls.map((event, index) =>
+                  event.kind === 'roll' ? (
+                    <div
+                      key={event.id}
+                      className={index === 0 ? 'screen-roll latest' : 'screen-roll'}
+                    >
+                      <RollView roll={event.roll} big={index === 0} />
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            )}
+          </aside>
         </main>
       )}
     </div>

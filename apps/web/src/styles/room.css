@@ -514,9 +514,16 @@
   gap: 8px;
 }
 
+.intents.six {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .intent-button {
-  min-height: 52px;
-  padding: 12px 10px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 76px;
+  padding: 10px 6px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-card);
   background: var(--raised);
@@ -1013,4 +1020,168 @@
 
 .composer-options .check {
   font-size: 15px;
+}
+
+/* La sala del jugador: en el móvil, pestañas; en una pantalla ancha, dos columnas. */
+.player-room {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 24px 64px;
+}
+
+.player-room.wide {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    'banner banner'
+    'table log'
+    'sheet log';
+  gap: 20px;
+}
+
+.player-room.wide .turn-banner {
+  grid-area: banner;
+}
+
+.player-room.wide .pane-table {
+  grid-area: table;
+}
+
+.player-room.wide .pane-sheet {
+  grid-area: sheet;
+}
+
+.player-room.wide .pane-log {
+  grid-area: log;
+}
+
+@media (max-width: 720px) {
+  .player-room {
+    padding-inline: 16px;
+  }
+}
+
+.player-pane {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+
+/* «¡Te toca!»: lo primero que se ve, en ámbar. */
+.turn-banner {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: var(--radius-card);
+  background: var(--ember);
+  color: var(--ember-ink);
+}
+
+.turn-banner strong {
+  margin-right: 6px;
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.player-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--sunk);
+}
+
+.player-tabs button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-2);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.player-tabs button[aria-pressed='true'] {
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: 0 1px 0 var(--line-strong);
+}
+
+.last-reveal p.prewrap {
+  font-family: var(--display);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.own-roll summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.own-roll summary::-webkit-details-marker {
+  display: none;
+}
+
+.own-roll summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.own-roll[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.own-roll summary h2 {
+  display: inline;
+}
+
+/* La ficha en pequeño. */
+.mini-sheet {
+  --tone: var(--neutral);
+  border-top: 4px solid var(--tone);
+}
+
+.mini-sheet > .button {
+  justify-self: start;
+}
+
+.skill-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-chips li {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  font-size: 14px;
+}
+
+.wounds-mini {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 14px;
 }

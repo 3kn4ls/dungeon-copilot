@@ -18,6 +18,7 @@ import { useStoreGameEvent } from '../queries';
 import { Avatar } from './Avatar';
 import { eventTime, intentLabel } from './GameEvents';
 import { holdsFloor } from './Floor';
+import { Icon, type IconName } from './Icon';
 import { ErrorNote } from './ui';
 
 /** Los botones de quien no pelea: fuera de combate, atacar es empezar una pelea. */
@@ -38,6 +39,17 @@ const TEXT_LABELS: Record<InterventionIntent, (name: string) => string> = {
   melee: (name) => `Cómo ataca ${name} (opcional)`,
   ranged: (name) => `Cómo dispara ${name} (opcional)`,
   spell: (name) => `Qué hechizo lanza ${name} (opcional)`,
+};
+
+/** El icono de cada botón: atacar para empezar una pelea es el mismo que cuerpo a cuerpo. */
+const INTENT_ICONS: Record<InterventionIntent, IconName> = {
+  speak: 'speak',
+  act: 'act',
+  ask: 'ask',
+  attack: 'melee',
+  melee: 'melee',
+  ranged: 'ranged',
+  spell: 'spell',
 };
 
 const PLACEHOLDERS: Record<InterventionIntent, string> = {
@@ -179,7 +191,11 @@ export function InterventionPanel(props: {
           {last && settled.get(last.id) === 'dismissed' && (
             <p className="muted">El máster te ha dicho que ahora no.</p>
           )}
-          <div className="intents" role="group" aria-label="Qué quieres hacer">
+          <div
+            className={intents.length > 4 ? 'intents six' : 'intents'}
+            role="group"
+            aria-label="Qué quieres hacer"
+          >
             {intents.map((option) => (
               <button
                 key={option}
@@ -188,6 +204,7 @@ export function InterventionPanel(props: {
                 aria-pressed={intent === option}
                 onClick={() => setIntent(intent === option ? null : option)}
               >
+                <Icon name={INTENT_ICONS[option]} size={22} />
                 {INTERVENTION_LABELS[option]}
               </button>
             ))}

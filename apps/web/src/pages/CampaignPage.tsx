@@ -1,9 +1,4 @@
-import {
-  ATTRIBUTES,
-  ATTRIBUTE_INFO,
-  LUCK_PER_SESSION,
-  SEVERITY_LABELS,
-} from '@dungeon-copilot/rules';
+import { LUCK_PER_SESSION } from '@dungeon-copilot/rules';
 import {
   ROLE_LABELS,
   gameName,
@@ -18,6 +13,7 @@ import { api } from '../api';
 import { Avatar, toneOf } from '../components/Avatar';
 import { Emblem } from '../components/Emblem';
 import { Icon } from '../components/Icon';
+import { AttributeRow, LuckPips, WoundsMini } from '../components/Sheet';
 import { ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
 import { useRememberCampaign } from '../current-campaign';
 import { keys, useCampaign, useCharacters, useGames, useMe } from '../queries';
@@ -292,40 +288,10 @@ function CharacterCard({ character, mine }: { character: CharacterView; mine: bo
           </p>
         </div>
       </div>
-      <dl className="attribute-row">
-        {ATTRIBUTES.map((attribute) => (
-          <div key={attribute}>
-            <dt>
-              <abbr title={ATTRIBUTE_INFO[attribute].label}>
-                {ATTRIBUTE_INFO[attribute].abbreviation}
-              </abbr>
-            </dt>
-            <dd>{character.attributes[attribute]}</dd>
-          </div>
-        ))}
-      </dl>
+      <AttributeRow attributes={character.attributes} />
       <div className="character-card-state">
-        <span
-          className="mini-boxes"
-          role="img"
-          aria-label={`Rasguños: ${wounds.scratches} de ${wounds.scratchBoxes}`}
-        >
-          {Array.from({ length: wounds.scratchBoxes }, (_, i) => (
-            <i key={i} className={i < wounds.scratches ? 'marked' : undefined} />
-          ))}
-        </span>
-        <span className={wounds.severity === 'none' ? 'severity' : 'severity hurt'}>
-          {SEVERITY_LABELS[wounds.severity]}
-        </span>
-        <span
-          className="pips small"
-          role="img"
-          aria-label={`Suerte: ${luck} de ${LUCK_PER_SESSION}`}
-        >
-          {Array.from({ length: LUCK_PER_SESSION }, (_, i) => (
-            <i key={i} className={i < luck ? 'pip filled' : 'pip'} />
-          ))}
-        </span>
+        <WoundsMini wounds={wounds} />
+        <LuckPips luck={luck} />
         <span className="muted">{character.xp} PX</span>
       </div>
     </li>
