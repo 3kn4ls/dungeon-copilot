@@ -1,50 +1,13 @@
-/* Entrar, las campañas, sus partidas y su mesa. */
+/* Entrar, las campañas y, dentro de una, su crónica, sus personajes, sus PNJ y su mesa. */
 
 .auth {
   max-width: 440px;
   margin: 0 auto;
 }
 
-.card-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-
-.card {
-  display: grid;
-  gap: 4px;
-  padding: 16px 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  color: var(--ink);
-  text-decoration: none;
-  transition: border-color 0.15s;
-}
-
-.panel .card {
-  background: var(--raised);
-}
-
-.card:hover {
-  border-color: var(--accent);
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-family: var(--display);
-  font-size: 21px;
-  font-weight: 700;
-}
-
 .card-text {
   display: -webkit-box;
+  margin: 0;
   overflow: hidden;
   color: var(--ink-2);
   -webkit-line-clamp: 2;
@@ -52,94 +15,208 @@
 }
 
 .card-meta {
+  margin: 0;
   font-size: 14px;
   color: var(--muted);
 }
 
-.invite-code {
-  margin: 0;
-  color: var(--accent);
-  font-family: var(--display);
-  font-size: 38px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
+/* El escudo de una campaña, con su inicial. */
+.emblem {
+  flex-shrink: 0;
 }
 
-.member-list {
+.emblem path {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.emblem text {
+  fill: var(--accent);
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+/* Las campañas */
+
+.campaign-grid {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 14px;
+}
+
+.campaign-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.campaign-card:hover {
+  border-color: var(--accent);
+}
+
+.campaign-card.live {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.campaign-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
 }
 
-.member-list li {
-  display: flex;
+.campaign-card-top .badges {
+  justify-content: flex-end;
+}
+
+.campaign-card h3 {
+  font-size: 22px;
+}
+
+.campaign-card h3 a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* El botón de la sala va por encima del enlace que cubre la tarjeta. */
+.campaign-card > .button {
+  position: relative;
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+/* La cabecera de una campaña */
+
+.campaign-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 16px 22px;
+  margin-bottom: 22px;
 }
 
-.member-actions {
+.campaign-title h1 {
+  margin-bottom: 6px;
+}
+
+.campaign-live {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
 }
 
-.member-actions .button {
-  min-height: 30px;
-  padding: 3px 10px;
-  font-size: 14px;
+@media (max-width: 760px) {
+  .campaign-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .campaign-live {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
 }
 
-/* Partidas */
+/* Crónica: las partidas en una línea de tiempo, de la última a la primera. */
 
-.live-card {
-  gap: 8px;
-  justify-items: start;
+.chronicle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  align-items: start;
 }
 
-.game-list,
-.table-characters {
+@media (max-width: 860px) {
+  .chronicle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.timeline {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
 }
 
-.game-list li,
-.table-characters li {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 2px 12px;
-}
-
-.table-characters li {
+.timeline-item {
+  position: relative;
   display: grid;
-  justify-content: start;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 22px;
 }
 
-.table-characters .muted {
-  font-size: 14px;
+/* La línea que une las partidas, de una marca a la siguiente. */
+.timeline-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 46px;
+  bottom: 0;
+  left: 21px;
+  width: 2px;
+  background: var(--line);
 }
 
-/* El resumen de cada partida anterior, en tres líneas: entero, en la partida. */
-.game-recap {
-  display: -webkit-box;
-  flex-basis: 100%;
-  margin: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 15px;
-  white-space: pre-line;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+.timeline-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.timeline-item.live .timeline-mark {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.timeline-body {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.timeline-item.live .timeline-body {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.timeline-body h3 {
+  font-size: 22px;
+}
+
+.timeline-body h3 a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.timeline-body h3 a:hover {
+  color: var(--accent);
 }
 
 .recap-text {
+  max-width: 66ch;
   margin: 0;
   font-family: var(--display);
   font-size: 17px;
@@ -158,4 +235,234 @@
 
 .recall p {
   margin: 0;
+}
+
+/* Personajes: tarjetas con el color de cada uno. */
+
+.character-grid,
+.npc-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 14px;
+}
+
+.character-card {
+  --tone: var(--neutral);
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--tone);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.character-card:hover {
+  border-color: var(--tone);
+}
+
+.character-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.character-card h3 {
+  font-size: 22px;
+}
+
+.character-card h3 a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.attribute-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.attribute-row div {
+  display: grid;
+  justify-items: center;
+  padding: 6px 2px;
+  border-radius: var(--radius);
+  background: var(--sunk);
+}
+
+.attribute-row dt {
+  color: var(--muted);
+  font-family: var(--caps);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+
+.attribute-row abbr {
+  text-decoration: none;
+}
+
+.attribute-row dd {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.character-card-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 15px;
+}
+
+.mini-boxes {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.mini-boxes i {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.mini-boxes i.marked {
+  border-color: var(--blood);
+  background: var(--blood);
+}
+
+.severity {
+  color: var(--muted);
+}
+
+.severity.hurt {
+  color: var(--blood);
+  font-weight: 700;
+}
+
+.pips.small {
+  gap: 6px;
+}
+
+.pips.small .pip {
+  width: 11px;
+  height: 11px;
+  margin: 1px;
+  border-width: 1.5px;
+  border-radius: 2px;
+}
+
+/* PNJ */
+
+.npc-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  height: 100%;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+
+.npc-card:hover {
+  border-color: var(--accent);
+}
+
+.npc-card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.npc-card-text strong {
+  font-family: var(--display);
+  font-size: 19px;
+}
+
+.npc-card .badges {
+  grid-column: 1 / -1;
+}
+
+/* La mesa */
+
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.invite-code {
+  margin: 0;
+  color: var(--accent);
+  font-family: var(--display);
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.member-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.member-name {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.member-characters {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+/* La partida en juego, en la sala: quién está en la mesa. */
+.table-characters {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.table-characters li {
+  display: grid;
+  justify-content: start;
+  gap: 2px 12px;
+}
+
+.table-characters .muted {
+  font-size: 14px;
 }

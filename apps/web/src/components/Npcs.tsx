@@ -207,7 +207,8 @@ export function NpcSheet({ npc }: { npc: NpcView }) {
   return (
     <dl className="npc-sheet">
       {filled.map(([label, value]) => (
-        <div key={label}>
+        // Lo que oculta se distingue: solo lo ve el máster, y nunca llega a la mesa.
+        <div key={label} className={label === 'Qué oculta' ? 'secret' : undefined}>
           <dt>{label}</dt>
           <dd className="prewrap">{value}</dd>
         </div>

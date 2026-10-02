@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api } from '../api';
+import { Emblem } from '../components/Emblem';
+import { Icon } from '../components/Icon';
 import { ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
 import { keys, useCampaigns } from '../queries';
 
@@ -30,25 +32,38 @@ export function CampaignsPage() {
           </h2>
           {campaigns.data ? (
             campaigns.data.length > 0 ? (
-              <ul className="card-list">
+              <ul className="campaign-grid">
                 {campaigns.data.map((campaign) => (
-                  <li key={campaign.id}>
-                    <Link to={`/campanas/${campaign.id}`} className="card">
-                      <span className="card-title">
-                        {campaign.name}
+                  <li
+                    key={campaign.id}
+                    className={campaign.openGameId ? 'campaign-card live' : 'campaign-card'}
+                  >
+                    <div className="campaign-card-top">
+                      <Emblem name={campaign.name} />
+                      <span className="badges">
                         <span className={`badge role-${campaign.role}`}>
                           {ROLE_LABELS[campaign.role]}
                         </span>
                         {campaign.openGameId && <span className="badge live">En juego</span>}
                       </span>
-                      {campaign.description && (
-                        <span className="card-text">{campaign.description}</span>
-                      )}
-                      <span className="card-meta">
-                        {plural(campaign.memberCount, 'persona', 'personas')} ·{' '}
-                        {plural(campaign.characterCount, 'personaje', 'personajes')}
-                      </span>
-                    </Link>
+                    </div>
+                    <h3>
+                      {/* Toda la tarjeta lleva a la campaña; el botón de la sala va encima. */}
+                      <Link to={`/campanas/${campaign.id}`} className="stretched">
+                        {campaign.name}
+                      </Link>
+                    </h3>
+                    {campaign.description && <p className="card-text">{campaign.description}</p>}
+                    <p className="card-meta">
+                      {plural(campaign.memberCount, 'persona', 'personas')} ·{' '}
+                      {plural(campaign.characterCount, 'personaje', 'personajes')}
+                    </p>
+                    {campaign.openGameId && (
+                      <Link to={`/partidas/${campaign.openGameId}`} className="button primary">
+                        <Icon name="room" size={18} />
+                        Entrar en la sala
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>

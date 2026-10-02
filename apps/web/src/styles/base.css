@@ -219,3 +219,26 @@ h3 {
     transition: none !important;
   }
 }
+
+/* Un enlace que cubre toda su tarjeta (la tarjeta lleva position: relative). Lo que tenga que
+   pulsarse aparte dentro de ella va por encima con position: relative. */
+.stretched::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* Encima de una lista: lo que es, a la izquierda, y su acción principal, a la derecha. */
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-head > p {
+  flex: 1 1 320px;
+  max-width: 70ch;
+}

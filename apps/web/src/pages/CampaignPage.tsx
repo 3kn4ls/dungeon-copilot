@@ -1,102 +1,182 @@
-import { LUCK_PER_SESSION, SEVERITY_LABELS } from '@dungeon-copilot/rules';
-import { ROLE_LABELS, gameName, type CampaignDetail } from '@dungeon-copilot/shared';
+import {
+  ATTRIBUTES,
+  ATTRIBUTE_INFO,
+  LUCK_PER_SESSION,
+  SEVERITY_LABELS,
+} from '@dungeon-copilot/rules';
+import {
+  ROLE_LABELS,
+  gameName,
+  type CampaignDetail,
+  type CharacterView,
+  type GameSummary,
+} from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useState, type CSSProperties } from 'react';
+import { Link, NavLink, Outlet, useNavigate, useOutletContext, useParams } from 'react-router';
 import { api } from '../api';
-import { profileText } from '../components/Npcs';
-import { ScreenLink } from '../components/ScreenLink';
-import { ConfirmButton, ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
+import { Avatar, toneOf } from '../components/Avatar';
+import { Emblem } from '../components/Emblem';
+import { Icon } from '../components/Icon';
+import { ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
 import { useRememberCampaign } from '../current-campaign';
-import { keys, useCampaign, useCharacters, useGames, useMe, useNpcs } from '../queries';
+import { keys, useCampaign, useCharacters, useGames, useMe } from '../queries';
 
+/** Lo que la campaña pasa a sus pestañas. */
+interface CampaignOutlet {
+  campaign: CampaignDetail;
+}
+
+export const useCampaignOutlet = () => useOutletContext<CampaignOutlet>();
+
+/**
+ * La campaña: su cabecera (con la partida en juego, si la hay) y sus pestañas, cada una con su
+ * ruta: Crónica, Personajes, PNJ (solo el máster) y Mesa.
+ */
 export function CampaignPage() {
   const { campaignId = '' } = useParams();
   const campaign = useCampaign(campaignId);
+  const games = useGames(campaignId);
   useRememberCampaign(campaign.data?.id);
   useDocumentTitle(campaign.data?.name);
 
   if (!campaign.data) return <QueryState error={campaign.error} />;
   const detail = campaign.data;
-  const isMaster = detail.role === 'master';
+  const open = games.data?.find((game) => game.status === 'open');
+  const base = `/campanas/${detail.id}`;
 
   return (
     <>
-      <header className="masthead">
-        <Link to="/campanas" className="eyebrow back">
-          ← Campañas
-        </Link>
-        <h1>
-          {detail.name}{' '}
-          <span className={`badge role-${detail.role}`}>{ROLE_LABELS[detail.role]}</span>
-        </h1>
-        {detail.description && <p className="lede prewrap">{detail.description}</p>}
+      <header className="campaign-head">
+        <Emblem name={detail.name} large />
+        <div className="campaign-title">
+          <Link to="/campanas" className="eyebrow back">
+            ← Campañas
+          </Link>
+          <h1>
+            {detail.name}{' '}
+            <span className={`badge role-${detail.role}`}>{ROLE_LABELS[detail.role]}</span>
+          </h1>
+          {detail.description && <p className="lede prewrap">{detail.description}</p>}
+        </div>
+        {open && (
+          <div className="campaign-live">
+            <span className="badge live">{gameName(open)}, en juego</span>
+            <Link to={`/partidas/${open.id}`} className="button primary">
+              <Icon name="room" size={18} />
+              Entrar en la sala
+            </Link>
+          </div>
+        )}
       </header>
 
-      <div className="layout layout-main">
-        <div className="stack">
-          <Games campaign={detail} />
-          <Characters campaignId={detail.id} />
-          {isMaster && <Npcs campaignId={detail.id} />}
-        </div>
-        <div className="side">
-          {isMaster && detail.inviteCode && <Invite campaign={detail} />}
-          {isMaster && detail.screenToken && (
-            <ScreenLink campaignId={detail.id} token={detail.screenToken} />
-          )}
-          <Members campaign={detail} />
-          {isMaster && <MasterTools campaign={detail} />}
-        </div>
-      </div>
+      <nav className="tabs" aria-label="Secciones de la campaña">
+        <NavLink to={base} end>
+          <Icon name="chronicle" size={18} />
+          Crónica
+        </NavLink>
+        <NavLink to={`${base}/personajes`}>
+          <Icon name="characters" size={18} />
+          Personajes
+        </NavLink>
+        {detail.role === 'master' && (
+          <NavLink to={`${base}/pnj`}>
+            <Icon name="npcs" size={18} />
+            PNJ
+          </NavLink>
+        )}
+        <NavLink to={`${base}/mesa`}>
+          <Icon name="campaign" size={18} />
+          Mesa
+        </NavLink>
+      </nav>
+
+      <Outlet context={{ campaign: detail } satisfies CampaignOutlet} />
     </>
   );
 }
 
-const gameDate = (iso: string) =>
+const longDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
 
-function Games({ campaign }: { campaign: CampaignDetail }) {
+/** Las partidas, de la última a la primera, con lo que pasó en cada una. */
+export function CampaignChronicle() {
+  const { campaign } = useCampaignOutlet();
   const games = useGames(campaign.id);
   const isMaster = campaign.role === 'master';
   if (!games.data) return <QueryState error={games.error} />;
   const open = games.data.find((game) => game.status === 'open');
-  const past = games.data.filter((game) => game.status === 'closed');
 
   return (
-    <section className="panel" aria-labelledby="games-heading">
-      <h2 id="games-heading">Partidas</h2>
-      {open ? (
-        <Link to={`/partidas/${open.id}`} className="card live-card">
-          <span className="card-title">
-            {gameName(open)} <span className="badge live">En juego</span>
-          </span>
-          <span className="card-meta">
-            {open.title ? `Partida ${open.number} · ` : ''}Empezó el {gameDate(open.openedAt)}
-          </span>
-          <span className="button primary">Entrar en la sala</span>
-        </Link>
-      ) : isMaster ? (
-        <OpenGame campaignId={campaign.id} />
-      ) : (
-        <p className="muted">
-          No hay ninguna partida en juego. Cuando el máster abra una, aparecerá aquí.
-        </p>
-      )}
-      {past.length > 0 && (
-        <>
-          <h3>Anteriores</h3>
-          <ul className="game-list">
-            {past.map((game) => (
-              <li key={game.id}>
-                <Link to={`/partidas/${game.id}`}>{gameName(game)}</Link>
-                <span className="muted">{gameDate(game.openedAt)}</span>
-                {game.recap && <p className="game-recap">{game.recap}</p>}
-              </li>
+    <div className="chronicle">
+      <section aria-labelledby="chronicle-heading">
+        <h2 id="chronicle-heading" className="visually-hidden">
+          Crónica
+        </h2>
+        {games.data.length > 0 ? (
+          <ol className="timeline">
+            {games.data.map((game) => (
+              <ChronicleEntry key={game.id} game={game} isMaster={isMaster} />
             ))}
-          </ul>
-        </>
+          </ol>
+        ) : (
+          <div className="panel empty">
+            <p>Aún no habéis jugado ninguna partida.</p>
+            <p className="muted">
+              {isMaster
+                ? 'Ábrela aquí al lado cuando empecéis.'
+                : 'Cuando el máster abra una, aparecerá aquí.'}
+            </p>
+          </div>
+        )}
+      </section>
+      {isMaster && (
+        <aside className="side">
+          <section className="panel" aria-labelledby="open-heading">
+            <h2 id="open-heading">Abrir partida</h2>
+            {open ? (
+              <p className="muted">
+                Ya hay una en juego. Termínala desde la sala para abrir la siguiente.
+              </p>
+            ) : (
+              <OpenGame campaignId={campaign.id} />
+            )}
+          </section>
+        </aside>
       )}
-    </section>
+    </div>
+  );
+}
+
+function ChronicleEntry({ game, isMaster }: { game: GameSummary; isMaster: boolean }) {
+  const live = game.status === 'open';
+  return (
+    <li className={live ? 'timeline-item live' : 'timeline-item'}>
+      <span className="timeline-mark num" aria-hidden="true">
+        {game.number}
+      </span>
+      <div className="timeline-body">
+        <p className="eyebrow">
+          Partida {game.number} · {longDate(game.openedAt)}
+        </p>
+        <h3>
+          <Link to={`/partidas/${game.id}`}>{gameName(game)}</Link>{' '}
+          {live && <span className="badge live">En juego</span>}
+        </h3>
+        {live ? (
+          <Link to={`/partidas/${game.id}`} className="button primary">
+            <Icon name="room" size={18} />
+            Entrar en la sala
+          </Link>
+        ) : game.recap ? (
+          <p className="recap-text prewrap">{game.recap}</p>
+        ) : (
+          <p className="muted">
+            Sin resumen.{isMaster ? ' Puedes escribirlo desde la partida.' : ''}
+          </p>
+        )}
+      </div>
+    </li>
   );
 }
 
@@ -152,37 +232,41 @@ function OpenGame({ campaignId }: { campaignId: string }) {
   );
 }
 
-function Characters({ campaignId }: { campaignId: string }) {
-  const characters = useCharacters(campaignId);
+/** Los personajes de la campaña, cada uno con su color, sus atributos y cómo está. */
+export function CampaignCharacters() {
+  const { campaign } = useCampaignOutlet();
+  const characters = useCharacters(campaign.id);
+  const { data: me } = useMe();
+
   return (
-    <section className="panel" aria-labelledby="characters-heading">
-      <div className="panel-heading">
-        <h2 id="characters-heading">Personajes</h2>
-        <Link to={`/campanas/${campaignId}/personajes/nuevo`} className="button primary small">
+    <section className="stack" aria-labelledby="characters-heading">
+      <div className="section-head">
+        <h2 id="characters-heading" className="visually-hidden">
+          Personajes
+        </h2>
+        <p className="muted">
+          Cada jugador crea aquí el suyo. Las fichas las cambian su dueño y el máster.
+        </p>
+        <Link to={`/campanas/${campaign.id}/personajes/nuevo`} className="button primary">
+          <Icon name="plus" size={18} />
           Crear personaje
         </Link>
       </div>
       {characters.data ? (
         characters.data.length > 0 ? (
-          <ul className="card-list">
+          <ul className="character-grid">
             {characters.data.map((character) => (
-              <li key={character.id}>
-                <Link to={`/personajes/${character.id}`} className="card">
-                  <span className="card-title">{character.name}</span>
-                  <span className="card-text">
-                    {character.background || 'Sin trasfondo'} · de {character.ownerName}
-                  </span>
-                  <span className="card-meta">
-                    {SEVERITY_LABELS[character.wounds.severity]} · Rasguños{' '}
-                    {character.wounds.scratches}/{character.wounds.scratchBoxes} · Suerte{' '}
-                    {character.luck} · {character.xp} PX
-                  </span>
-                </Link>
-              </li>
+              <CharacterCard
+                key={character.id}
+                character={character}
+                mine={character.ownerId === me?.user?.id}
+              />
             ))}
           </ul>
         ) : (
-          <p className="muted">Aún no hay personajes. Cada jugador crea el suyo aquí.</p>
+          <div className="panel empty">
+            <p>Aún no hay personajes.</p>
+          </div>
         )
       ) : (
         <QueryState error={characters.error} />
@@ -191,233 +275,59 @@ function Characters({ campaignId }: { campaignId: string }) {
   );
 }
 
-/** Los PNJ de la campaña. Solo los ve el máster: la mesa los conoce cuando hablan. */
-function Npcs({ campaignId }: { campaignId: string }) {
-  const npcs = useNpcs(campaignId);
+function CharacterCard({ character, mine }: { character: CharacterView; mine: boolean }) {
+  const { wounds, luck } = character;
   return (
-    <section className="panel" aria-labelledby="npcs-heading">
-      <div className="panel-heading">
-        <h2 id="npcs-heading">PNJ</h2>
-        <Link to={`/campanas/${campaignId}/pnj/nuevo`} className="button primary small">
-          Crear PNJ
-        </Link>
-      </div>
-      {npcs.data ? (
-        npcs.data.length > 0 ? (
-          <ul className="card-list">
-            {npcs.data.map((npc) => (
-              <li key={npc.id}>
-                <Link to={`/pnj/${npc.id}`} className="card">
-                  <span className="card-title">
-                    {npc.name}
-                    {npc.profile && <span className="badge">{profileText(npc.profile)}</span>}
-                  </span>
-                  {npc.concept && <span className="card-text">{npc.concept}</span>}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
+    <li className="character-card" style={{ '--tone': toneOf(character.id) } as CSSProperties}>
+      <div className="character-card-top">
+        <Avatar name={character.name} id={character.id} size="large" />
+        <div>
+          <h3>
+            <Link to={`/personajes/${character.id}`} className="stretched">
+              {character.name}
+            </Link>
+          </h3>
           <p className="muted">
-            Aún no hay PNJ. Solo los ves tú; en la sala hablas por su boca, con ayuda de la IA.
+            {character.background || 'Sin trasfondo'} · {mine ? 'tuyo' : character.ownerName}
           </p>
-        )
-      ) : (
-        <QueryState error={npcs.error} />
-      )}
-    </section>
-  );
-}
-
-function Invite({ campaign }: { campaign: CampaignDetail }) {
-  const queryClient = useQueryClient();
-  const [copied, setCopied] = useState(false);
-  const regenerate = useMutation({
-    mutationFn: () => api.regenerateInviteCode(campaign.id),
-    onSuccess: (inviteCode) => {
-      queryClient.setQueryData<CampaignDetail>(keys.campaign(campaign.id), (old) =>
-        old ? { ...old, inviteCode } : old,
-      );
-    },
-  });
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(campaign.inviteCode ?? '');
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Sin permiso para el portapapeles: el código sigue a la vista para copiarlo a mano.
-    }
-  }
-
-  return (
-    <section className="panel" aria-labelledby="invite-heading">
-      <h2 id="invite-heading">Invitar jugadores</h2>
-      <p className="muted">Pásales este código para que se unan desde su cuenta.</p>
-      <p className="invite-code num" aria-label={`Código ${campaign.inviteCode}`}>
-        {campaign.inviteCode}
-      </p>
-      <div className="actions">
-        <button type="button" className="button" onClick={copy}>
-          {copied ? 'Copiado' : 'Copiar'}
-        </button>
-        <ConfirmButton
-          confirmLabel="¿Seguro? El viejo dejará de valer"
-          onConfirm={() => regenerate.mutate()}
-          disabled={regenerate.isPending}
-        >
-          Cambiar código
-        </ConfirmButton>
-      </div>
-      <ErrorNote error={regenerate.error} />
-    </section>
-  );
-}
-
-function Members({ campaign }: { campaign: CampaignDetail }) {
-  const { data: me } = useMe();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const isMaster = campaign.role === 'master';
-
-  const remove = useMutation({
-    mutationFn: (userId: string) => api.removeMember(campaign.id, userId),
-    onSuccess: async (_, userId) => {
-      if (userId === me?.user?.id) {
-        queryClient.removeQueries({ queryKey: keys.campaign(campaign.id) });
-        await queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
-        await navigate('/campanas');
-      } else {
-        await queryClient.invalidateQueries({ queryKey: keys.campaign(campaign.id) });
-      }
-    },
-  });
-
-  return (
-    <section className="panel" aria-labelledby="members-heading">
-      <h2 id="members-heading">Mesa</h2>
-      <ul className="member-list">
-        {campaign.members.map((member) => (
-          <li key={member.userId}>
-            <span>
-              {member.displayName} <span className="muted">@{member.username}</span>
-            </span>
-            <span className="member-actions">
-              <span className={`badge role-${member.role}`}>{ROLE_LABELS[member.role]}</span>
-              {isMaster && member.role === 'player' && (
-                <ConfirmButton
-                  confirmLabel="¿Echar?"
-                  onConfirm={() => remove.mutate(member.userId)}
-                  disabled={remove.isPending}
-                >
-                  Echar
-                </ConfirmButton>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {!isMaster && me?.user && (
-        <ConfirmButton
-          confirmLabel="¿Seguro? Tus personajes se quedan aquí"
-          onConfirm={() => remove.mutate(me.user!.id)}
-          disabled={remove.isPending}
-        >
-          Salir de la campaña
-        </ConfirmButton>
-      )}
-      <ErrorNote error={remove.error} />
-    </section>
-  );
-}
-
-function MasterTools({ campaign }: { campaign: CampaignDetail }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(campaign.name);
-  const [description, setDescription] = useState(campaign.description);
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-
-  const save = useMutation({
-    mutationFn: () => api.updateCampaign(campaign.id, { name, description }),
-    onSuccess: async (updated) => {
-      queryClient.setQueryData(keys.campaign(campaign.id), updated);
-      await queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
-      setEditing(false);
-    },
-  });
-  const destroy = useMutation({
-    mutationFn: () => api.deleteCampaign(campaign.id),
-    onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: keys.campaign(campaign.id) });
-      await queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
-      await navigate('/campanas');
-    },
-  });
-
-  return (
-    <section className="panel" aria-labelledby="tools-heading">
-      <h2 id="tools-heading">Ajustes de la campaña</h2>
-      {editing ? (
-        <form
-          className="stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            save.mutate();
-          }}
-        >
-          <label className="field">
-            <span className="field-label">Nombre</span>
-            <input
-              required
-              maxLength={100}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">De qué va</span>
-            <textarea
-              rows={4}
-              maxLength={5000}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </label>
-          <ErrorNote error={save.error} />
-          <div className="actions">
-            <button type="submit" className="button primary" disabled={save.isPending}>
-              Guardar
-            </button>
-            <button type="button" className="button" onClick={() => setEditing(false)}>
-              Cancelar
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="actions">
-          <button
-            type="button"
-            className="button"
-            onClick={() => {
-              setName(campaign.name);
-              setDescription(campaign.description);
-              setEditing(true);
-            }}
-          >
-            Editar nombre y descripción
-          </button>
-          <ConfirmButton
-            confirmLabel="¿Borrar con todos sus personajes?"
-            onConfirm={() => destroy.mutate()}
-            disabled={destroy.isPending}
-          >
-            Borrar campaña
-          </ConfirmButton>
         </div>
-      )}
-      <ErrorNote error={destroy.error} />
-    </section>
+      </div>
+      <dl className="attribute-row">
+        {ATTRIBUTES.map((attribute) => (
+          <div key={attribute}>
+            <dt>
+              <abbr title={ATTRIBUTE_INFO[attribute].label}>
+                {ATTRIBUTE_INFO[attribute].abbreviation}
+              </abbr>
+            </dt>
+            <dd>{character.attributes[attribute]}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="character-card-state">
+        <span
+          className="mini-boxes"
+          role="img"
+          aria-label={`Rasguños: ${wounds.scratches} de ${wounds.scratchBoxes}`}
+        >
+          {Array.from({ length: wounds.scratchBoxes }, (_, i) => (
+            <i key={i} className={i < wounds.scratches ? 'marked' : undefined} />
+          ))}
+        </span>
+        <span className={wounds.severity === 'none' ? 'severity' : 'severity hurt'}>
+          {SEVERITY_LABELS[wounds.severity]}
+        </span>
+        <span
+          className="pips small"
+          role="img"
+          aria-label={`Suerte: ${luck} de ${LUCK_PER_SESSION}`}
+        >
+          {Array.from({ length: LUCK_PER_SESSION }, (_, i) => (
+            <i key={i} className={i < luck ? 'pip filled' : 'pip'} />
+          ))}
+        </span>
+        <span className="muted">{character.xp} PX</span>
+      </div>
+    </li>
   );
 }
