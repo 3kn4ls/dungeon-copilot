@@ -447,22 +447,3 @@
   align-items: center;
   gap: 6px;
 }
-
-/* La partida en juego, en la sala: quién está en la mesa. */
-.table-characters {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.table-characters li {
-  display: grid;
-  justify-content: start;
-  gap: 2px 12px;
-}
-
-.table-characters .muted {
-  font-size: 14px;
-}

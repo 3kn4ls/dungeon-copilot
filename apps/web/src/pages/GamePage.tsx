@@ -1,9 +1,11 @@
 import {
+  ARMOR_CLASSES,
   ATTRIBUTES,
   ATTRIBUTE_INFO,
   DIFFICULTIES,
   DIFFICULTY_LABELS,
   EDGE_LABELS,
+  LUCK_PER_SESSION,
   NPC_PROFILES,
   SEVERITY_LABELS,
   SITUATION_LABELS,
@@ -14,6 +16,7 @@ import {
   rangedDifficulty,
   successChance,
   testOdds,
+  weaponLabel,
   type DifficultyLevel,
   type Edge,
   type Range,
@@ -37,7 +40,9 @@ import {
   type CheckSuggestion,
   type Combat,
   type GameDetail,
+  type Floor,
   type GameEvent,
+  type GameEventKind,
   type GameRollRequest,
   type GameState,
   type GameSummary,
@@ -60,6 +65,7 @@ import {
   StartCombat,
   TurnStatus,
 } from '../components/Combat';
+import { Avatar } from '../components/Avatar';
 import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
 import { CheckHint, LeakWarning, useLeakGuard } from '../components/Decisions';
@@ -152,6 +158,7 @@ export function GamePage() {
   const game = state.data?.game;
   const characters = useCharacters(game?.campaignId ?? '');
   useRememberCampaign(game?.campaignId);
+  const [filter, setFilter] = useState<FeedFilter>('all');
 
   const live = useLiveEvents({
     url: game?.status === 'open' ? `/api/games/${gameId}/stream` : null,
@@ -239,33 +246,122 @@ export function GamePage() {
   const morale =
     isMaster && isOpen && ai.data?.decisions ? moraleBlow(state.data.events, combat) : undefined;
 
+  const floor = currentFloor(state.data.events);
+  const scene = currentScene(state.data.events)?.title;
+  const feed = (
+    <section className="feed-panel" aria-labelledby="feed-heading">
+      <div className="feed-panel-head">
+        <h2 id="feed-heading" className="column-title">
+          Registro
+        </h2>
+        <div className="chips" role="group" aria-label="Qué ver del registro">
+          {FEED_FILTERS.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="chip"
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <ol className="feed" aria-live="polite">
+        {[...state.data.events]
+          .reverse()
+          .filter((event) => event.kind !== 'settled' && shows(filter, event))
+          .map((event) => (
+            <li key={event.id}>
+              <EventCard
+                event={event}
+                superseded={superseded.has(event.id)}
+                settled={settled.get(event.id)}
+                survived={survived.has(event.id)}
+                master={isMaster}
+              >
+                {event.kind === 'roll' && rerollable.has(event.id) && (
+                  <LuckReroll game={game} event={event} />
+                )}
+                {event.kind === 'roll' && striking.has(event.id) && (
+                  <RollDamage
+                    game={game}
+                    event={event}
+                    applied={blows.get(event.id) ?? []}
+                    combat={combat}
+                    characters={characters.data ?? []}
+                    spent={spent}
+                  />
+                )}
+                {event.kind === 'roll' && striking.has(event.id) && ai.data?.enabled && (
+                  <BlowNarration game={game} event={event} />
+                )}
+                {event.kind === 'roll' && complicated.has(event.id) && (
+                  <Complications game={game} event={event} intent={intents.get(event.id)} />
+                )}
+                {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
+                  <RollRequestAction game={game} event={event} />
+                )}
+                {event.kind === 'damage' && combat && event.id === morale && (
+                  <MoraleHint game={game} combat={combat} event={event} />
+                )}
+                {event.kind === 'damage' && isOpen && (
+                  <FallenActions
+                    game={game}
+                    event={event}
+                    characters={characters.data ?? []}
+                    spent={spent}
+                    survived={survived.has(event.id)}
+                  />
+                )}
+              </EventCard>
+            </li>
+          ))}
+      </ol>
+    </section>
+  );
+
+  // El máster, con la partida en juego, dirige desde tres columnas: la mesa, el escenario con sus
+  // acciones y el registro. Los jugadores y la partida terminada siguen con dos.
+  if (isMaster && isOpen) {
+    return (
+      <div className="room-master">
+        <RoomBar
+          game={game}
+          live={live}
+          combat={combat}
+          floor={floor}
+          scene={scene}
+          waiting={forMaster}
+        />
+        <aside className="room-table" aria-label="La mesa">
+          <TableCharacters game={game} combat={combat} floor={floor} spent={spent} master />
+          {game.screenToken && <ScreenLink campaignId={game.campaignId} token={game.screenToken} />}
+          <CloseGame game={game} />
+        </aside>
+        <div className="room-stage">
+          <MasterDesk state={state.data} />
+        </div>
+        <div className="room-log">{feed}</div>
+      </div>
+    );
+  }
+
   return (
     <>
-      <header className="masthead">
-        <Link to={`/campanas/${game.campaignId}`} className="eyebrow back">
-          ← {game.campaignName}
-        </Link>
-        <h1>
-          {gameName(game)}{' '}
-          <span className={`badge ${isOpen ? 'live' : ''}`}>{GAME_STATUS_LABELS[game.status]}</span>
-        </h1>
-        <p className="lede">
-          {game.title ? `Partida ${game.number} · ` : ''}
-          {isMaster
-            ? 'Diriges tú: lo que enseñes y las tiradas públicas lo ve toda la mesa.'
-            : 'Aquí ves lo que enseña el máster y las tiradas de la mesa.'}{' '}
-          {isOpen && <LiveBadge status={live} />}
-        </p>
-      </header>
-
+      <RoomBar
+        game={game}
+        live={live}
+        combat={isOpen ? combat : null}
+        floor={floor}
+        scene={scene}
+        waiting={0}
+      />
       <div className="room">
         <div className="room-actions">
           {isOpen ? (
-            isMaster ? (
-              <MasterDesk state={state.data} />
-            ) : (
-              <PlayerDesk state={state.data} settled={settled} />
-            )
+            <PlayerDesk state={state.data} settled={settled} />
           ) : (
             <>
               <section className="panel">
@@ -283,76 +379,108 @@ export function GamePage() {
             </>
           )}
         </div>
-
-        <section className="room-feed panel" aria-labelledby="feed-heading">
-          <h2 id="feed-heading">Registro</h2>
-          <ol className="feed" aria-live="polite">
-            {[...state.data.events]
-              .reverse()
-              .filter((event) => event.kind !== 'settled')
-              .map((event) => (
-                <li key={event.id}>
-                  <EventCard
-                    event={event}
-                    superseded={superseded.has(event.id)}
-                    settled={settled.get(event.id)}
-                    survived={survived.has(event.id)}
-                    master={isMaster}
-                  >
-                    {event.kind === 'roll' && rerollable.has(event.id) && (
-                      <LuckReroll game={game} event={event} />
-                    )}
-                    {event.kind === 'roll' && striking.has(event.id) && (
-                      <RollDamage
-                        game={game}
-                        event={event}
-                        applied={blows.get(event.id) ?? []}
-                        combat={combat}
-                        characters={characters.data ?? []}
-                        spent={spent}
-                      />
-                    )}
-                    {event.kind === 'roll' && striking.has(event.id) && ai.data?.enabled && (
-                      <BlowNarration game={game} event={event} />
-                    )}
-                    {event.kind === 'roll' && complicated.has(event.id) && (
-                      <Complications game={game} event={event} intent={intents.get(event.id)} />
-                    )}
-                    {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
-                      <RollRequestAction game={game} event={event} />
-                    )}
-                    {event.kind === 'damage' && combat && event.id === morale && (
-                      <MoraleHint game={game} combat={combat} event={event} />
-                    )}
-                    {event.kind === 'damage' && isOpen && (
-                      <FallenActions
-                        game={game}
-                        event={event}
-                        characters={characters.data ?? []}
-                        spent={spent}
-                        survived={survived.has(event.id)}
-                      />
-                    )}
-                  </EventCard>
-                </li>
-              ))}
-          </ol>
-        </section>
-
+        <div className="room-feed">{feed}</div>
         <div className="room-extras">
           <TableCharacters
             game={game}
             combat={isOpen ? combat : null}
+            floor={floor}
             spent={spent}
-            master={isMaster && isOpen}
+            master={false}
           />
           {isMaster && game.screenToken && (
             <ScreenLink campaignId={game.campaignId} token={game.screenToken} />
           )}
-          {isMaster && isOpen && <CloseGame game={game} />}
         </div>
       </div>
     </>
+  );
+}
+
+type FeedFilter = 'all' | 'story' | 'rolls' | 'secret';
+
+const FEED_FILTERS: [FeedFilter, string][] = [
+  ['all', 'Todo'],
+  ['story', 'Historia'],
+  ['rolls', 'Tiradas y combate'],
+  ['secret', 'En secreto'],
+];
+
+const STORY_KINDS: readonly GameEventKind[] = [
+  'opened',
+  'closed',
+  'scene',
+  'reveal',
+  'speech',
+  'note',
+  'intervention',
+];
+
+/** Qué entradas del registro enseña cada filtro. */
+function shows(filter: FeedFilter, event: GameEvent): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'story':
+      return STORY_KINDS.includes(event.kind);
+    case 'rolls':
+      return !STORY_KINDS.includes(event.kind) && event.kind !== 'floor';
+    case 'secret':
+      return event.visibility !== 'public';
+  }
+}
+
+/** Quién tiene la palabra, para la cabecera: «el máster», «la mesa» o el personaje. */
+function floorHolder(floor: Floor): string {
+  if (floor.kind === 'master') return 'el máster';
+  if (floor.kind === 'table') return 'la mesa';
+  return floor.name;
+}
+
+/**
+ * La cabecera de la sala: de qué campaña es, la partida, si está en directo, en qué fase (quién
+ * tiene la palabra o la ronda del combate), la escena y, al máster, cuántos esperan.
+ */
+function RoomBar(props: {
+  game: GameDetail;
+  live: LiveStatus;
+  combat: Combat | null;
+  floor: Floor;
+  /** El título de la escena en juego, si hay una. */
+  scene: string | undefined;
+  waiting: number;
+}) {
+  const { game, live, combat, floor, scene, waiting } = props;
+  const isOpen = game.status === 'open';
+  return (
+    <header className="room-bar">
+      <Link to={`/campanas/${game.campaignId}`} className="eyebrow back">
+        ← {game.campaignName}
+      </Link>
+      <div className="room-title">
+        <h1>{gameName(game)}</h1>
+        <div className="badges">
+          {isOpen ? (
+            <LiveBadge status={live} />
+          ) : (
+            <span className="badge">{GAME_STATUS_LABELS[game.status]}</span>
+          )}
+          {game.title && <span className="badge">Partida {game.number}</span>}
+          {isOpen &&
+            (combat ? (
+              <span className="badge turn">Combate · Ronda {combat.round}</span>
+            ) : (
+              <span className="badge">La palabra: {floorHolder(floor)}</span>
+            ))}
+          {isOpen && scene && <span className="badge">Escena: {scene}</span>}
+          {waiting > 0 && (
+            <span className="badge turn">
+              {waiting === 1 ? '1 intervención espera' : `${waiting} intervenciones esperan`}
+            </span>
+          )}
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -1607,32 +1735,75 @@ function SideEditor(props: {
 }
 
 /**
- * Los personajes de la mesa, con lo que más se mira durante la partida. El máster ve además sus
- * técnicas de una vez por escena o por sesión y, fuera de combate, puede aplicarles daño a mano.
+ * Los personajes de la mesa, con lo que más se mira durante la partida: cómo están, su Suerte,
+ * con qué pelean y quién tiene la palabra. El máster ve además sus técnicas de una vez por escena
+ * o por sesión y, fuera de combate, puede aplicarles daño a mano.
  */
 function TableCharacters(props: {
   game: GameDetail;
   combat: Combat | null;
+  floor: Floor;
   spent: SpentAbilities;
   /** Quien mira es el máster, con la partida en juego. */
   master: boolean;
 }) {
-  const { game, combat, spent, master } = props;
+  const { game, combat, floor, spent, master } = props;
   const characters = useCharacters(game.campaignId);
   if (!characters.data || characters.data.length === 0) return null;
   return (
-    <section className="panel" aria-labelledby="table-heading">
-      <h2 id="table-heading">Personajes</h2>
-      <ul className="table-characters">
-        {characters.data.map((character) => (
-          <li key={character.id}>
-            <Link to={`/personajes/${character.id}`}>{character.name}</Link>
-            <span className="muted">
-              {SEVERITY_LABELS[character.wounds.severity]} · Rasguños {character.wounds.scratches}/
-              {character.wounds.scratchBoxes} · Suerte {character.luck}
-            </span>
-          </li>
-        ))}
+    <section className="table-party" aria-labelledby="table-heading">
+      <h2 id="table-heading" className="column-title">
+        Personajes
+      </h2>
+      <ul className="party-list">
+        {characters.data.map((character) => {
+          const { wounds, gear } = character;
+          const speaking = floor.kind === 'character' && floor.characterId === character.id;
+          return (
+            <li key={character.id} className={speaking ? 'party-card speaking' : 'party-card'}>
+              <div className="party-head">
+                <Avatar name={character.name} id={character.id} />
+                <span className="party-name">
+                  <Link to={`/personajes/${character.id}`}>{character.name}</Link>
+                  <span className="muted">
+                    {character.ownerName}
+                    {speaking && ' · tiene la palabra'}
+                  </span>
+                </span>
+                <span
+                  className="pips small"
+                  role="img"
+                  aria-label={`Suerte: ${character.luck} de ${LUCK_PER_SESSION}`}
+                >
+                  {Array.from({ length: LUCK_PER_SESSION }, (_, i) => (
+                    <i key={i} className={i < character.luck ? 'pip filled' : 'pip'} />
+                  ))}
+                </span>
+              </div>
+              <div className="party-state">
+                <span
+                  className="mini-boxes"
+                  role="img"
+                  aria-label={`Rasguños: ${wounds.scratches} de ${wounds.scratchBoxes}`}
+                >
+                  {Array.from({ length: wounds.scratchBoxes }, (_, i) => (
+                    <i key={i} className={i < wounds.scratches ? 'marked' : undefined} />
+                  ))}
+                </span>
+                <span className={wounds.severity === 'none' ? 'severity' : 'severity hurt'}>
+                  {SEVERITY_LABELS[wounds.severity]}
+                </span>
+              </div>
+              <p className="party-gear">
+                {weaponLabel(gear.melee)}
+                {gear.ranged && ` · ${weaponLabel(gear.ranged)}`}
+                {gear.armor !== 'none' &&
+                  ` · armadura ${ARMOR_CLASSES[gear.armor].label.toLowerCase()}`}
+                {gear.shield && ' · escudo'}
+              </p>
+            </li>
+          );
+        })}
       </ul>
       {master && (
         <>

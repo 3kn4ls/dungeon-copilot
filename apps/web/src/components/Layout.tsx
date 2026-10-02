@@ -17,6 +17,8 @@ export function Layout() {
   const campaignId = useCurrentCampaignId();
   // Sale si sigue siendo miembro: la lista dice también si tiene una partida en juego.
   const campaign = useCampaigns(!!me?.user).data?.find((summary) => summary.id === campaignId);
+  // La sala de una partida usa todo el ancho: sus columnas se desplazan por separado.
+  const wide = useLocation().pathname.startsWith('/partidas/');
 
   async function logout() {
     await api.logout().catch(() => undefined);
@@ -65,7 +67,7 @@ export function Layout() {
           <RailLink to="/entrar" icon="enter" label="Entrar" />
         )}
       </nav>
-      <main className="page">
+      <main className={wide ? 'page wide' : 'page'}>
         <Outlet />
       </main>
     </div>
