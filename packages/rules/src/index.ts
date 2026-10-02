@@ -1,5 +1,6 @@
 export * from './advancement';
 export * from './attributes';
+export * from './battlemap';
 export * from './character';
 export * from './combat';
 export * from './dice';
