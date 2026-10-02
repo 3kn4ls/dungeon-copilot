@@ -52,7 +52,7 @@ import {
   type SpentAbilities,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
@@ -89,6 +89,7 @@ import {
 import { LuckReroll } from '../components/Luck';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
+import { OddsBar, formatChance } from '../components/Odds';
 import { RecapPanel } from '../components/Recap';
 import { RecipientSelect, useRecipient } from '../components/Recipient';
 import {
@@ -129,7 +130,6 @@ import {
   freeDraft,
   interventionPreset,
   npcDraft,
-  percent,
   previewCheck,
   toSideRequest,
   type RollPreset,
@@ -340,10 +340,7 @@ export function GamePage() {
           {game.screenToken && <ScreenLink campaignId={game.campaignId} token={game.screenToken} />}
           <CloseGame game={game} />
         </aside>
-        <div className="room-stage">
-          <MasterDesk state={state.data} />
-        </div>
-        <div className="room-log">{feed}</div>
+        <MasterDesk state={state.data} feed={feed} />
       </div>
     );
   }
@@ -610,12 +607,13 @@ interface Handoff {
 }
 
 /**
- * La mesa del máster: a quién da la palabra o, en combate, el orden y los turnos; las
- * intervenciones que esperan y las tiradas que ha pedido; y sus acciones (enseñar, hablar por un
- * PNJ, tirar, anotar). Lo que elige hacer con una intervención, o con el turno de unos PNJ, abre
- * la acción que toca, lista para usarla.
+ * La mesa del máster, en dos columnas de la sala. En el centro, a quién da la palabra o, en
+ * combate, el orden y los turnos, y debajo sus acciones (enseñar, hablar por un PNJ, tirar,
+ * anotar). A la derecha, lo que espera (las intervenciones y las tiradas que ha pedido) encima
+ * del registro (`feed`). Lo que elige hacer con una intervención, o con el turno de unos PNJ,
+ * abre la acción que toca, lista para usarla.
  */
-function MasterDesk({ state }: { state: GameState }) {
+function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
   const { game, events } = state;
   const [action, setAction] = useState<Action>('reveal');
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -647,125 +645,148 @@ function MasterDesk({ state }: { state: GameState }) {
 
   const rolling = handedTo('roll');
   const starting = handedTo('combat');
+  const requests = pendingRollRequests(events);
+  const queued = waiting.length + requests.length;
   return (
     <>
-      <section className="panel" aria-labelledby="floor-heading">
-        <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
-        <SceneLine events={events} />
-        {combat ? (
-          <CombatTracker
-            game={game}
-            combat={combat}
-            characters={characters}
-            spent={spent}
-            ai={ai.data?.enabled === true}
-            decisions={ai.data?.decisions === true}
-            onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
+      <div className="room-stage">
+        <section className="panel" aria-labelledby="floor-heading">
+          <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+          <SceneLine events={events} />
+          {combat ? (
+            <CombatTracker
+              game={game}
+              combat={combat}
+              characters={characters}
+              spent={spent}
+              ai={ai.data?.enabled === true}
+              decisions={ai.data?.decisions === true}
+              onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
+            />
+          ) : (
+            <FloorControl game={game} floor={floor} characters={characters} />
+          )}
+          {combat ? (
+            <>
+              <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
+              <EndCombat game={game} />
+            </>
+          ) : (
+            <>
+              <StartCombat
+                key={starting?.key ?? 0}
+                game={game}
+                characters={characters}
+                npcs={npcs}
+                answering={starting?.intervention}
+                onStopAnswering={stopAnswering}
+              />
+              <SceneControl
+                game={game}
+                fighting={false}
+                onStarted={() => {
+                  // Lo normal es describirla: se abre Enseñar.
+                  setAction('reveal');
+                  desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                }}
+              />
+            </>
+          )}
+        </section>
+
+        {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
+          que se estaba escribiendo ni las ideas de la IA. */}
+        <section className="panel desk" aria-label="Acciones del máster" ref={desk}>
+          <Segmented
+            label="Qué quieres hacer"
+            value={action}
+            options={[
+              ['reveal', 'Enseñar'],
+              ['talk', 'Hablar como PNJ'],
+              ['roll', 'Tirar'],
+              ['note', 'Anotar'],
+            ]}
+            onChange={setAction}
           />
-        ) : (
-          <FloorControl game={game} floor={floor} characters={characters} />
-        )}
-        <InterventionQueue
-          game={game}
-          floor={floor}
-          combat={combat}
-          pending={waiting}
-          onHandoff={(to, intervention) =>
-            hand(to, {
-              intervention,
-              roll:
-                to === 'roll' ? interventionPreset(intervention, characters, combat) : undefined,
-              // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
-              // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
-              suggest:
-                to === 'roll' &&
-                ai.data?.decisions &&
-                isCheckedIntent(intervention.intent) &&
-                intervention.text.trim()
-                  ? (suggestion) => interventionPreset(intervention, characters, combat, suggestion)
-                  : undefined,
-            })
-          }
-        />
-        <PendingRollRequests game={game} pending={pendingRollRequests(events)} />
-        {combat ? (
-          <>
-            <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
-            <EndCombat game={game} />
-          </>
-        ) : (
-          <>
-            <StartCombat
-              key={starting?.key ?? 0}
+          <div hidden={action !== 'reveal'}>
+            <RevealForm
               game={game}
               characters={characters}
-              npcs={npcs}
-              answering={starting?.intervention}
+              scene={currentScene(events)?.title}
+              starting={!events.some((event) => event.kind === 'reveal')}
+              answering={handedTo('reveal')?.intervention}
               onStopAnswering={stopAnswering}
             />
-            <SceneControl
+          </div>
+          <div hidden={action !== 'talk'}>
+            <TalkPanel
               game={game}
-              fighting={false}
-              onStarted={() => {
-                // Lo normal es describirla: se abre Enseñar.
-                setAction('reveal');
-                desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-              }}
+              characters={characters}
+              answering={handedTo('talk')?.intervention}
+              onStopAnswering={stopAnswering}
             />
-          </>
-        )}
-      </section>
-
-      {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
-          que se estaba escribiendo ni las ideas de la IA. */}
-      <section className="panel" aria-label="Acciones del máster" ref={desk}>
-        <Segmented
-          label="Qué quieres hacer"
-          value={action}
-          options={[
-            ['reveal', 'Enseñar'],
-            ['talk', 'Hablar'],
-            ['roll', 'Tirar'],
-            ['note', 'Anotar'],
-          ]}
-          onChange={setAction}
-        />
-        <div hidden={action !== 'reveal'}>
-          <RevealForm
-            game={game}
-            characters={characters}
-            scene={currentScene(events)?.title}
-            starting={!events.some((event) => event.kind === 'reveal')}
-            answering={handedTo('reveal')?.intervention}
-            onStopAnswering={stopAnswering}
-          />
-        </div>
-        <div hidden={action !== 'talk'}>
-          <TalkPanel
-            game={game}
-            characters={characters}
-            answering={handedTo('talk')?.intervention}
-            onStopAnswering={stopAnswering}
-          />
-        </div>
-        <div hidden={action !== 'roll'}>
-          {/* Cada tirada que se prepara (para una intervención o para unos PNJ) empieza de
+          </div>
+          <div hidden={action !== 'roll'}>
+            {/* Cada tirada que se prepara (para una intervención o para unos PNJ) empieza de
               cero; al hacerla o pedirla, Tirar vuelve a quedar libre. */}
-          <RollForm
-            key={rolling?.key ?? 0}
-            game={game}
-            embedded
-            preset={rolling?.roll}
-            suggest={rolling?.suggest}
-            answering={rolling?.intervention}
-            onStopAnswering={stopAnswering}
-            onDone={rolling ? stopAnswering : undefined}
-          />
-        </div>
-        <div hidden={action !== 'note'}>
-          <NoteForm gameId={game.id} />
-        </div>
-      </section>
+            <RollForm
+              key={rolling?.key ?? 0}
+              game={game}
+              embedded
+              preset={rolling?.roll}
+              suggest={rolling?.suggest}
+              answering={rolling?.intervention}
+              onStopAnswering={stopAnswering}
+              onDone={rolling ? stopAnswering : undefined}
+            />
+          </div>
+          <div hidden={action !== 'note'}>
+            <NoteForm gameId={game.id} />
+          </div>
+        </section>
+      </div>
+      <div className="room-log">
+        <section className="queue-panel" aria-labelledby="queue-heading">
+          <h2 id="queue-heading" className="column-title">
+            Esperando {queued > 0 && <span className="count">{queued}</span>}
+          </h2>
+          {queued === 0 ? (
+            <p className="muted">
+              Nadie espera. Cuando alguien intervenga o pidas una tirada, aparecerá aquí.
+            </p>
+          ) : (
+            <>
+              <InterventionQueue
+                game={game}
+                floor={floor}
+                combat={combat}
+                pending={waiting}
+                onHandoff={(to, intervention) =>
+                  hand(to, {
+                    intervention,
+                    roll:
+                      to === 'roll'
+                        ? interventionPreset(intervention, characters, combat)
+                        : undefined,
+                    // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
+                    // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
+                    suggest:
+                      to === 'roll' &&
+                      ai.data?.decisions &&
+                      isCheckedIntent(intervention.intent) &&
+                      intervention.text.trim()
+                        ? (suggestion) =>
+                            interventionPreset(intervention, characters, combat, suggestion)
+                        : undefined,
+                  })
+                }
+              />
+              <PendingRollRequests game={game} pending={requests} />
+            </>
+          )}
+        </section>
+        {feed}
+      </div>
     </>
   );
 }
@@ -1419,118 +1440,117 @@ function RollForm(props: {
           onApply={() => suggestion.data && applySuggestion(suggestion.data)}
         />
       )}
-      <SideEditor
-        title="Quién tira"
-        draft={actorDraft}
-        characters={available}
-        npcs={npcs}
-        allowFree={isMaster}
-        onChange={edit(setActor)}
+      <div className="composer-grid">
+        <SideEditor
+          title="Quién tira"
+          draft={actorDraft}
+          characters={available}
+          npcs={npcs}
+          allowFree={isMaster}
+          onChange={edit(setActor)}
+        />
+        <div className="stack tight">
+          {isMaster && (
+            <Segmented
+              label="Contra"
+              value={against}
+              options={[
+                ['difficulty', 'Una dificultad'],
+                ['opposed', 'Un rival'],
+              ]}
+              onChange={(next) => {
+                setTouched(true);
+                setAgainst(next);
+                setSituation(next === 'opposed' ? 'melee' : 'test');
+              }}
+            />
+          )}
+          {shooting ? (
+            <fieldset className="side-editor">
+              <legend className="field-label">Dificultad a distancia</legend>
+              <div className="steppers">
+                <Stepper
+                  label="Destreza del objetivo"
+                  value={shot.dexterity}
+                  min={0}
+                  max={6}
+                  onChange={(dexterity) => edit(setShot)({ ...shot, dexterity })}
+                  hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
+                />
+              </div>
+              <Segmented
+                label="Distancia"
+                value={shot.range}
+                options={RANGES}
+                onChange={(range) => edit(setShot)({ ...shot, range })}
+              />
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={shot.cover}
+                  onChange={(event) => edit(setShot)({ ...shot, cover: event.target.checked })}
+                />
+                Cobertura parcial (+2)
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={shot.shield}
+                  onChange={(event) => edit(setShot)({ ...shot, shield: event.target.checked })}
+                />
+                Lleva escudo (+1)
+              </label>
+              <p className="side-summary">
+                Dificultad <strong>{target}</strong>
+                {shooter?.advancedSkills.includes('deadeye') &&
+                  ` · con Disparo certero, ${shooter.name} no cuenta la distancia media ni la cobertura`}
+              </p>
+            </fieldset>
+          ) : against === 'difficulty' ? (
+            <div className="field">
+              <span className="field-label">Dificultad</span>
+              <div className="chips" role="group" aria-label="Dificultad">
+                {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    className="chip"
+                    aria-pressed={difficulty === level}
+                    onClick={() => edit(setDifficulty)(level)}
+                  >
+                    {DIFFICULTY_LABELS[level]}{' '}
+                    <strong className="num">{DIFFICULTIES[level]}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <SideEditor
+              title="Quién se opone"
+              draft={opponent}
+              characters={characters.data}
+              npcs={npcs}
+              allowFree
+              onChange={edit(setOpponent)}
+            />
+          )}
+        </div>
+      </div>
+
+      <Segmented
+        label="Situación"
+        value={situation}
+        options={SITUATIONS.map((s) => [s, SITUATION_LABELS[s]])}
+        onChange={(next) => {
+          setTouched(true);
+          setSituation(next);
+          // A distancia se tira contra una dificultad, que sale del objetivo.
+          if (next === 'ranged') setAgainst('difficulty');
+        }}
       />
 
       {isMaster && (
-        <Segmented
-          label="Contra"
-          value={against}
-          options={[
-            ['difficulty', 'Dificultad'],
-            ['opposed', 'Rival'],
-          ]}
-          onChange={(next) => {
-            setTouched(true);
-            setAgainst(next);
-            setSituation(next === 'opposed' ? 'melee' : 'test');
-          }}
-        />
-      )}
-      {shooting ? (
-        <fieldset className="side-editor">
-          <legend className="field-label">Dificultad a distancia</legend>
-          <div className="steppers">
-            <Stepper
-              label="Destreza del objetivo"
-              value={shot.dexterity}
-              min={0}
-              max={6}
-              onChange={(dexterity) => edit(setShot)({ ...shot, dexterity })}
-              hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
-            />
-          </div>
-          <Segmented
-            label="Distancia"
-            value={shot.range}
-            options={RANGES}
-            onChange={(range) => edit(setShot)({ ...shot, range })}
-          />
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={shot.cover}
-              onChange={(event) => edit(setShot)({ ...shot, cover: event.target.checked })}
-            />
-            Cobertura parcial (+2)
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={shot.shield}
-              onChange={(event) => edit(setShot)({ ...shot, shield: event.target.checked })}
-            />
-            Lleva escudo (+1)
-          </label>
-          <p className="side-summary">
-            Dificultad <strong>{target}</strong>
-            {shooter?.advancedSkills.includes('deadeye') &&
-              ` · con Disparo certero, ${shooter.name} no cuenta la distancia media ni la cobertura`}
-          </p>
-        </fieldset>
-      ) : against === 'difficulty' ? (
-        <label className="field">
-          <span className="field-label">Dificultad</span>
-          <select
-            value={difficulty}
-            onChange={(event) => edit(setDifficulty)(event.target.value as DifficultyLevel)}
-          >
-            {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
-              <option key={level} value={level}>
-                {DIFFICULTY_LABELS[level]} ({DIFFICULTIES[level]})
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : (
-        <SideEditor
-          title="Quién se opone"
-          draft={opponent}
-          characters={characters.data}
-          npcs={npcs}
-          allowFree
-          onChange={edit(setOpponent)}
-        />
-      )}
-
-      <label className="field">
-        <span className="field-label">Situación</span>
-        <select
-          value={situation}
-          onChange={(event) => {
-            const next = event.target.value as Situation;
-            setTouched(true);
-            setSituation(next);
-            // A distancia se tira contra una dificultad, que sale del objetivo.
-            if (next === 'ranged') setAgainst('difficulty');
-          }}
-        >
-          {SITUATIONS.map((s) => (
-            <option key={s} value={s}>
-              {SITUATION_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {isMaster && (
-        <>
+        <div className="composer-options">
           <label className="check">
             <input
               type="checkbox"
@@ -1548,19 +1568,21 @@ function RollForm(props: {
               ? `En secreto: solo lo veis tú y quien juega con ${rollerName}`
               : 'Tirada secreta: solo la ves tú'}
           </label>
-        </>
+        </div>
       )}
 
-      <div className="roll-bar">
-        <p className="bonus">
-          {odds ? (
+      <div className="composer-foot">
+        <div className="composer-summary" aria-live="polite">
+          {odds && (
             <>
-              <strong>{percent(successChance(odds))}</strong> de conseguirlo
+              <p>
+                <strong>{formatChance(successChance(odds))}</strong> de conseguirlo
+                {asking && `: la tira ${rollerName}`}.
+              </p>
+              <OddsBar odds={odds} legend />
             </>
-          ) : (
-            ' '
           )}
-        </p>
+        </div>
         <button type="submit" className="roll-button" disabled={pending}>
           {asking ? (pending ? 'Pidiendo…' : 'Pedir la tirada') : pending ? 'Tirando…' : 'Tirar'}
         </button>

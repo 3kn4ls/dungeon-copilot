@@ -15,6 +15,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api';
 import { useStoreGameEvent } from '../queries';
+import { Avatar } from './Avatar';
 import { eventTime, intentLabel } from './GameEvents';
 import { holdsFloor } from './Floor';
 import { ErrorNote } from './ui';
@@ -303,12 +304,10 @@ export function InterventionQueue(props: {
   });
   const busy = giveFloor.isPending || join.isPending || answer.isPending;
 
-  if (pending.length === 0) {
-    return <p className="muted">Nadie ha pedido la palabra.</p>;
-  }
+  // Sin nadie esperando no se enseña nada: lo dice quien enseña la cola.
+  if (pending.length === 0) return null;
   return (
     <div className="stack tight">
-      <p className="field-label">Piden la palabra</p>
       <ol className="queue">
         {pending.map((intervention) => {
           const talking = holdsFloor(floor, [intervention.characterId]);
@@ -322,18 +321,22 @@ export function InterventionQueue(props: {
             else onHandoff(action === 'fight' ? 'combat' : action, intervention);
           };
           return (
-            <li key={intervention.id} className="queue-item">
+            <li
+              key={intervention.id}
+              className={intervention.visibility === 'private' ? 'queue-item secret' : 'queue-item'}
+            >
               <p className="queue-who">
-                <strong>{intervention.name}</strong> ·{' '}
-                {intentLabel(intervention.intent, intervention.target)}
-                <span className="muted"> · {eventTime(intervention)}</span>
+                <Avatar name={intervention.name} id={intervention.characterId} size="small" />
+                <strong>{intervention.name}</strong>
+                <span>{intentLabel(intervention.intent, intervention.target)}</span>
                 {intervention.visibility === 'private' && (
                   <span className="badge secret">En secreto</span>
                 )}
                 {talking && <span className="badge">Tiene la palabra</span>}
+                <span className="feed-time">{eventTime(intervention)}</span>
               </p>
               {intervention.text ? (
-                <p className="prewrap">{intervention.text}</p>
+                <p className="prewrap queue-said">{intervention.text}</p>
               ) : (
                 <p className="muted">Sin texto: te lo dirá de palabra.</p>
               )}

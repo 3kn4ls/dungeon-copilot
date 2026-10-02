@@ -549,6 +549,31 @@
   margin: 0;
 }
 
+/* Lo que espera al máster, encima del registro: intervenciones (en ámbar; las secretas, en
+   violeta) y las tiradas que ha pedido. */
+.queue-panel {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--ember);
+  color: var(--ember-ink);
+  font-family: var(--body);
+  font-size: 13px;
+  letter-spacing: 0;
+  vertical-align: middle;
+}
+
 .queue {
   list-style: none;
   margin: 0;
@@ -559,22 +584,46 @@
 
 .queue-item {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   padding: 12px;
   border: 1px solid var(--ember);
   border-radius: var(--radius-card);
   background: var(--ember-soft);
 }
 
+.queue-item.secret {
+  border-color: var(--arcane);
+  background: var(--arcane-soft);
+}
+
+.queue-item.request {
+  border-style: dashed;
+  background: var(--raised);
+}
+
 .queue-item p {
   margin: 0;
+}
+
+.queue-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 15px;
+}
+
+.queue-said {
+  font-family: var(--display);
+  font-size: 17px;
+  line-height: 1.5;
 }
 
 .queue-who .badge,
 .waiting .badge,
 .answering .badge,
 .requested-title .badge {
-  margin-left: 8px;
+  margin-left: 0;
 }
 
 /* En las acciones del máster, la intervención a la que responde. */
@@ -953,4 +1002,15 @@
 .npc-sheet .secret dt,
 .npc-sheet .secret dd {
   color: var(--arcane);
+}
+
+/* Las acciones del máster y el compositor de tiradas de la sala. */
+.composer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.composer-options .check {
+  font-size: 15px;
 }
