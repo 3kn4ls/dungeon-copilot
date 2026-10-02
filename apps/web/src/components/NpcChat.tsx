@@ -9,6 +9,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStoreGameEvent } from '../queries';
+import { LeakWarning, useLeakGuard } from './Decisions';
 import { RecipientSelect, useRecipient } from './Recipient';
 import { ConfirmButton, ErrorNote, LineEditor, useSessionState } from './ui';
 
@@ -57,6 +58,11 @@ export function NpcChat({
   /** La intervención que ya ha pasado a la charla, para no pasarla dos veces. */
   const [heard, setHeard] = useState<number | null>(null);
   const recipient = characters.find((character) => character.id === to);
+  // La IA que escribe conoce los secretos del PNJ: antes de enseñar una frase, la que decide mira
+  // si desvela alguno.
+  const leaks = useLeakGuard(gameId);
+  /** La frase que está mirando el guardián. */
+  const [guarded, setGuarded] = useState<string | null>(null);
 
   const reveal = useMutation({
     mutationFn: (line: ChatLine) => {
@@ -225,10 +231,21 @@ export function NpcChat({
                         <button
                           type="button"
                           className="button small primary"
-                          disabled={reveal.isPending}
-                          onClick={() => reveal.mutate(line)}
+                          disabled={reveal.isPending || leaks.checking}
+                          onClick={() => {
+                            setGuarded(line.id);
+                            void leaks.guard(
+                              { body: line.text, npcId: npc.id },
+                              () => reveal.mutate(line),
+                              () => setEditing({ id: line.id, text: line.text }),
+                            );
+                          }}
                         >
-                          {recipient ? `Enseñar solo a ${recipient.name}` : 'Enseñar a la mesa'}
+                          {leaks.checking && guarded === line.id
+                            ? 'Comprobando…'
+                            : recipient
+                              ? `Enseñar solo a ${recipient.name}`
+                              : 'Enseñar a la mesa'}
                         </button>
                       )}
                       <button
@@ -283,6 +300,7 @@ export function NpcChat({
           </button>
         </div>
       )}
+      {leaks.alert && <LeakWarning alert={leaks.alert} onDismiss={leaks.dismiss} />}
       {gameId && <RecipientSelect characters={characters} value={to} onChange={setTo} />}
       <ErrorNote error={error ?? reveal.error} />
       {Boolean(error) && last?.role === 'table' && (

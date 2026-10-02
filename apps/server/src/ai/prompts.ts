@@ -842,26 +842,41 @@ export type PromptFighter =
   | { kind: 'character'; name: string; severity: Severity; gear: Gear }
   | { kind: 'npc'; name: string; profile: NpcProfile; count: number; harm: NpcHarm };
 
-/** Cómo va quien pelea, en una línea: «Kael (PJ): herido; Espada larga (media)». */
-function fighterLine(fighter: PromptFighter): string {
+/** Cómo va quien pelea: «Kael (PJ): herido; lleva Espada larga (media)». */
+export function fighterText(fighter: PromptFighter): string {
   if (fighter.kind === 'character') {
     const state = SEVERITY_LABELS[fighter.severity].toLowerCase();
-    return `- ${fighter.name} (PJ): ${state}; lleva ${gearText(fighter.gear)}`;
+    return `${fighter.name} (PJ): ${state}; lleva ${gearText(fighter.gear)}`;
   }
   const profile = NPC_PROFILES[fighter.profile].label.toLowerCase();
   const standing = fighter.count - fighter.harm.down;
   let state = fighter.harm.damage > 0 ? 'herido' : 'sin heridas';
   if (fighter.count > 1) state = `quedan ${standing} de ${fighter.count} en pie`;
-  return `- ${fighter.name} (PNJ, ${profile}): ${state}`;
+  return `${fighter.name} (PNJ, ${profile}): ${state}`;
 }
 
-/** Los PNJ a los que les toca, y lo que sabe el máster de ellos si son de la campaña. */
-export interface PromptActingNpc {
-  fighter: PromptFighter & { kind: 'npc' };
+/** Cómo va quien pelea, en una línea de una lista. */
+export const fighterLine = (fighter: PromptFighter) => `- ${fighterText(fighter)}`;
+
+/** Lo que sabe el máster de un PNJ de la campaña que pelea: nunca lo que oculta. */
+export interface PromptNpcKnown {
   concept?: string | undefined;
   personality?: string | undefined;
   goals?: string | undefined;
 }
+
+/** Los PNJ a los que les toca, y lo que sabe el máster de ellos si son de la campaña. */
+export interface PromptActingNpc extends PromptNpcKnown {
+  fighter: PromptFighter & { kind: 'npc' };
+}
+
+/** Lo que sabe el máster de un PNJ, en líneas: «Concepto: …». */
+export const knownLines = (npc: PromptNpcKnown) =>
+  describe([
+    ['Concepto', fit(npc.concept ?? '', NPC_CONCEPT_CHARS)],
+    ['Personalidad', fit(npc.personality ?? '', NPC_CONCEPT_CHARS)],
+    ['Objetivos', fit(npc.goals ?? '', NPC_CONCEPT_CHARS)],
+  ]);
 
 export interface TacticsPrompt {
   campaign: PromptCampaign;
@@ -892,11 +907,7 @@ export function tacticsMessages(prompt: TacticsPrompt): AiMessage[] {
 
   const party = partyLines(prompt.characters);
   const hint = fit(prompt.hint, IDEA_HINT_CHARS);
-  const known = describe([
-    ['Concepto', fit(acting.concept ?? '', NPC_CONCEPT_CHARS)],
-    ['Personalidad', fit(acting.personality ?? '', NPC_CONCEPT_CHARS)],
-    ['Objetivos', fit(acting.goals ?? '', NPC_CONCEPT_CHARS)],
-  ]);
+  const known = knownLines(acting);
   const user = [
     campaignBlock(prompt.campaign),
     party.length > 0 ? `Personajes de los jugadores:\n${party.join('\n')}` : '',

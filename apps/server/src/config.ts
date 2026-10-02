@@ -16,14 +16,18 @@ export interface Config {
   allowRegistration: boolean;
   /** Carpeta con la web compilada. Si no existe, el servidor solo sirve la API. */
   webDist?: string;
-  /** IA de los PNJ. Sin ella, todo funciona igual salvo lo que escribe la IA. */
+  /** La IA. Sin ella, todo funciona igual salvo lo que escribe o sugiere la IA. */
   ollama?: OllamaConfig;
 }
 
+/** Ollama, con al menos uno de sus dos modelos. */
 export interface OllamaConfig {
   /** Dirección de Ollama: el del cluster, otro servidor o https://ollama.com. */
   url: string;
-  model: string;
+  /** El modelo que escribe: los PNJ, las escenas, las ideas y los resúmenes. */
+  model?: string;
+  /** El modelo que decide (Nimble): qué tirada pedir, qué hacen los enemigos, qué se desvela. */
+  decisionModel?: string;
   /** Para los modelos en la nube de Ollama. */
   apiKey?: string;
 }
@@ -50,10 +54,15 @@ function parsePort(value: string | undefined): number {
 function parseOllama(env: Env): OllamaConfig | undefined {
   const url = env.OLLAMA_URL?.trim();
   const model = env.OLLAMA_MODEL?.trim();
+  const decisionModel = env.OLLAMA_DECISION_MODEL?.trim();
   const apiKey = env.OLLAMA_API_KEY?.trim();
-  if (!url && !model) return undefined;
+  if (!url && !model && !decisionModel) return undefined;
   if (!url) throw new Error('Falta OLLAMA_URL: la dirección de Ollama, como http://ollama:11434');
-  if (!model) throw new Error('Falta OLLAMA_MODEL: el modelo de Ollama que usará la IA');
+  if (!model && !decisionModel) {
+    throw new Error(
+      'Falta OLLAMA_MODEL: el modelo de Ollama que usará la IA (u OLLAMA_DECISION_MODEL, si solo quieres sus sugerencias)',
+    );
+  }
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -63,7 +72,12 @@ function parseOllama(env: Env): OllamaConfig | undefined {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`OLLAMA_URL debe empezar por http:// o https://, llegó "${url}"`);
   }
-  return { url, model, ...(apiKey ? { apiKey } : {}) };
+  return {
+    url,
+    ...(model ? { model } : {}),
+    ...(decisionModel ? { decisionModel } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
 }
 
 /** Lee la configuración de las variables de entorno. Las rutas relativas parten de cwd. */

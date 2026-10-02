@@ -4,6 +4,7 @@ export * from './auth';
 export * from './campaigns';
 export * from './characters';
 export * from './combat';
+export * from './decisions';
 export * from './games';
 export * from './npcs';
 export * from './rolls';

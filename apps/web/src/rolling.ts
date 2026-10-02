@@ -16,17 +16,19 @@ import {
   type Range,
   type Situation,
 } from '@dungeon-copilot/rules';
-import type {
-  Blow,
-  CharacterView,
-  Combat,
-  Combatant,
-  GameRollRequest,
-  InterventionEvent,
-  InterventionIntent,
-  NpcCombatant,
-  NpcView,
-  RollSideRequest,
+import {
+  SUGGESTION_THRESHOLDS,
+  type Blow,
+  type CharacterView,
+  type CheckSuggestion,
+  type Combat,
+  type Combatant,
+  type GameRollRequest,
+  type InterventionEvent,
+  type InterventionIntent,
+  type NpcCombatant,
+  type NpcView,
+  type RollSideRequest,
 } from '@dungeon-copilot/shared';
 
 /** Lado de una tirada mientras se prepara: un personaje o algo que describe el máster. */
@@ -265,12 +267,14 @@ const INTENT_CHECKS: Record<InterventionIntent, (character: CharacterView) => st
 
 /**
  * La tirada que pide, de entrada, una intervención: la hace su jugador, y en secreto si lo era.
- * Un ataque va contra quien ataca, si se sabe; un disparo, con la Destreza del objetivo.
+ * Un ataque va contra quien ataca, si se sabe; un disparo, con la Destreza del objetivo. Con
+ * `suggestion`, con lo que sugiere la IA (ver withSuggestion).
  */
 export function interventionPreset(
   intervention: InterventionEvent,
   characters: CharacterView[],
   combat: Combat | null,
+  suggestion?: CheckSuggestion,
 ): RollPreset | undefined {
   const character = characters.find((c) => c.id === intervention.characterId);
   if (!character) return undefined;
@@ -303,15 +307,50 @@ export function interventionPreset(
         situation: 'melee',
         opponent: target ? combatantDraft(target, characters) : preset.opponent,
       };
-    case 'ranged':
-      return {
+    case 'ranged': {
+      const shooting: RollPreset = {
         ...preset,
         situation: 'ranged',
         shot: target ? combatantShot(target, characters) : DEFAULT_SHOT,
       };
+      return suggestion ? withSuggestion(shooting, suggestion, target) : shooting;
+    }
     default:
-      return preset;
+      return suggestion ? withSuggestion(preset, suggestion, target) : preset;
   }
+}
+
+/**
+ * La tirada con lo que sugiere la IA: la habilidad más probable y la dificultad; ventaja si encaja
+ * su trasfondo; enfrentada contra un rival si alguien se opone (salvo que vaya contra alguien del
+ * combate); y en un disparo, la distancia y la cobertura.
+ */
+function withSuggestion(
+  preset: RollPreset,
+  suggestion: CheckSuggestion,
+  target: Combatant | undefined,
+): RollPreset {
+  const [best] = suggestion.skills;
+  const fits = (suggestion.background ?? 0) >= SUGGESTION_THRESHOLDS.background;
+  const actor: SideDraft =
+    preset.actor.kind === 'character'
+      ? {
+          ...preset.actor,
+          check: best ? `skill:${best.id}` : preset.actor.check,
+          edge: fits ? 'advantage' : preset.actor.edge,
+        }
+      : preset.actor;
+  const opposed = !target && (suggestion.opposed ?? 0) >= SUGGESTION_THRESHOLDS.opposed;
+  const { shot } = suggestion;
+  return {
+    ...preset,
+    actor,
+    difficulty: suggestion.difficulty ?? preset.difficulty,
+    ...(opposed ? { against: 'opposed' as const, opponent: freeDraft('Rival') } : {}),
+    shot: shot
+      ? { ...preset.shot, range: shot.range, cover: shot.cover >= SUGGESTION_THRESHOLDS.cover }
+      : preset.shot,
+  };
 }
 
 /** Unos PNJ atacan cuerpo a cuerpo a un personaje: se defiende su jugador, con lo que mejor se le dé. */

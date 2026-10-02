@@ -68,6 +68,24 @@ describe('loadConfig', () => {
     });
   });
 
+  it('las sugerencias de la IA usan su propio modelo, con el otro o solas', () => {
+    expect(
+      loadConfig(
+        {
+          OLLAMA_URL: 'http://ollama:11434',
+          OLLAMA_MODEL: 'qwen2.5:7b',
+          OLLAMA_DECISION_MODEL: ' nimble ',
+        },
+        cwd,
+      ).ollama,
+    ).toEqual({ url: 'http://ollama:11434', model: 'qwen2.5:7b', decisionModel: 'nimble' });
+    expect(
+      loadConfig({ OLLAMA_URL: 'http://ollama:11434', OLLAMA_DECISION_MODEL: 'nimble' }, cwd)
+        .ollama,
+    ).toEqual({ url: 'http://ollama:11434', decisionModel: 'nimble' });
+    expect(() => loadConfig({ OLLAMA_DECISION_MODEL: 'nimble' }, cwd)).toThrow('OLLAMA_URL');
+  });
+
   it('avisa si a la IA le falta la dirección o el modelo', () => {
     expect(() => loadConfig({ OLLAMA_URL: 'http://ollama:11434' }, cwd)).toThrow('OLLAMA_MODEL');
     expect(() => loadConfig({ OLLAMA_MODEL: 'llama3.1' }, cwd)).toThrow('OLLAMA_URL');

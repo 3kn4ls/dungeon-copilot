@@ -9,6 +9,7 @@ import type {
   AuthResponse,
   AwardXpRequest,
   CampaignDetail,
+  CheckSuggestion,
   CampaignSummary,
   CharacterView,
   CloseGameRequest,
@@ -19,6 +20,8 @@ import type {
   DamageResponse,
   DealDamageRequest,
   EndCombatRequest,
+  EnemyDecision,
+  EnemyDecisionRequest,
   GameDetail,
   GameEvent,
   GameRollRequest,
@@ -45,11 +48,13 @@ import type {
   RecoverRequest,
   RegisterRequest,
   RerollRequest,
+  RevealCheckRequest,
   RevealDraftRequest,
   RevealRequest,
   RollRequest,
   RollResponse,
   ScreenState,
+  SecretLeak,
   SpeechRequest,
   StartCombatRequest,
   StartSceneRequest,
@@ -74,15 +79,23 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  url: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
       method,
       headers: body === undefined ? {} : { 'content-type': 'application/json' },
       body: body === undefined ? null : JSON.stringify(body),
+      signal: signal ?? null,
     });
-  } catch {
+  } catch (error) {
+    // Quien la pidió ya no espera la respuesta: no es un fallo de conexión.
+    if (signal?.aborted) throw error;
     throw new ApiError(0, { error: 'No hay conexión con el servidor' });
   }
   if (response.status === 204) return undefined as T;
@@ -211,6 +224,11 @@ export const api = {
     post<{ game: GameDetail; event: GameEvent }>(`/api/games/${id}/close`, body),
   reveal: (id: string, body: RevealRequest) =>
     post<EventResponse>(`/api/games/${id}/reveals`, body).then((r) => r.event),
+  /** La IA mira si lo que va a enseñar el máster desvela lo que oculta algún PNJ. */
+  checkReveal: (id: string, body: RevealCheckRequest, signal?: AbortSignal) =>
+    request<{ leaks: SecretLeak[] }>('POST', `/api/games/${id}/reveals/check`, body, signal).then(
+      (r) => r.leaks,
+    ),
   /** La IA convierte las notas del máster en la descripción de una escena, sin enseñarla. */
   draftReveal: (id: string, body: RevealDraftRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/reveals/draft`, body, options),
@@ -239,6 +257,14 @@ export const api = {
   /** Un jugador interviene o pide la palabra con su personaje. */
   intervene: (id: string, body: InterventionRequest) =>
     post<EventResponse>(`/api/games/${id}/interventions`, body).then((r) => r.event),
+  /** La IA sugiere qué tirada pedir para una intervención. No escribe nada en la partida. */
+  checkSuggestion: (id: string, eventId: number, signal?: AbortSignal) =>
+    request<{ suggestion: CheckSuggestion }>(
+      'POST',
+      `/api/games/${id}/interventions/${eventId}/check`,
+      undefined,
+      signal,
+    ).then((r) => r.suggestion),
   answerIntervention: (id: string, eventId: number, body: AnswerInterventionRequest) =>
     post<EventResponse>(`/api/games/${id}/interventions/${eventId}/answer`, body).then(
       (r) => r.event,
@@ -279,6 +305,14 @@ export const api = {
   /** La IA propone cómo contar el golpe de una tirada de combate, sin enseñarlo. */
   narrateBlow: (id: string, eventId: number, body: NarrationRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/rolls/${eventId}/narration`, body, options),
+  /** La IA sugiere a quién atacan unos PNJ y si siguen, huyen o se rinden. */
+  enemyDecision: (id: string, body: EnemyDecisionRequest, signal?: AbortSignal) =>
+    request<{ decision: EnemyDecision }>(
+      'POST',
+      `/api/games/${id}/combat/decision`,
+      body,
+      signal,
+    ).then((r) => r.decision),
   /** La IA propone qué pueden hacer unos PNJ en su turno, sin enseñarlo. */
   tactics: (id: string, body: TacticsRequest, options: AiTextOptions) =>
     aiText(`/api/games/${id}/combat/tactics`, body, options),

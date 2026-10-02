@@ -2,15 +2,24 @@ import { Readable } from 'node:stream';
 import type { AiTextChunk } from '@dungeon-copilot/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpError } from '../http/errors';
+import type { DecisionAnswers, DecisionQuestions, DecisionRequest, Decider } from './decide';
 import type { Ai, AiRequest } from './ollama';
 
 const AI_DISABLED =
   'La IA no está configurada: el servidor necesita OLLAMA_URL y OLLAMA_MODEL para usar Ollama';
+const DECIDER_DISABLED =
+  'Las sugerencias de la IA no están configuradas: el servidor necesita OLLAMA_URL y OLLAMA_DECISION_MODEL (Nimble)';
 
 /** La IA del servidor, o un 503 si no tiene. */
 export function requireAi(ai: Ai | null): Ai {
   if (!ai) throw new HttpError(503, AI_DISABLED);
   return ai;
+}
+
+/** La IA que sugiere decisiones, o un 503 si no tiene. */
+export function requireDecider(decider: Decider | null): Decider {
+  if (!decider) throw new HttpError(503, DECIDER_DISABLED);
+  return decider;
 }
 
 /**
@@ -23,6 +32,26 @@ export function abortWhenGone(request: FastifyRequest, reply: FastifyReply): Abo
   // Si se fue mientras se consultaba la base de datos, "close" ya pasó y no volverá a avisar.
   if (request.raw.socket.destroyed) controller.abort();
   return controller;
+}
+
+/**
+ * Pregunta a la IA que decide por quien espera la respuesta: si se va antes, se corta la
+ * pregunta. Devuelve null si ya no hay a quién contestar.
+ */
+export async function askDecider<Q extends DecisionQuestions>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  decider: Decider,
+  question: Omit<DecisionRequest<Q>, 'signal'>,
+): Promise<DecisionAnswers<Q> | null> {
+  const controller = abortWhenGone(request, reply);
+  try {
+    return await decider.decide({ ...question, signal: controller.signal });
+  } catch (error) {
+    if (!controller.signal.aborted) throw error;
+    reply.hijack();
+    return null;
+  }
 }
 
 const ndjson = (chunk: AiTextChunk) => `${JSON.stringify(chunk)}\n`;

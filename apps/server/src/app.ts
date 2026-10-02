@@ -1,6 +1,7 @@
 import fastifyCookie from '@fastify/cookie';
 import type { Random } from '@dungeon-copilot/rules';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { Decider } from './ai/decide';
 import type { Ai } from './ai/ollama';
 import { DEFAULT_SCRYPT_PARAMS, type ScryptParams } from './auth/password';
 import type { AppContext } from './context';
@@ -13,6 +14,7 @@ import { registerCampaignRoutes } from './routes/campaigns';
 import { registerCharacterRoutes } from './routes/characters';
 import { registerCombatRoutes } from './routes/combat';
 import { registerDamageRoutes } from './routes/damage';
+import { registerDecisionRoutes } from './routes/decisions';
 import { registerGameRoutes } from './routes/games';
 import { registerNpcRoutes } from './routes/npcs';
 import { registerRollRoutes } from './routes/rolls';
@@ -27,6 +29,8 @@ export interface AppOptions {
   random?: Random;
   /** IA de los PNJ (Ollama). Sin ella, la web no ofrece lo que escribe la IA. */
   ai?: Ai | null;
+  /** IA que sugiere decisiones (Nimble). Sin ella, la web no ofrece sus sugerencias. */
+  decider?: Decider | null;
   /** Cookies solo por HTTPS. Por defecto, "auto": según llegue la petición. */
   cookieSecure?: boolean | 'auto';
   allowRegistration?: boolean;
@@ -42,6 +46,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     db: options.db,
     hub: new GameHub(),
     ai: options.ai ?? null,
+    decider: options.decider ?? null,
     random: options.random ?? Math.random,
     cookieSecure: options.cookieSecure ?? 'auto',
     allowRegistration: options.allowRegistration ?? true,
@@ -59,6 +64,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     closing = true;
     ctx.hub.disconnectAll();
     ctx.ai?.close();
+    ctx.decider?.close();
   });
   // Una respuesta que acaba ya apagando (la de la IA, que avisa del corte) deja libre una
   // conexión keep-alive después de que Fastify cerrara las libres; sin esto, el apagado espera
@@ -78,6 +84,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   registerCombatRoutes(app, ctx);
   registerDamageRoutes(app, ctx);
   registerSceneRoutes(app, ctx);
+  registerDecisionRoutes(app, ctx);
   registerNpcRoutes(app, ctx);
   registerAiRoutes(app, ctx);
   registerRollRoutes(app, ctx.random);

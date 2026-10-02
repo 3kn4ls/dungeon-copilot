@@ -2242,6 +2242,48 @@ h1 .badge {
   font-size: 14px;
 }
 
+/* Lo que sugiere la IA que decide (Nimble): una nota discreta, que no manda. */
+.suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+}
+
+.suggestion .hint,
+.suggestion .actions {
+  margin: 0;
+}
+
+.suggestion-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.suggestion.morale p,
+.suggestion.leak p {
+  margin: 0;
+}
+
+/* El guardián de secretos avisa antes de enseñar: más visible que una sugerencia. */
+.suggestion.leak {
+  border-style: solid;
+  border-color: var(--partial);
+}
+
+/* El objetivo que sugiere la IA en el turno de los enemigos, y la probabilidad de cada uno. */
+.chip.suggested {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.chip-odds {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* Las escenas y las técnicas que se gastan. */
 .scene-line {
   margin: 0;

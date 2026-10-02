@@ -23,9 +23,11 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { refreshCharacters, useStoreGameEvent } from '../queries';
+import { refreshCharacters, useEnemyDecision, useStoreGameEvent } from '../queries';
+import { percent } from '../rolling';
 import { EnemyTactics } from './CombatIdeas';
 import { ManualDamage } from './Damage';
+import { EnemyDecision } from './Decisions';
 import { AnsweringNote } from './Interventions';
 import { profileText } from './Npcs';
 import { ConfirmButton, ErrorNote, Stepper } from './ui';
@@ -401,7 +403,8 @@ export function StartCombat(props: {
 
 /**
  * El combate, para el máster: el orden y a quién le toca, sacar a quien cae o huye, atacar con
- * los PNJ en su turno (con ideas de la IA, si la hay), aplicar daño a mano y pasar el turno.
+ * los PNJ en su turno (con ideas de la IA, si la hay, y lo que sugiere la que decide: a quién
+ * atacan y si huyen o se rinden), aplicar daño a mano y pasar el turno.
  */
 export function CombatTracker(props: {
   game: GameDetail;
@@ -409,10 +412,12 @@ export function CombatTracker(props: {
   characters: CharacterView[];
   spent: SpentAbilities;
   ai: boolean;
+  /** Si hay IA que sugiere decisiones (Nimble). */
+  decisions: boolean;
   /** Los PNJ a los que les toca atacan a un personaje: se prepara la tirada. */
   onAttack: (enemy: NpcCombatant, target: CharacterView) => void;
 }) {
-  const { game, combat, characters, spent, ai, onAttack } = props;
+  const { game, combat, characters, spent, ai, decisions, onAttack } = props;
   const storeEvent = useStoreGameEvent(game.id);
   const pass = useEndTurn(game, combat);
   const leave = useMutation({
@@ -427,6 +432,15 @@ export function CombatTracker(props: {
       ? characters.filter((character) => character.id === combatant.id)
       : [],
   );
+  const enemyTurn =
+    current.kind === 'npc' && standing(combat, current) && targets.length > 0 ? current : undefined;
+  // Se pregunta una vez por turno, al empezar: es barato.
+  const advice = useEnemyDecision(
+    game.id,
+    decisions ? enemyTurn?.id : undefined,
+    `${combat.round}:${combat.turn}`,
+  );
+  const suggested = advice.data?.targets;
 
   return (
     <div className="stack tight">
@@ -447,29 +461,45 @@ export function CombatTracker(props: {
           )
         }
       />
-      {current.kind === 'npc' && standing(combat, current) && targets.length > 0 && (
+      {enemyTurn && (
         <div className="enemy-turn">
           <span className="field-label" id="enemy-turn-label">
-            Le toca a {current.name}. Atacar a:
+            Le toca a {enemyTurn.name}. Atacar a:
           </span>
           <div className="chips" role="group" aria-labelledby="enemy-turn-label">
-            {targets.map((target) => (
-              <button
-                key={target.id}
-                type="button"
-                className="chip"
-                onClick={() => onAttack(current, target)}
-              >
-                {target.name}
-              </button>
-            ))}
+            {targets.map((target) => {
+              // Lo que sugiere la IA: el más probable, marcado, y la probabilidad de cada uno.
+              const choosing = suggested !== undefined && suggested.length > 1;
+              const odds = choosing ? suggested.find((other) => other.id === target.id) : undefined;
+              const first = choosing && suggested[0]?.id === target.id;
+              return (
+                <button
+                  key={target.id}
+                  type="button"
+                  className={first ? 'chip suggested' : 'chip'}
+                  title={first ? 'Lo sugiere la IA' : undefined}
+                  onClick={() => onAttack(enemyTurn, target)}
+                >
+                  {target.name}
+                  {odds && <span className="chip-odds"> {percent(odds.probability)}</span>}
+                </button>
+              );
+            })}
           </div>
           <span className="hint">
-            Se prepara en Tirar: {current.name} contra la defensa del personaje, que tira su
+            Se prepara en Tirar: {enemyTurn.name} contra la defensa del personaje, que tira su
             jugador.
           </span>
+          {decisions && (
+            <EnemyDecision
+              asked={advice}
+              enemy={enemyTurn}
+              leaving={leave.isPending}
+              onLeave={() => leave.mutate(enemyTurn.id)}
+            />
+          )}
           {ai && (
-            <EnemyTactics key={`${combat.round}:${combat.turn}`} game={game} enemy={current} />
+            <EnemyTactics key={`${combat.round}:${combat.turn}`} game={game} enemy={enemyTurn} />
           )}
         </div>
       )}
