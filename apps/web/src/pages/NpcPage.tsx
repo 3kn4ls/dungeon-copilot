@@ -6,12 +6,14 @@ import { api } from '../api';
 import { NpcChat } from '../components/NpcChat';
 import { NpcFields, NpcGenerator, NpcSheet, profileText } from '../components/Npcs';
 import { ConfirmButton, ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
+import { useRememberCampaign } from '../current-campaign';
 import { keys, useAiStatus, useCampaign, useNpc, useStoreNpc } from '../queries';
 
 export function NpcPage() {
   const { npcId = '' } = useParams();
   const npc = useNpc(npcId);
   const campaign = useCampaign(npc.data?.campaignId ?? '');
+  useRememberCampaign(campaign.data?.id);
   const ai = useAiStatus();
   const [editing, setEditing] = useState(false);
   useDocumentTitle(npc.data?.name);

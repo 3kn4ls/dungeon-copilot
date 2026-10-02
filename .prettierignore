@@ -3,3 +3,5 @@ dist/
 coverage/
 # Migraciones generadas por drizzle-kit
 apps/server/drizzle/
+# Prototipo del frontend: borrador suelto, con plantillas htm que Prettier rompería
+docs/prototipo/

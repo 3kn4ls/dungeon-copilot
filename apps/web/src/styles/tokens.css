@@ -1,0 +1,113 @@
+/*
+ * Los colores, las fuentes y los radios de toda la web. El tema sigue al sistema y se puede fijar
+ * con data-theme="light" o "dark" en <html> (lo guarda el selector de tema). El oscuro es el de
+ * una mesa de noche: piedra fría, verdín para lo que se pulsa, ámbar para lo que toca ahora.
+ */
+
+:root {
+  color-scheme: light;
+  --bg: #e7eae8;
+  --surface: #f6f7f6;
+  --raised: #ffffff;
+  --sunk: #dce0de;
+  --line: #c9cfcc;
+  --line-strong: #a3aca8;
+  --ink: #1a1f24;
+  --ink-2: #39414a;
+  --muted: #59616a;
+  /* Verdín: lo que se pulsa y lo que está bien. */
+  --accent: #1d6e5e;
+  --accent-ink: #ffffff;
+  --accent-soft: #d3eae2;
+  /* Ámbar de antorcha: a quién le toca, lo que espera. */
+  --ember: #9a590c;
+  --ember-ink: #ffffff;
+  --ember-soft: #f5e4cc;
+  /* Sangre: heridas, daño y lo que no se deshace. */
+  --blood: #a8323d;
+  --blood-ink: #ffffff;
+  --blood-soft: #f6dcdd;
+  /* Lo que va en secreto. */
+  --arcane: #5646ad;
+  --arcane-soft: #e6e2fa;
+  /* Los resultados de una tirada, de peor a mejor. */
+  --fumble: #6e1f28;
+  --failure: #b04a55;
+  --partial: #9c7618;
+  --success: #2e8b6f;
+  --critical: #17624d;
+  --shadow: 0 10px 30px rgb(30 40 38 / 14%);
+
+  --display: 'Alegreya', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --body: 'Alegreya Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --caps: 'Alegreya Sans SC', 'Alegreya Sans', system-ui, sans-serif;
+
+  --radius: 8px;
+  --radius-card: 12px;
+  --radius-panel: 14px;
+}
+
+/* El oscuro, dos veces: cuando lo pide el sistema y cuando se elige a mano. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #121518;
+    --surface: #1a1e23;
+    --raised: #232830;
+    --sunk: #0c0e11;
+    --line: #2d333b;
+    --line-strong: #444c57;
+    --ink: #ece7dd;
+    --ink-2: #c3bdb2;
+    --muted: #949aa0;
+    --accent: #5fb8a5;
+    --accent-ink: #08201b;
+    --accent-soft: #173029;
+    --ember: #e8a24c;
+    --ember-ink: #2a1a05;
+    --ember-soft: #352612;
+    --blood: #e0646c;
+    --blood-ink: #2b0b0e;
+    --blood-soft: #3a1b1e;
+    --arcane: #b0a4f4;
+    --arcane-soft: #262140;
+    --fumble: #c4485a;
+    --failure: #e07a83;
+    --partial: #d9b45b;
+    --success: #5fb8a5;
+    --critical: #a5ecd9;
+    --shadow: 0 10px 30px rgb(0 0 0 / 40%);
+  }
+}
+
+/* La pantalla de la mesa va siempre a oscuras: es para una tele. */
+:root[data-theme='dark'],
+.screen {
+  color-scheme: dark;
+  --bg: #121518;
+  --surface: #1a1e23;
+  --raised: #232830;
+  --sunk: #0c0e11;
+  --line: #2d333b;
+  --line-strong: #444c57;
+  --ink: #ece7dd;
+  --ink-2: #c3bdb2;
+  --muted: #949aa0;
+  --accent: #5fb8a5;
+  --accent-ink: #08201b;
+  --accent-soft: #173029;
+  --ember: #e8a24c;
+  --ember-ink: #2a1a05;
+  --ember-soft: #352612;
+  --blood: #e0646c;
+  --blood-ink: #2b0b0e;
+  --blood-soft: #3a1b1e;
+  --arcane: #b0a4f4;
+  --arcane-soft: #262140;
+  --fumble: #c4485a;
+  --failure: #e07a83;
+  --partial: #d9b45b;
+  --success: #5fb8a5;
+  --critical: #a5ecd9;
+  --shadow: 0 10px 30px rgb(0 0 0 / 40%);
+}

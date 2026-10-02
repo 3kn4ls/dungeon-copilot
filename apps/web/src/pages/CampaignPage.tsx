@@ -7,11 +7,13 @@ import { api } from '../api';
 import { profileText } from '../components/Npcs';
 import { ScreenLink } from '../components/ScreenLink';
 import { ConfirmButton, ErrorNote, QueryState, useDocumentTitle } from '../components/ui';
+import { useRememberCampaign } from '../current-campaign';
 import { keys, useCampaign, useCharacters, useGames, useMe, useNpcs } from '../queries';
 
 export function CampaignPage() {
   const { campaignId = '' } = useParams();
   const campaign = useCampaign(campaignId);
+  useRememberCampaign(campaign.data?.id);
   useDocumentTitle(campaign.data?.name);
 
   if (!campaign.data) return <QueryState error={campaign.error} />;

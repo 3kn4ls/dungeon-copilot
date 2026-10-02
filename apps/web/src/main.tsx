@@ -15,9 +15,22 @@ import { NpcPage } from './pages/NpcPage';
 import { RollerPage } from './pages/RollerPage';
 import { ScreenPage } from './pages/ScreenPage';
 import { createQueryClient } from './queries';
-import './styles.css';
+import { applyTheme, savedTheme } from './theme';
+import '@fontsource/alegreya/400.css';
+import '@fontsource/alegreya/400-italic.css';
+import '@fontsource/alegreya/700.css';
+import '@fontsource/alegreya/800.css';
+import '@fontsource/alegreya-sans/400.css';
+import '@fontsource/alegreya-sans/400-italic.css';
+import '@fontsource/alegreya-sans/500.css';
+import '@fontsource/alegreya-sans/700.css';
+import '@fontsource/alegreya-sans-sc/500.css';
+import '@fontsource/alegreya-sans-sc/700.css';
+import './styles/index.css';
 
 const queryClient = createQueryClient();
+// El tema elegido en este navegador, antes de pintar nada.
+applyTheme(savedTheme());
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

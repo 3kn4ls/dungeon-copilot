@@ -5,7 +5,8 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  globalIgnores(['**/dist/**', '**/coverage/**']),
+  // El prototipo del frontend es un borrador suelto, sin compilar: no se revisa.
+  globalIgnores(['**/dist/**', '**/coverage/**', 'docs/prototipo/**']),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
