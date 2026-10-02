@@ -30,8 +30,8 @@ Ya está en esta rama: `docs/prototipo`, fuera de lint y de Prettier.
 ### Fase 1. Sistema de diseño y armazón
 
 - `styles.css` (2357 líneas) se parte en `styles/`: los tokens del prototipo (paleta oscura y clara, los colores de cada resultado, tipografía y radios), la base y las piezas.
-- Piezas en `components/ui.tsx`: iconos SVG propios, botones, `Segmented`, chips, pastillas, avatares, dados con puntos, la barra de probabilidades, heridas, Suerte y avisos.
-- `Layout`: el raíl de navegación (Campañas, Campaña, Sala, Fichas, Tirador), que en el móvil va abajo, y el selector de tema.
+- Las piezas con el aspecto nuevo: iconos SVG propios (`components/Icon.tsx`), botones, `Segmented`, chips, etiquetas, dados con puntos, la barra de probabilidades, heridas y Suerte. Los avatares y los avisos llegan con las pantallas que los usan.
+- `Layout`: el raíl de navegación (Campañas, la última campaña visitada y su sala si hay partida en juego, y Tirador), que en el móvil va abajo, con el selector de tema y Salir.
 - Hecho cuando: todas las pantallas de hoy funcionan con las piezas nuevas, en los dos temas.
 
 ### Fase 2. Campañas y campaña

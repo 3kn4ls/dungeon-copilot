@@ -1,0 +1,433 @@
+/* Crear un personaje y su ficha: atributos, habilidades, heridas, Suerte, experiencia y equipo. */
+
+.creation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+.summary {
+  position: sticky;
+  top: 16px;
+}
+
+/* En móvil el resumen queda al final: esta barra lleva la cuenta mientras se reparte. */
+.creation-counter {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .creation {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .creation-counter {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: 0 -16px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    font-size: 15px;
+    font-weight: 700;
+  }
+}
+
+.attribute-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.attribute-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.attribute-head h2 {
+  margin: 0 0 2px;
+}
+
+.attribute-head p {
+  margin: 0;
+}
+
+.abbr {
+  font-family: var(--caps);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.skill-list,
+.sheet-skills,
+.sheet-advanced,
+.advance-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.skill-row,
+.sheet-skills li,
+.advance-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-row > span,
+.sheet-skills li > span,
+.advance-list li > span,
+.advanced-option > span,
+.sheet-advanced li {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* En las listas, el botón con la cifra no se parte ni se encoge. */
+.advance-list .button,
+.sheet-skills .button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.skill-name {
+  font-weight: 700;
+}
+
+.rank-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.rank-control output {
+  min-width: 2ch;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.advanced-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.advanced-list legend {
+  float: left;
+  margin-bottom: 2px;
+  padding: 0;
+}
+
+.advanced-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.advanced-option input {
+  flex: none;
+  margin: 5px 0 0;
+  accent-color: var(--accent);
+}
+
+.advanced-option.locked {
+  cursor: default;
+}
+
+.advanced-option.locked .skill-name {
+  color: var(--muted);
+}
+
+.tally {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.tally div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tally dt {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.tally dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 700;
+}
+
+.problems {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ember);
+  font-size: 15px;
+}
+
+/* Ficha */
+
+.identity-form {
+  max-width: 520px;
+}
+
+.attribute-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .attribute-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.attribute-tile {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 12px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--sunk);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.attribute-tile:hover {
+  border-color: var(--accent);
+}
+
+.attribute-tile .hint {
+  font-size: 13px;
+}
+
+.attribute-value {
+  font-family: var(--display);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.sheet-advanced {
+  gap: 12px;
+}
+
+/* Heridas: casillas de rasguño y la escala sin heridas → herido → grave → fuera de combate. */
+.boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.box {
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line-strong);
+  border-radius: 5px;
+}
+
+.box.marked {
+  border-color: var(--blood);
+  background: var(--blood);
+}
+
+.severity-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.severity-track li {
+  padding: 6px 2px;
+  border-radius: 6px;
+  background: var(--sunk);
+  color: var(--muted);
+}
+
+.severity-track li.passed:not(:first-child) {
+  background: var(--blood-soft);
+  color: var(--blood);
+}
+
+.severity-track li.current {
+  background: var(--blood);
+  color: var(--blood-ink);
+  font-weight: 700;
+}
+
+.severity-track li.current:first-child {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.damage-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Suerte: rombos de ámbar. */
+.pips {
+  display: flex;
+  gap: 10px;
+}
+
+.pip {
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  border: 2px solid var(--ember);
+  border-radius: 3px;
+  transform: rotate(45deg);
+}
+
+.pip.filled {
+  background: var(--ember);
+}
+
+.xp-total {
+  margin: 0;
+  color: var(--muted);
+}
+
+.xp-total strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 32px;
+}
+
+.advances {
+  margin-top: 20px;
+}
+
+.advances summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  cursor: pointer;
+  list-style-position: outside;
+}
+
+.advances summary::-webkit-details-marker {
+  display: none;
+}
+
+.advances summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+
+.advances[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.advances summary h2 {
+  display: inline;
+}
+
+.advance-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 20px 28px;
+}
+
+.advance-groups section {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.danger-zone {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin-top: 28px;
+}
+
+/* El equipo, en la ficha y al crear el personaje. */
+.gear-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.gear-summary div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.gear-summary dt {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.gear-summary dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+/* Las técnicas que se gastan: una vez por escena o por sesión. */
+.abilities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.abilities li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 15px;
+}
+
+.abilities li.spent > span:first-child {
+  color: var(--muted);
+}

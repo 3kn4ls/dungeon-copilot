@@ -100,6 +100,7 @@ import {
   Stepper,
   useDocumentTitle,
 } from '../components/ui';
+import { useRememberCampaign } from '../current-campaign';
 import { LIVE_STATUS_LABELS, useLiveEvents, type LiveStatus } from '../live';
 import {
   changesSheets,
@@ -150,6 +151,7 @@ export function GamePage() {
   const { data: me } = useMe();
   const game = state.data?.game;
   const characters = useCharacters(game?.campaignId ?? '');
+  useRememberCampaign(game?.campaignId);
 
   const live = useLiveEvents({
     url: game?.status === 'open' ? `/api/games/${gameId}/stream` : null,

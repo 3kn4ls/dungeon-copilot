@@ -1,0 +1,694 @@
+/* La sala de una partida: el registro, la palabra, las intervenciones, el combate y la IA. */
+
+/* Registro a la izquierda y acciones a la derecha; en el móvil, primero las acciones. */
+.room {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'feed actions'
+    'feed extras';
+  gap: 20px;
+  align-items: start;
+}
+
+.room-actions {
+  grid-area: actions;
+  display: grid;
+  gap: 20px;
+}
+
+.room-feed {
+  grid-area: feed;
+}
+
+.room-extras {
+  grid-area: extras;
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+
+@media (max-width: 760px) {
+  .room {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: 'actions' 'feed' 'extras';
+  }
+}
+
+/* El registro */
+
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.feed-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+}
+
+.feed-item p,
+.feed-item h3 {
+  margin: 0;
+}
+
+.feed-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.feed-reveal h3 {
+  font-size: 21px;
+}
+
+.feed-reveal p {
+  font-family: var(--display);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.feed-note {
+  border-style: dashed;
+  background: transparent;
+}
+
+.feed-milestone {
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+
+.feed-floor {
+  padding: 6px 14px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.feed-intervention {
+  border-color: color-mix(in srgb, var(--ember) 55%, var(--line));
+}
+
+.feed-request {
+  border-style: dashed;
+  border-color: var(--ember);
+}
+
+.feed-status {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.feed-status.status-pending {
+  color: var(--ember);
+}
+
+.feed-status.status-answered {
+  color: var(--success);
+}
+
+.feed-speech h3 {
+  font-family: var(--caps);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+
+.feed-speech p {
+  font-family: var(--display);
+  font-size: 18px;
+  font-style: italic;
+}
+
+.feed-combat {
+  border-color: color-mix(in srgb, var(--blood) 50%, var(--line));
+}
+
+.feed-damage {
+  border-color: color-mix(in srgb, var(--blood) 50%, var(--line));
+  background: var(--blood-soft);
+}
+
+.feed-damage p {
+  margin: 0;
+}
+
+/* Las tiradas del registro */
+
+.roll-view {
+  display: grid;
+  gap: 8px;
+}
+
+.roll-view .outcome {
+  font-size: 24px;
+}
+
+.roll-heading {
+  margin: 0;
+}
+
+.roll-note {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ember);
+}
+
+/* Una tirada repetida con Suerte: la nueva lo dice y la vieja queda apagada, porque no cuenta. */
+.roll-luck {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ember);
+}
+
+.feed-superseded .roll-view {
+  opacity: 0.55;
+}
+
+.roll-superseded {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.luck-reroll {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.luck-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.luck-row p {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.side-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.side-editor legend {
+  padding: 0 4px;
+}
+
+.side-summary {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.side-summary strong {
+  color: var(--ink);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* La palabra: quién la tiene, lo que piden los jugadores y las tiradas que pide el máster. */
+
+.floor-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--sunk);
+  color: var(--muted);
+}
+
+.floor-status.yours {
+  background: var(--ember-soft);
+  color: var(--ember);
+  font-weight: 700;
+}
+
+/* Cuando le toca al jugador, su panel se nota desde lejos. */
+.panel.your-turn {
+  border-color: var(--ember);
+  box-shadow: 0 0 0 1px var(--ember);
+}
+
+.intents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.intent-button {
+  min-height: 52px;
+  padding: 12px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intent-button:hover {
+  border-color: var(--accent);
+}
+
+.intent-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--ember);
+  border-radius: var(--radius);
+}
+
+.waiting p {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.queue-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--ember);
+  border-radius: var(--radius-card);
+  background: var(--ember-soft);
+}
+
+.queue-item p {
+  margin: 0;
+}
+
+.queue-who .badge,
+.waiting .badge,
+.answering .badge,
+.requested-title .badge {
+  margin-left: 8px;
+}
+
+/* En las acciones del máster, la intervención a la que responde. */
+.answering {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--ember-soft);
+}
+
+.answering p {
+  margin: 0;
+}
+
+.requested-roll {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1.5px solid var(--ember);
+  border-radius: var(--radius-card);
+  background: var(--ember-soft);
+}
+
+.requested-roll p {
+  margin: 0;
+}
+
+.requested-title {
+  font-weight: 700;
+  color: var(--ember);
+}
+
+.requested-roll .roll-bar {
+  padding-top: 10px;
+}
+
+/* El combate: el orden de iniciativa, a quién le toca y cómo se prepara. */
+
+.combat-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.combatant {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.combatant.current {
+  border-color: var(--ember);
+  background: var(--ember-soft);
+  box-shadow: 0 0 0 1px var(--ember);
+}
+
+.combatant-initiative {
+  min-width: 2ch;
+  color: var(--ink-2);
+  font-family: var(--display);
+  font-weight: 800;
+  font-variant-numeric: lining-nums tabular-nums;
+  text-align: right;
+}
+
+.combatant-name {
+  font-weight: 700;
+}
+
+.combatant .button {
+  margin-left: auto;
+}
+
+/* El turno de los PNJ: el máster elige a quién atacan. */
+.enemy-turn {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--blood);
+  border-radius: var(--radius);
+}
+
+.combat-form,
+.combat-end {
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.combat-form h3 {
+  margin: 0;
+}
+
+.enemy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.enemy-row {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.enemy-row select,
+.enemy-row input {
+  width: 100%;
+}
+
+.initiative-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.initiative-list .roll-note {
+  display: block;
+}
+
+/* El daño: el golpe de una tirada, cómo se calcula y cómo queda quien lo recibe. */
+.roll-damage {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.damage-form {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--blood) 50%, var(--line));
+  border-radius: var(--radius);
+  background: var(--blood-soft);
+}
+
+.damage-form .field-label:first-child {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.damage-breakdown {
+  margin: 0;
+  font-size: 15px;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.damage-breakdown strong {
+  font-size: 17px;
+}
+
+.lethal {
+  color: var(--blood);
+  font-weight: 700;
+}
+
+.blow-note {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--blood-soft);
+  font-size: 15px;
+}
+
+/* Las escenas. */
+.scene-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* Lo que sugiere la IA que decide (Nimble): una nota discreta, que no manda. */
+.suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+}
+
+.suggestion .hint,
+.suggestion .actions {
+  margin: 0;
+}
+
+.suggestion-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.suggestion.morale p,
+.suggestion.leak p {
+  margin: 0;
+}
+
+/* El guardián de secretos avisa antes de enseñar: más visible que una sugerencia. */
+.suggestion.leak {
+  border-style: solid;
+  border-color: var(--arcane);
+  background: var(--arcane-soft);
+}
+
+/* El objetivo que sugiere la IA en el turno de los enemigos, y la probabilidad de cada uno. */
+.chip.suggested {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.chip-odds {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Ideas que propone la IA al máster, bajo una tirada o bajo lo que enseña: solo las ve él. */
+.ai-ideas {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.ai-ideas .link-button {
+  justify-self: start;
+}
+
+.ideas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.idea {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--sunk);
+}
+
+.idea p {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+}
+
+.idea .badge {
+  margin-left: 8px;
+}
+
+/* PNJ: ficha, editor y charla con la IA. */
+
+@media (max-width: 760px) {
+  /* En el móvil, la ayuda de la IA antes que el formulario largo. */
+  .npc-editor .side {
+    order: -1;
+  }
+}
+
+.npc-sheet {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.npc-sheet dt {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.npc-sheet dd {
+  margin: 2px 0 0;
+}
+
+.npc-summary {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.npc-summary summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.npc-summary[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.chat {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  display: grid;
+  gap: 10px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-line {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+}
+
+.chat-line p {
+  margin: 0;
+}
+
+.chat-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.chat-table {
+  margin-left: 24px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--ink-2);
+}
+
+.chat-npc {
+  margin-right: 24px;
+  background: var(--accent-soft);
+}
+
+.chat-npc p {
+  font-family: var(--display);
+  font-size: 17px;
+}
+
+.chat-npc .chat-who {
+  color: var(--accent);
+}
+
+.chat-pending p {
+  color: var(--muted);
+}
+
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 4px;
+}

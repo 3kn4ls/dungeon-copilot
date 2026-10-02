@@ -24,6 +24,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { GearEditor, GearSummary } from '../components/Gear';
 import { ConfirmButton, ErrorNote, QueryState, Stepper, useDocumentTitle } from '../components/ui';
+import { useRememberCampaign } from '../current-campaign';
 import { keys, useCampaign, useCharacter, useStoreCharacter } from '../queries';
 import { requirementText, signed } from '../rules-text';
 
@@ -91,6 +92,7 @@ export function CharacterPage() {
   const { characterId = '' } = useParams();
   const character = useCharacter(characterId);
   const campaign = useCampaign(character.data?.campaignId ?? '');
+  useRememberCampaign(campaign.data?.id);
   const actions = useSheetActions();
   useDocumentTitle(character.data?.name);
 

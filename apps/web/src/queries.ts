@@ -50,7 +50,9 @@ export function createQueryClient(): QueryClient {
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: api.me, staleTime: Infinity });
 
-export const useCampaigns = () => useQuery({ queryKey: keys.campaigns, queryFn: api.campaigns });
+// Sin sesión (`enabled` a false) no se pide nada.
+export const useCampaigns = (enabled = true) =>
+  useQuery({ queryKey: keys.campaigns, queryFn: api.campaigns, enabled });
 
 // Con un id vacío (aún no se sabe cuál) no se pide nada.
 export const useCampaign = (id: string) =>

@@ -1,0 +1,161 @@
+/* Entrar, las campañas, sus partidas y su mesa. */
+
+.auth {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+
+.panel .card {
+  background: var(--raised);
+}
+
+.card:hover {
+  border-color: var(--accent);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-2);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.card-meta {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.invite-code {
+  margin: 0;
+  color: var(--accent);
+  font-family: var(--display);
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.member-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-actions .button {
+  min-height: 30px;
+  padding: 3px 10px;
+  font-size: 14px;
+}
+
+/* Partidas */
+
+.live-card {
+  gap: 8px;
+  justify-items: start;
+}
+
+.game-list,
+.table-characters {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.game-list li,
+.table-characters li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.table-characters li {
+  display: grid;
+  justify-content: start;
+}
+
+.table-characters .muted {
+  font-size: 14px;
+}
+
+/* El resumen de cada partida anterior, en tres líneas: entero, en la partida. */
+.game-recap {
+  display: -webkit-box;
+  flex-basis: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 15px;
+  white-space: pre-line;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.recap-text {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+/* Al empezar una partida, recordar a la mesa la anterior. */
+.recall {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.recall p {
+  margin: 0;
+}
