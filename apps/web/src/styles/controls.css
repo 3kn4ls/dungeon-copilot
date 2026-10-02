@@ -57,6 +57,7 @@
 }
 
 .link-button {
+  justify-self: start;
   padding: 0;
   border: 0;
   background: none;
@@ -400,6 +401,13 @@ h1 .badge {
   width: 48px;
   height: 48px;
   font-size: 22px;
+}
+
+.avatar.xlarge {
+  width: 80px;
+  height: 80px;
+  border-width: 3px;
+  font-size: 38px;
 }
 
 /* Varias etiquetas juntas. */

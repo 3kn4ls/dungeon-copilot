@@ -14,7 +14,7 @@ export function toneOf(id: string): string {
  * La inicial en un círculo. Con `id`, el color de ese personaje; sin él, neutro (PNJ y
  * personas de la mesa).
  */
-export function Avatar(props: { name: string; id?: string; size?: 'small' | 'large' }) {
+export function Avatar(props: { name: string; id?: string; size?: 'small' | 'large' | 'xlarge' }) {
   const { name, id, size } = props;
   return (
     <span

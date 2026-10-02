@@ -3,7 +3,6 @@ import {
   DIFFICULTY_LABELS,
   EDGE_LABELS,
   NPC_PROFILES,
-  OUTCOMES,
   OUTCOME_GUIDES,
   OUTCOME_LABELS,
   SITUATION_LABELS,
@@ -22,6 +21,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
 import { Dice } from '../components/Dice';
+import { OddsBar, formatChance } from '../components/Odds';
 import { Segmented, Stepper, useDocumentTitle } from '../components/ui';
 import { signed } from '../rules-text';
 
@@ -37,11 +37,6 @@ const EDGES: Edge[] = ['disadvantage', 'none', 'advantage'];
 let nextHistoryId = 0;
 const SITUATIONS: Situation[] = ['test', 'melee', 'ranged'];
 
-const percent = (value: number) => {
-  if (value > 0 && value < 0.005) return '<1%';
-  if (value < 1 && value > 0.995) return '>99%';
-  return `${Math.round(value * 100)}%`;
-};
 /** Lee un número de la URL si está dentro de los límites; si no, usa el valor por defecto. */
 function numberParam(
   params: URLSearchParams,
@@ -119,124 +114,131 @@ export function RollerPage() {
   return (
     <>
       <header className="masthead">
-        <p className="eyebrow">Dungeon Copilot</p>
+        <p className="eyebrow">Sin partida</p>
         <h1>Tirador</h1>
         <p className="lede">
           {label
             ? `Tirada de ${label}.`
             : '2d6 + atributo + habilidad contra una dificultad o contra la tirada del rival.'}{' '}
-          Sistema base v0.1.
+          Mira la probabilidad de cada resultado antes de tirar.
         </p>
       </header>
 
-      <div className="layout">
-        <section className="panel" aria-labelledby="roll-heading">
-          <h2 id="roll-heading">Tirada</h2>
-
-          <Segmented
-            label="Contra"
-            value={mode}
-            options={[
-              ['test', 'Dificultad'],
-              ['opposed', 'Rival'],
-            ]}
-            onChange={changeMode}
-          />
-
-          <div className="steppers">
-            <Stepper label="Atributo" value={attribute} min={1} max={5} onChange={setAttribute} />
-            <Stepper
-              label="Habilidad"
-              value={rank}
-              min={0}
-              max={3}
-              onChange={setRank}
-              hint={SKILL_RANK_LABELS[rank]}
+      <div className="roller">
+        <section className="panel composer" aria-labelledby="roll-heading">
+          <h2 id="roll-heading" className="visually-hidden">
+            Tirada
+          </h2>
+          <div className="composer-grid">
+            <Segmented
+              label="Contra"
+              value={mode}
+              options={[
+                ['test', 'Una dificultad'],
+                ['opposed', 'Un rival'],
+              ]}
+              onChange={changeMode}
             />
-            <Stepper
-              label="Modificador"
-              value={modifier}
-              min={-3}
-              max={3}
-              onChange={setModifier}
-              format={signed}
+            <Segmented
+              label="Situación"
+              value={situation}
+              options={SITUATIONS.map((s) => [s, SITUATION_LABELS[s]])}
+              onChange={setSituation}
             />
-          </div>
 
-          <Segmented
-            label="Tu tirada"
-            value={edge}
-            options={EDGES.map((e) => [e, EDGE_LABELS[e]])}
-            onChange={setEdge}
-          />
-
-          {mode === 'test' ? (
-            <label className="field">
-              <span className="field-label">Dificultad</span>
-              <select
-                id="difficulty"
-                value={difficulty}
-                onChange={(event) => setDifficulty(event.target.value as DifficultyLevel)}
-              >
-                {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
-                  <option key={level} value={level}>
-                    {DIFFICULTY_LABELS[level]} ({DIFFICULTIES[level]})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <div className="opponent">
-              <span className="field-label">Rival (tira el máster)</span>
-              <div className="chips">
-                {Object.values(NPC_PROFILES).map((profile) => (
-                  <button
-                    key={profile.label}
-                    type="button"
-                    className="chip"
-                    aria-pressed={opponentBonus === profile.bonus}
-                    onClick={() => setOpponentBonus(profile.bonus)}
-                  >
-                    {profile.label} {signed(profile.bonus)}
-                  </button>
-                ))}
-              </div>
+            <div className="steppers">
+              <Stepper label="Atributo" value={attribute} min={1} max={5} onChange={setAttribute} />
               <Stepper
-                label="Bonificador del rival"
-                value={opponentBonus}
+                label="Habilidad"
+                value={rank}
                 min={0}
-                max={12}
-                onChange={setOpponentBonus}
+                max={3}
+                onChange={setRank}
+                hint={SKILL_RANK_LABELS[rank]}
+              />
+              <Stepper
+                label="Modificador"
+                value={modifier}
+                min={-3}
+                max={3}
+                onChange={setModifier}
                 format={signed}
               />
-              <Segmented
-                label="Tirada del rival"
-                value={opponentEdge}
-                options={EDGES.map((e) => [e, EDGE_LABELS[e]])}
-                onChange={setOpponentEdge}
-              />
             </div>
-          )}
 
-          <label className="field">
-            <span className="field-label">Situación</span>
-            <select
-              id="situation"
-              value={situation}
-              onChange={(event) => setSituation(event.target.value as Situation)}
-            >
-              {SITUATIONS.map((s) => (
-                <option key={s} value={s}>
-                  {SITUATION_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </label>
+            <Segmented
+              label="Tu tirada"
+              value={edge}
+              options={EDGES.map((e) => [e, EDGE_LABELS[e]])}
+              onChange={setEdge}
+            />
 
-          <div className="roll-bar">
-            <p className="bonus">
-              Bonificador <strong>{signed(bonus)}</strong>
-            </p>
+            {mode === 'test' ? (
+              <div className="field wide">
+                <span className="field-label">Dificultad</span>
+                <div className="chips" role="group" aria-label="Dificultad">
+                  {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      className="chip"
+                      aria-pressed={difficulty === level}
+                      onClick={() => setDifficulty(level)}
+                    >
+                      {DIFFICULTY_LABELS[level]}{' '}
+                      <strong className="num">{DIFFICULTIES[level]}</strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="opponent wide">
+                <span className="field-label">Rival (tira el máster)</span>
+                <div className="chips">
+                  {Object.values(NPC_PROFILES).map((profile) => (
+                    <button
+                      key={profile.label}
+                      type="button"
+                      className="chip"
+                      aria-pressed={opponentBonus === profile.bonus}
+                      onClick={() => setOpponentBonus(profile.bonus)}
+                    >
+                      {profile.label} <strong className="num">{signed(profile.bonus)}</strong>
+                    </button>
+                  ))}
+                </div>
+                <div className="steppers">
+                  <Stepper
+                    label="Bonificador del rival"
+                    value={opponentBonus}
+                    min={0}
+                    max={12}
+                    onChange={setOpponentBonus}
+                    format={signed}
+                  />
+                </div>
+                <Segmented
+                  label="Tirada del rival"
+                  value={opponentEdge}
+                  options={EDGES.map((e) => [e, EDGE_LABELS[e]])}
+                  onChange={setOpponentEdge}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="composer-foot">
+            <div className="composer-summary" aria-live="polite">
+              <p>
+                Tiras <strong className="num">{signed(bonus)}</strong>{' '}
+                {mode === 'test'
+                  ? `contra ${DIFFICULTY_LABELS[difficulty].toLowerCase()} (${DIFFICULTIES[difficulty]})`
+                  : `contra un rival con ${signed(opponentBonus)}`}
+                {edge !== 'none' && `, con ${EDGE_LABELS[edge].toLowerCase()}`}:{' '}
+                <strong>{formatChance(successChance(odds))}</strong> de conseguirlo.
+              </p>
+              <OddsBar odds={odds} legend />
+            </div>
             <button type="button" className="roll-button" onClick={roll} disabled={pending}>
               {pending ? 'Tirando…' : 'Tirar'}
             </button>
@@ -249,31 +251,6 @@ export function RollerPage() {
         </section>
 
         <div className="side">
-          <section className="panel" aria-labelledby="odds-heading">
-            <h2 id="odds-heading">Probabilidades</h2>
-            <p className="odds-summary">
-              <strong>{percent(successChance(odds))}</strong> de conseguirlo
-            </p>
-            <div className="odds-bar" aria-hidden="true">
-              {OUTCOMES.map((outcome) => (
-                <span
-                  key={outcome}
-                  className={`segment outcome-${outcome}`}
-                  style={{ flexGrow: odds[outcome] }}
-                />
-              ))}
-            </div>
-            <ul className="odds-list">
-              {[...OUTCOMES].reverse().map((outcome) => (
-                <li key={outcome}>
-                  <span className={`swatch outcome-${outcome}`} />
-                  {OUTCOME_LABELS[outcome]}
-                  <span className="num">{percent(odds[outcome])}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
           <section className="panel" aria-labelledby="result-heading" aria-live="polite">
             <h2 id="result-heading">Resultado</h2>
             {result ? (
@@ -321,16 +298,16 @@ function RollResult({ result, situation }: { result: RollResponse; situation: Si
       <p className={`outcome outcome-text-${result.outcome}`}>{OUTCOME_LABELS[result.outcome]}</p>
       {result.kind === 'test' ? (
         <div className="rollers">
-          <Dice label="Tú" dice={result.roller.dice} total={result.roller.total} />
+          <Dice label="Tú" dice={result.roller.dice} total={result.roller.total} big />
           <p className="versus">
             contra <strong>{result.difficulty}</strong>
           </p>
         </div>
       ) : (
         <div className="rollers">
-          <Dice label="Tú" dice={result.actor.dice} total={result.actor.total} />
+          <Dice label="Tú" dice={result.actor.dice} total={result.actor.total} big />
           <p className="versus">contra</p>
-          <Dice label="Rival" dice={result.opponent.dice} total={result.opponent.total} />
+          <Dice label="Rival" dice={result.opponent.dice} total={result.opponent.total} big />
         </div>
       )}
       <p className="margin">
