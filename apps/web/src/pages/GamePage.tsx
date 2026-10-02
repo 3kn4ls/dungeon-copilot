@@ -1,9 +1,11 @@
 import {
+  ARMOR_CLASSES,
   ATTRIBUTES,
   ATTRIBUTE_INFO,
   DIFFICULTIES,
   DIFFICULTY_LABELS,
   EDGE_LABELS,
+  LUCK_PER_SESSION,
   NPC_PROFILES,
   SEVERITY_LABELS,
   SITUATION_LABELS,
@@ -14,6 +16,7 @@ import {
   rangedDifficulty,
   successChance,
   testOdds,
+  weaponLabel,
   type DifficultyLevel,
   type Edge,
   type Range,
@@ -37,7 +40,9 @@ import {
   type CheckSuggestion,
   type Combat,
   type GameDetail,
+  type Floor,
   type GameEvent,
+  type GameEventKind,
   type GameRollRequest,
   type GameState,
   type GameSummary,
@@ -47,7 +52,7 @@ import {
   type SpentAbilities,
 } from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAiText } from '../ai';
 import { ApiError, api } from '../api';
@@ -60,6 +65,7 @@ import {
   StartCombat,
   TurnStatus,
 } from '../components/Combat';
+import { Avatar } from '../components/Avatar';
 import { BlowNarration } from '../components/CombatIdeas';
 import { Complications } from '../components/Complications';
 import { CheckHint, LeakWarning, useLeakGuard } from '../components/Decisions';
@@ -83,6 +89,7 @@ import {
 import { LuckReroll } from '../components/Luck';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
+import { OddsBar, formatChance } from '../components/Odds';
 import { RecapPanel } from '../components/Recap';
 import { RecipientSelect, useRecipient } from '../components/Recipient';
 import {
@@ -123,7 +130,6 @@ import {
   freeDraft,
   interventionPreset,
   npcDraft,
-  percent,
   previewCheck,
   toSideRequest,
   type RollPreset,
@@ -152,6 +158,7 @@ export function GamePage() {
   const game = state.data?.game;
   const characters = useCharacters(game?.campaignId ?? '');
   useRememberCampaign(game?.campaignId);
+  const [filter, setFilter] = useState<FeedFilter>('all');
 
   const live = useLiveEvents({
     url: game?.status === 'open' ? `/api/games/${gameId}/stream` : null,
@@ -239,33 +246,119 @@ export function GamePage() {
   const morale =
     isMaster && isOpen && ai.data?.decisions ? moraleBlow(state.data.events, combat) : undefined;
 
+  const floor = currentFloor(state.data.events);
+  const scene = currentScene(state.data.events)?.title;
+  const feed = (
+    <section className="feed-panel" aria-labelledby="feed-heading">
+      <div className="feed-panel-head">
+        <h2 id="feed-heading" className="column-title">
+          Registro
+        </h2>
+        <div className="chips" role="group" aria-label="Qué ver del registro">
+          {FEED_FILTERS.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="chip"
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <ol className="feed" aria-live="polite">
+        {[...state.data.events]
+          .reverse()
+          .filter((event) => event.kind !== 'settled' && shows(filter, event))
+          .map((event) => (
+            <li key={event.id}>
+              <EventCard
+                event={event}
+                superseded={superseded.has(event.id)}
+                settled={settled.get(event.id)}
+                survived={survived.has(event.id)}
+                master={isMaster}
+              >
+                {event.kind === 'roll' && rerollable.has(event.id) && (
+                  <LuckReroll game={game} event={event} />
+                )}
+                {event.kind === 'roll' && striking.has(event.id) && (
+                  <RollDamage
+                    game={game}
+                    event={event}
+                    applied={blows.get(event.id) ?? []}
+                    combat={combat}
+                    characters={characters.data ?? []}
+                    spent={spent}
+                  />
+                )}
+                {event.kind === 'roll' && striking.has(event.id) && ai.data?.enabled && (
+                  <BlowNarration game={game} event={event} />
+                )}
+                {event.kind === 'roll' && complicated.has(event.id) && (
+                  <Complications game={game} event={event} intent={intents.get(event.id)} />
+                )}
+                {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
+                  <RollRequestAction game={game} event={event} />
+                )}
+                {event.kind === 'damage' && combat && event.id === morale && (
+                  <MoraleHint game={game} combat={combat} event={event} />
+                )}
+                {event.kind === 'damage' && isOpen && (
+                  <FallenActions
+                    game={game}
+                    event={event}
+                    characters={characters.data ?? []}
+                    spent={spent}
+                    survived={survived.has(event.id)}
+                  />
+                )}
+              </EventCard>
+            </li>
+          ))}
+      </ol>
+    </section>
+  );
+
+  // El máster, con la partida en juego, dirige desde tres columnas: la mesa, el escenario con sus
+  // acciones y el registro. Los jugadores y la partida terminada siguen con dos.
+  if (isMaster && isOpen) {
+    return (
+      <div className="room-master">
+        <RoomBar
+          game={game}
+          live={live}
+          combat={combat}
+          floor={floor}
+          scene={scene}
+          waiting={forMaster}
+        />
+        <aside className="room-table" aria-label="La mesa">
+          <TableCharacters game={game} combat={combat} floor={floor} spent={spent} master />
+          {game.screenToken && <ScreenLink campaignId={game.campaignId} token={game.screenToken} />}
+          <CloseGame game={game} />
+        </aside>
+        <MasterDesk state={state.data} feed={feed} />
+      </div>
+    );
+  }
+
   return (
     <>
-      <header className="masthead">
-        <Link to={`/campanas/${game.campaignId}`} className="eyebrow back">
-          ← {game.campaignName}
-        </Link>
-        <h1>
-          {gameName(game)}{' '}
-          <span className={`badge ${isOpen ? 'live' : ''}`}>{GAME_STATUS_LABELS[game.status]}</span>
-        </h1>
-        <p className="lede">
-          {game.title ? `Partida ${game.number} · ` : ''}
-          {isMaster
-            ? 'Diriges tú: lo que enseñes y las tiradas públicas lo ve toda la mesa.'
-            : 'Aquí ves lo que enseña el máster y las tiradas de la mesa.'}{' '}
-          {isOpen && <LiveBadge status={live} />}
-        </p>
-      </header>
-
+      <RoomBar
+        game={game}
+        live={live}
+        combat={isOpen ? combat : null}
+        floor={floor}
+        scene={scene}
+        waiting={0}
+      />
       <div className="room">
         <div className="room-actions">
           {isOpen ? (
-            isMaster ? (
-              <MasterDesk state={state.data} />
-            ) : (
-              <PlayerDesk state={state.data} settled={settled} />
-            )
+            <PlayerDesk state={state.data} settled={settled} />
           ) : (
             <>
               <section className="panel">
@@ -283,76 +376,108 @@ export function GamePage() {
             </>
           )}
         </div>
-
-        <section className="room-feed panel" aria-labelledby="feed-heading">
-          <h2 id="feed-heading">Registro</h2>
-          <ol className="feed" aria-live="polite">
-            {[...state.data.events]
-              .reverse()
-              .filter((event) => event.kind !== 'settled')
-              .map((event) => (
-                <li key={event.id}>
-                  <EventCard
-                    event={event}
-                    superseded={superseded.has(event.id)}
-                    settled={settled.get(event.id)}
-                    survived={survived.has(event.id)}
-                    master={isMaster}
-                  >
-                    {event.kind === 'roll' && rerollable.has(event.id) && (
-                      <LuckReroll game={game} event={event} />
-                    )}
-                    {event.kind === 'roll' && striking.has(event.id) && (
-                      <RollDamage
-                        game={game}
-                        event={event}
-                        applied={blows.get(event.id) ?? []}
-                        combat={combat}
-                        characters={characters.data ?? []}
-                        spent={spent}
-                      />
-                    )}
-                    {event.kind === 'roll' && striking.has(event.id) && ai.data?.enabled && (
-                      <BlowNarration game={game} event={event} />
-                    )}
-                    {event.kind === 'roll' && complicated.has(event.id) && (
-                      <Complications game={game} event={event} intent={intents.get(event.id)} />
-                    )}
-                    {event.kind === 'rollRequest' && isOpen && !settled.has(event.id) && (
-                      <RollRequestAction game={game} event={event} />
-                    )}
-                    {event.kind === 'damage' && combat && event.id === morale && (
-                      <MoraleHint game={game} combat={combat} event={event} />
-                    )}
-                    {event.kind === 'damage' && isOpen && (
-                      <FallenActions
-                        game={game}
-                        event={event}
-                        characters={characters.data ?? []}
-                        spent={spent}
-                        survived={survived.has(event.id)}
-                      />
-                    )}
-                  </EventCard>
-                </li>
-              ))}
-          </ol>
-        </section>
-
+        <div className="room-feed">{feed}</div>
         <div className="room-extras">
           <TableCharacters
             game={game}
             combat={isOpen ? combat : null}
+            floor={floor}
             spent={spent}
-            master={isMaster && isOpen}
+            master={false}
           />
           {isMaster && game.screenToken && (
             <ScreenLink campaignId={game.campaignId} token={game.screenToken} />
           )}
-          {isMaster && isOpen && <CloseGame game={game} />}
         </div>
       </div>
     </>
+  );
+}
+
+type FeedFilter = 'all' | 'story' | 'rolls' | 'secret';
+
+const FEED_FILTERS: [FeedFilter, string][] = [
+  ['all', 'Todo'],
+  ['story', 'Historia'],
+  ['rolls', 'Tiradas y combate'],
+  ['secret', 'En secreto'],
+];
+
+const STORY_KINDS: readonly GameEventKind[] = [
+  'opened',
+  'closed',
+  'scene',
+  'reveal',
+  'speech',
+  'note',
+  'intervention',
+];
+
+/** Qué entradas del registro enseña cada filtro. */
+function shows(filter: FeedFilter, event: GameEvent): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'story':
+      return STORY_KINDS.includes(event.kind);
+    case 'rolls':
+      return !STORY_KINDS.includes(event.kind) && event.kind !== 'floor';
+    case 'secret':
+      return event.visibility !== 'public';
+  }
+}
+
+/** Quién tiene la palabra, para la cabecera: «el máster», «la mesa» o el personaje. */
+function floorHolder(floor: Floor): string {
+  if (floor.kind === 'master') return 'el máster';
+  if (floor.kind === 'table') return 'la mesa';
+  return floor.name;
+}
+
+/**
+ * La cabecera de la sala: de qué campaña es, la partida, si está en directo, en qué fase (quién
+ * tiene la palabra o la ronda del combate), la escena y, al máster, cuántos esperan.
+ */
+function RoomBar(props: {
+  game: GameDetail;
+  live: LiveStatus;
+  combat: Combat | null;
+  floor: Floor;
+  /** El título de la escena en juego, si hay una. */
+  scene: string | undefined;
+  waiting: number;
+}) {
+  const { game, live, combat, floor, scene, waiting } = props;
+  const isOpen = game.status === 'open';
+  return (
+    <header className="room-bar">
+      <Link to={`/campanas/${game.campaignId}`} className="eyebrow back">
+        ← {game.campaignName}
+      </Link>
+      <div className="room-title">
+        <h1>{gameName(game)}</h1>
+        <div className="badges">
+          {isOpen ? (
+            <LiveBadge status={live} />
+          ) : (
+            <span className="badge">{GAME_STATUS_LABELS[game.status]}</span>
+          )}
+          {game.title && <span className="badge">Partida {game.number}</span>}
+          {isOpen &&
+            (combat ? (
+              <span className="badge turn">Combate · Ronda {combat.round}</span>
+            ) : (
+              <span className="badge">La palabra: {floorHolder(floor)}</span>
+            ))}
+          {isOpen && scene && <span className="badge">Escena: {scene}</span>}
+          {waiting > 0 && (
+            <span className="badge turn">
+              {waiting === 1 ? '1 intervención espera' : `${waiting} intervenciones esperan`}
+            </span>
+          )}
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -482,12 +607,13 @@ interface Handoff {
 }
 
 /**
- * La mesa del máster: a quién da la palabra o, en combate, el orden y los turnos; las
- * intervenciones que esperan y las tiradas que ha pedido; y sus acciones (enseñar, hablar por un
- * PNJ, tirar, anotar). Lo que elige hacer con una intervención, o con el turno de unos PNJ, abre
- * la acción que toca, lista para usarla.
+ * La mesa del máster, en dos columnas de la sala. En el centro, a quién da la palabra o, en
+ * combate, el orden y los turnos, y debajo sus acciones (enseñar, hablar por un PNJ, tirar,
+ * anotar). A la derecha, lo que espera (las intervenciones y las tiradas que ha pedido) encima
+ * del registro (`feed`). Lo que elige hacer con una intervención, o con el turno de unos PNJ,
+ * abre la acción que toca, lista para usarla.
  */
-function MasterDesk({ state }: { state: GameState }) {
+function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
   const { game, events } = state;
   const [action, setAction] = useState<Action>('reveal');
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -519,125 +645,148 @@ function MasterDesk({ state }: { state: GameState }) {
 
   const rolling = handedTo('roll');
   const starting = handedTo('combat');
+  const requests = pendingRollRequests(events);
+  const queued = waiting.length + requests.length;
   return (
     <>
-      <section className="panel" aria-labelledby="floor-heading">
-        <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
-        <SceneLine events={events} />
-        {combat ? (
-          <CombatTracker
-            game={game}
-            combat={combat}
-            characters={characters}
-            spent={spent}
-            ai={ai.data?.enabled === true}
-            decisions={ai.data?.decisions === true}
-            onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
+      <div className="room-stage">
+        <section className="panel" aria-labelledby="floor-heading">
+          <h2 id="floor-heading">{combat ? `Combate · Ronda ${combat.round}` : 'La palabra'}</h2>
+          <SceneLine events={events} />
+          {combat ? (
+            <CombatTracker
+              game={game}
+              combat={combat}
+              characters={characters}
+              spent={spent}
+              ai={ai.data?.enabled === true}
+              decisions={ai.data?.decisions === true}
+              onAttack={(enemy, target) => hand('roll', { roll: enemyAttackPreset(enemy, target) })}
+            />
+          ) : (
+            <FloorControl game={game} floor={floor} characters={characters} />
+          )}
+          {combat ? (
+            <>
+              <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
+              <EndCombat game={game} />
+            </>
+          ) : (
+            <>
+              <StartCombat
+                key={starting?.key ?? 0}
+                game={game}
+                characters={characters}
+                npcs={npcs}
+                answering={starting?.intervention}
+                onStopAnswering={stopAnswering}
+              />
+              <SceneControl
+                game={game}
+                fighting={false}
+                onStarted={() => {
+                  // Lo normal es describirla: se abre Enseñar.
+                  setAction('reveal');
+                  desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                }}
+              />
+            </>
+          )}
+        </section>
+
+        {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
+          que se estaba escribiendo ni las ideas de la IA. */}
+        <section className="panel desk" aria-label="Acciones del máster" ref={desk}>
+          <Segmented
+            label="Qué quieres hacer"
+            value={action}
+            options={[
+              ['reveal', 'Enseñar'],
+              ['talk', 'Hablar como PNJ'],
+              ['roll', 'Tirar'],
+              ['note', 'Anotar'],
+            ]}
+            onChange={setAction}
           />
-        ) : (
-          <FloorControl game={game} floor={floor} characters={characters} />
-        )}
-        <InterventionQueue
-          game={game}
-          floor={floor}
-          combat={combat}
-          pending={waiting}
-          onHandoff={(to, intervention) =>
-            hand(to, {
-              intervention,
-              roll:
-                to === 'roll' ? interventionPreset(intervention, characters, combat) : undefined,
-              // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
-              // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
-              suggest:
-                to === 'roll' &&
-                ai.data?.decisions &&
-                isCheckedIntent(intervention.intent) &&
-                intervention.text.trim()
-                  ? (suggestion) => interventionPreset(intervention, characters, combat, suggestion)
-                  : undefined,
-            })
-          }
-        />
-        <PendingRollRequests game={game} pending={pendingRollRequests(events)} />
-        {combat ? (
-          <>
-            <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
-            <EndCombat game={game} />
-          </>
-        ) : (
-          <>
-            <StartCombat
-              key={starting?.key ?? 0}
+          <div hidden={action !== 'reveal'}>
+            <RevealForm
               game={game}
               characters={characters}
-              npcs={npcs}
-              answering={starting?.intervention}
+              scene={currentScene(events)?.title}
+              starting={!events.some((event) => event.kind === 'reveal')}
+              answering={handedTo('reveal')?.intervention}
               onStopAnswering={stopAnswering}
             />
-            <SceneControl
+          </div>
+          <div hidden={action !== 'talk'}>
+            <TalkPanel
               game={game}
-              fighting={false}
-              onStarted={() => {
-                // Lo normal es describirla: se abre Enseñar.
-                setAction('reveal');
-                desk.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-              }}
+              characters={characters}
+              answering={handedTo('talk')?.intervention}
+              onStopAnswering={stopAnswering}
             />
-          </>
-        )}
-      </section>
-
-      {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
-          que se estaba escribiendo ni las ideas de la IA. */}
-      <section className="panel" aria-label="Acciones del máster" ref={desk}>
-        <Segmented
-          label="Qué quieres hacer"
-          value={action}
-          options={[
-            ['reveal', 'Enseñar'],
-            ['talk', 'Hablar'],
-            ['roll', 'Tirar'],
-            ['note', 'Anotar'],
-          ]}
-          onChange={setAction}
-        />
-        <div hidden={action !== 'reveal'}>
-          <RevealForm
-            game={game}
-            characters={characters}
-            scene={currentScene(events)?.title}
-            starting={!events.some((event) => event.kind === 'reveal')}
-            answering={handedTo('reveal')?.intervention}
-            onStopAnswering={stopAnswering}
-          />
-        </div>
-        <div hidden={action !== 'talk'}>
-          <TalkPanel
-            game={game}
-            characters={characters}
-            answering={handedTo('talk')?.intervention}
-            onStopAnswering={stopAnswering}
-          />
-        </div>
-        <div hidden={action !== 'roll'}>
-          {/* Cada tirada que se prepara (para una intervención o para unos PNJ) empieza de
+          </div>
+          <div hidden={action !== 'roll'}>
+            {/* Cada tirada que se prepara (para una intervención o para unos PNJ) empieza de
               cero; al hacerla o pedirla, Tirar vuelve a quedar libre. */}
-          <RollForm
-            key={rolling?.key ?? 0}
-            game={game}
-            embedded
-            preset={rolling?.roll}
-            suggest={rolling?.suggest}
-            answering={rolling?.intervention}
-            onStopAnswering={stopAnswering}
-            onDone={rolling ? stopAnswering : undefined}
-          />
-        </div>
-        <div hidden={action !== 'note'}>
-          <NoteForm gameId={game.id} />
-        </div>
-      </section>
+            <RollForm
+              key={rolling?.key ?? 0}
+              game={game}
+              embedded
+              preset={rolling?.roll}
+              suggest={rolling?.suggest}
+              answering={rolling?.intervention}
+              onStopAnswering={stopAnswering}
+              onDone={rolling ? stopAnswering : undefined}
+            />
+          </div>
+          <div hidden={action !== 'note'}>
+            <NoteForm gameId={game.id} />
+          </div>
+        </section>
+      </div>
+      <div className="room-log">
+        <section className="queue-panel" aria-labelledby="queue-heading">
+          <h2 id="queue-heading" className="column-title">
+            Esperando {queued > 0 && <span className="count">{queued}</span>}
+          </h2>
+          {queued === 0 ? (
+            <p className="muted">
+              Nadie espera. Cuando alguien intervenga o pidas una tirada, aparecerá aquí.
+            </p>
+          ) : (
+            <>
+              <InterventionQueue
+                game={game}
+                floor={floor}
+                combat={combat}
+                pending={waiting}
+                onHandoff={(to, intervention) =>
+                  hand(to, {
+                    intervention,
+                    roll:
+                      to === 'roll'
+                        ? interventionPreset(intervention, characters, combat)
+                        : undefined,
+                    // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
+                    // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
+                    suggest:
+                      to === 'roll' &&
+                      ai.data?.decisions &&
+                      isCheckedIntent(intervention.intent) &&
+                      intervention.text.trim()
+                        ? (suggestion) =>
+                            interventionPreset(intervention, characters, combat, suggestion)
+                        : undefined,
+                  })
+                }
+              />
+              <PendingRollRequests game={game} pending={requests} />
+            </>
+          )}
+        </section>
+        {feed}
+      </div>
     </>
   );
 }
@@ -1291,118 +1440,117 @@ function RollForm(props: {
           onApply={() => suggestion.data && applySuggestion(suggestion.data)}
         />
       )}
-      <SideEditor
-        title="Quién tira"
-        draft={actorDraft}
-        characters={available}
-        npcs={npcs}
-        allowFree={isMaster}
-        onChange={edit(setActor)}
+      <div className="composer-grid">
+        <SideEditor
+          title="Quién tira"
+          draft={actorDraft}
+          characters={available}
+          npcs={npcs}
+          allowFree={isMaster}
+          onChange={edit(setActor)}
+        />
+        <div className="stack tight">
+          {isMaster && (
+            <Segmented
+              label="Contra"
+              value={against}
+              options={[
+                ['difficulty', 'Una dificultad'],
+                ['opposed', 'Un rival'],
+              ]}
+              onChange={(next) => {
+                setTouched(true);
+                setAgainst(next);
+                setSituation(next === 'opposed' ? 'melee' : 'test');
+              }}
+            />
+          )}
+          {shooting ? (
+            <fieldset className="side-editor">
+              <legend className="field-label">Dificultad a distancia</legend>
+              <div className="steppers">
+                <Stepper
+                  label="Destreza del objetivo"
+                  value={shot.dexterity}
+                  min={0}
+                  max={6}
+                  onChange={(dexterity) => edit(setShot)({ ...shot, dexterity })}
+                  hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
+                />
+              </div>
+              <Segmented
+                label="Distancia"
+                value={shot.range}
+                options={RANGES}
+                onChange={(range) => edit(setShot)({ ...shot, range })}
+              />
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={shot.cover}
+                  onChange={(event) => edit(setShot)({ ...shot, cover: event.target.checked })}
+                />
+                Cobertura parcial (+2)
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={shot.shield}
+                  onChange={(event) => edit(setShot)({ ...shot, shield: event.target.checked })}
+                />
+                Lleva escudo (+1)
+              </label>
+              <p className="side-summary">
+                Dificultad <strong>{target}</strong>
+                {shooter?.advancedSkills.includes('deadeye') &&
+                  ` · con Disparo certero, ${shooter.name} no cuenta la distancia media ni la cobertura`}
+              </p>
+            </fieldset>
+          ) : against === 'difficulty' ? (
+            <div className="field">
+              <span className="field-label">Dificultad</span>
+              <div className="chips" role="group" aria-label="Dificultad">
+                {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    className="chip"
+                    aria-pressed={difficulty === level}
+                    onClick={() => edit(setDifficulty)(level)}
+                  >
+                    {DIFFICULTY_LABELS[level]}{' '}
+                    <strong className="num">{DIFFICULTIES[level]}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <SideEditor
+              title="Quién se opone"
+              draft={opponent}
+              characters={characters.data}
+              npcs={npcs}
+              allowFree
+              onChange={edit(setOpponent)}
+            />
+          )}
+        </div>
+      </div>
+
+      <Segmented
+        label="Situación"
+        value={situation}
+        options={SITUATIONS.map((s) => [s, SITUATION_LABELS[s]])}
+        onChange={(next) => {
+          setTouched(true);
+          setSituation(next);
+          // A distancia se tira contra una dificultad, que sale del objetivo.
+          if (next === 'ranged') setAgainst('difficulty');
+        }}
       />
 
       {isMaster && (
-        <Segmented
-          label="Contra"
-          value={against}
-          options={[
-            ['difficulty', 'Dificultad'],
-            ['opposed', 'Rival'],
-          ]}
-          onChange={(next) => {
-            setTouched(true);
-            setAgainst(next);
-            setSituation(next === 'opposed' ? 'melee' : 'test');
-          }}
-        />
-      )}
-      {shooting ? (
-        <fieldset className="side-editor">
-          <legend className="field-label">Dificultad a distancia</legend>
-          <div className="steppers">
-            <Stepper
-              label="Destreza del objetivo"
-              value={shot.dexterity}
-              min={0}
-              max={6}
-              onChange={(dexterity) => edit(setShot)({ ...shot, dexterity })}
-              hint="De un PNJ, la de su perfil: esbirro 1, soldado 2, veterano 3, campeón 4."
-            />
-          </div>
-          <Segmented
-            label="Distancia"
-            value={shot.range}
-            options={RANGES}
-            onChange={(range) => edit(setShot)({ ...shot, range })}
-          />
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={shot.cover}
-              onChange={(event) => edit(setShot)({ ...shot, cover: event.target.checked })}
-            />
-            Cobertura parcial (+2)
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={shot.shield}
-              onChange={(event) => edit(setShot)({ ...shot, shield: event.target.checked })}
-            />
-            Lleva escudo (+1)
-          </label>
-          <p className="side-summary">
-            Dificultad <strong>{target}</strong>
-            {shooter?.advancedSkills.includes('deadeye') &&
-              ` · con Disparo certero, ${shooter.name} no cuenta la distancia media ni la cobertura`}
-          </p>
-        </fieldset>
-      ) : against === 'difficulty' ? (
-        <label className="field">
-          <span className="field-label">Dificultad</span>
-          <select
-            value={difficulty}
-            onChange={(event) => edit(setDifficulty)(event.target.value as DifficultyLevel)}
-          >
-            {(Object.keys(DIFFICULTIES) as DifficultyLevel[]).map((level) => (
-              <option key={level} value={level}>
-                {DIFFICULTY_LABELS[level]} ({DIFFICULTIES[level]})
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : (
-        <SideEditor
-          title="Quién se opone"
-          draft={opponent}
-          characters={characters.data}
-          npcs={npcs}
-          allowFree
-          onChange={edit(setOpponent)}
-        />
-      )}
-
-      <label className="field">
-        <span className="field-label">Situación</span>
-        <select
-          value={situation}
-          onChange={(event) => {
-            const next = event.target.value as Situation;
-            setTouched(true);
-            setSituation(next);
-            // A distancia se tira contra una dificultad, que sale del objetivo.
-            if (next === 'ranged') setAgainst('difficulty');
-          }}
-        >
-          {SITUATIONS.map((s) => (
-            <option key={s} value={s}>
-              {SITUATION_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {isMaster && (
-        <>
+        <div className="composer-options">
           <label className="check">
             <input
               type="checkbox"
@@ -1420,19 +1568,21 @@ function RollForm(props: {
               ? `En secreto: solo lo veis tú y quien juega con ${rollerName}`
               : 'Tirada secreta: solo la ves tú'}
           </label>
-        </>
+        </div>
       )}
 
-      <div className="roll-bar">
-        <p className="bonus">
-          {odds ? (
+      <div className="composer-foot">
+        <div className="composer-summary" aria-live="polite">
+          {odds && (
             <>
-              <strong>{percent(successChance(odds))}</strong> de conseguirlo
+              <p>
+                <strong>{formatChance(successChance(odds))}</strong> de conseguirlo
+                {asking && `: la tira ${rollerName}`}.
+              </p>
+              <OddsBar odds={odds} legend />
             </>
-          ) : (
-            ' '
           )}
-        </p>
+        </div>
         <button type="submit" className="roll-button" disabled={pending}>
           {asking ? (pending ? 'Pidiendo…' : 'Pedir la tirada') : pending ? 'Tirando…' : 'Tirar'}
         </button>
@@ -1607,32 +1757,75 @@ function SideEditor(props: {
 }
 
 /**
- * Los personajes de la mesa, con lo que más se mira durante la partida. El máster ve además sus
- * técnicas de una vez por escena o por sesión y, fuera de combate, puede aplicarles daño a mano.
+ * Los personajes de la mesa, con lo que más se mira durante la partida: cómo están, su Suerte,
+ * con qué pelean y quién tiene la palabra. El máster ve además sus técnicas de una vez por escena
+ * o por sesión y, fuera de combate, puede aplicarles daño a mano.
  */
 function TableCharacters(props: {
   game: GameDetail;
   combat: Combat | null;
+  floor: Floor;
   spent: SpentAbilities;
   /** Quien mira es el máster, con la partida en juego. */
   master: boolean;
 }) {
-  const { game, combat, spent, master } = props;
+  const { game, combat, floor, spent, master } = props;
   const characters = useCharacters(game.campaignId);
   if (!characters.data || characters.data.length === 0) return null;
   return (
-    <section className="panel" aria-labelledby="table-heading">
-      <h2 id="table-heading">Personajes</h2>
-      <ul className="table-characters">
-        {characters.data.map((character) => (
-          <li key={character.id}>
-            <Link to={`/personajes/${character.id}`}>{character.name}</Link>
-            <span className="muted">
-              {SEVERITY_LABELS[character.wounds.severity]} · Rasguños {character.wounds.scratches}/
-              {character.wounds.scratchBoxes} · Suerte {character.luck}
-            </span>
-          </li>
-        ))}
+    <section className="table-party" aria-labelledby="table-heading">
+      <h2 id="table-heading" className="column-title">
+        Personajes
+      </h2>
+      <ul className="party-list">
+        {characters.data.map((character) => {
+          const { wounds, gear } = character;
+          const speaking = floor.kind === 'character' && floor.characterId === character.id;
+          return (
+            <li key={character.id} className={speaking ? 'party-card speaking' : 'party-card'}>
+              <div className="party-head">
+                <Avatar name={character.name} id={character.id} />
+                <span className="party-name">
+                  <Link to={`/personajes/${character.id}`}>{character.name}</Link>
+                  <span className="muted">
+                    {character.ownerName}
+                    {speaking && ' · tiene la palabra'}
+                  </span>
+                </span>
+                <span
+                  className="pips small"
+                  role="img"
+                  aria-label={`Suerte: ${character.luck} de ${LUCK_PER_SESSION}`}
+                >
+                  {Array.from({ length: LUCK_PER_SESSION }, (_, i) => (
+                    <i key={i} className={i < character.luck ? 'pip filled' : 'pip'} />
+                  ))}
+                </span>
+              </div>
+              <div className="party-state">
+                <span
+                  className="mini-boxes"
+                  role="img"
+                  aria-label={`Rasguños: ${wounds.scratches} de ${wounds.scratchBoxes}`}
+                >
+                  {Array.from({ length: wounds.scratchBoxes }, (_, i) => (
+                    <i key={i} className={i < wounds.scratches ? 'marked' : undefined} />
+                  ))}
+                </span>
+                <span className={wounds.severity === 'none' ? 'severity' : 'severity hurt'}>
+                  {SEVERITY_LABELS[wounds.severity]}
+                </span>
+              </div>
+              <p className="party-gear">
+                {weaponLabel(gear.melee)}
+                {gear.ranged && ` · ${weaponLabel(gear.ranged)}`}
+                {gear.armor !== 'none' &&
+                  ` · armadura ${ARMOR_CLASSES[gear.armor].label.toLowerCase()}`}
+                {gear.shield && ' · escudo'}
+              </p>
+            </li>
+          );
+        })}
       </ul>
       {master && (
         <>

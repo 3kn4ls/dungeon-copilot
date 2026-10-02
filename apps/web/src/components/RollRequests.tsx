@@ -98,7 +98,7 @@ export function PendingRollRequests({
   if (pending.length === 0) return null;
   return (
     <div className="stack tight">
-      <p className="field-label">Tiradas que has pedido</p>
+      <p className="field-label">Tiradas que has pedido y faltan por tirar</p>
       <ol className="queue">
         {pending.map((event) => (
           <PendingRollRequest key={event.id} game={game} event={event} />
@@ -117,7 +117,7 @@ function PendingRollRequest({ game, event }: { game: GameDetail; event: RollRequ
   });
   const busy = roll.isPending || withdraw.isPending;
   return (
-    <li className="queue-item">
+    <li className="queue-item request">
       <p className="queue-who">
         Esperando a <strong>{event.name}</strong>
         {event.visibility === 'private' && <span className="badge secret">En secreto</span>}

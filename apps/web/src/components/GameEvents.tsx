@@ -21,6 +21,7 @@ import {
 } from '@dungeon-copilot/shared';
 import type { ReactNode } from 'react';
 import { signed } from '../rules-text';
+import { Avatar } from './Avatar';
 import { Dice } from './Dice';
 
 export const eventTime = (event: GameEvent) =>
@@ -148,7 +149,16 @@ export function blowResult(event: DamageEvent, master: boolean): string {
 }
 
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */
-export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean }) {
+export function RollView({
+  roll,
+  big = false,
+  heading = true,
+}: {
+  roll: GameRoll;
+  big?: boolean;
+  /** Sin quién tira, si ya lo dice quien la enseña: solo contra qué. */
+  heading?: boolean;
+}) {
   const { result } = roll;
   const luckyOne = rerollerLabel(roll);
   const shift =
@@ -160,8 +170,12 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
     <div className="roll-view">
       {luckyOne && <p className="roll-luck">{luckyOne} repite con Suerte</p>}
       <p className="roll-heading">
-        <strong>{roll.actor.label}</strong>
-        {roll.actor.check && <> · {roll.actor.check}</>}{' '}
+        {heading && (
+          <>
+            <strong>{roll.actor.label}</strong>
+            {roll.actor.check && <> · {roll.actor.check}</>}{' '}
+          </>
+        )}
         <span className="muted">contra {targetText(roll)}</span>
       </p>
       <p className={`outcome outcome-text-${result.outcome}`}>{OUTCOME_LABELS[result.outcome]}</p>
@@ -213,10 +227,12 @@ export function RollView({ roll, big = false }: { roll: GameRoll; big?: boolean 
 }
 
 /**
- * Un evento del registro de la partida, tal como se ve en la sala. `children` va debajo de
- * una tirada, como las complicaciones que propone la IA al máster. Una tirada `superseded`
- * se ha repetido con Suerte y ya no cuenta; `settled` dice cómo acabó una intervención o una
- * tirada pedida que ya no espera. `master`: quien mira es el máster.
+ * Un evento del registro de la partida, tal como se ve en la sala. Lo que solo marca el paso de
+ * la partida (la palabra, los turnos, quién sale) va en una línea; los hitos (escenas, principio
+ * y fin), como separadores; lo demás, en tarjetas. `children` va debajo de una tirada o de un
+ * golpe, como las complicaciones que propone la IA al máster. Una tirada `superseded` se ha
+ * repetido con Suerte y ya no cuenta; `settled` dice cómo acabó una intervención o una tirada
+ * pedida que ya no espera. `master`: quien mira es el máster.
  */
 export function EventCard({
   event,
@@ -235,89 +251,106 @@ export function EventCard({
   children?: ReactNode;
 }) {
   const partner = secretWith(event);
-  const meta = (
-    <p className="feed-meta">
+  const time = (
+    <time className="feed-time" dateTime={event.createdAt}>
       {eventTime(event)}
-      {event.authorName && <> · {event.authorName}</>}
-      {event.visibility === 'master' && <span className="badge secret">Solo tú lo ves</span>}
-      {event.visibility === 'private' && (
-        <span className="badge secret">
-          {master ? `En secreto${partner ? ` con ${partner}` : ''}` : 'En secreto: el máster y tú'}
-        </span>
-      )}
+    </time>
+  );
+  const seenBy =
+    event.visibility === 'master' ? (
+      <span className="badge secret">Solo tú lo ves</span>
+    ) : event.visibility === 'private' ? (
+      <span className="badge secret">
+        {master ? `En secreto${partner ? ` con ${partner}` : ''}` : 'En secreto: el máster y tú'}
+      </span>
+    ) : null;
+  /** La cabecera de una tarjeta: quién o qué, quién lo ve y cuándo. */
+  const head = (title: ReactNode, who?: ReactNode) => (
+    <header className="feed-head">
+      {who}
+      <span className="feed-title">{title}</span>
+      {seenBy}
+      {time}
+    </header>
+  );
+  const line = (text: ReactNode, tone?: string) => (
+    <p className={tone ? `feed-line ${tone}` : 'feed-line'}>
+      {time} <span>{text}</span>
     </p>
   );
+  const divider = (title: string, text?: string) => (
+    <div className="feed-divider">
+      <span className="eyebrow">{title}</span>
+      {text && <span className="muted">{text}</span>}
+    </div>
+  );
+  const recovering = (recovered: { name: string }[]) =>
+    recovered.length === 0
+      ? ''
+      : `${listText(recovered.map(({ name }) => name))} ${recovered.length === 1 ? 'recupera' : 'recuperan'} el aliento: se borran sus rasguños.`;
 
   switch (event.kind) {
     case 'opened':
-      return (
-        <article className="feed-item feed-milestone">
-          {meta}
-          <h3>Empieza la partida {event.number}</h3>
-          {event.title && <p>{event.title}</p>}
-          {event.luckRefilled && (
-            <p className="muted">Todos los personajes empiezan con la Suerte llena.</p>
-          )}
-        </article>
+      return divider(
+        `Empieza la partida ${event.number}${event.title ? `: ${event.title}` : ''}`,
+        event.luckRefilled ? 'Todos los personajes empiezan con la Suerte llena.' : undefined,
       );
     case 'closed':
-      return (
-        <article className="feed-item feed-milestone">
-          {meta}
-          <h3>Fin de la partida</h3>
-          {event.xpAwarded > 0 && (
-            <p className="muted">Cada personaje gana {event.xpAwarded} PX de fin de sesión.</p>
-          )}
-        </article>
+      return divider(
+        'Fin de la partida',
+        event.xpAwarded > 0 ? `Cada personaje gana ${event.xpAwarded} PX de fin de sesión.` : '',
       );
     case 'reveal':
       return (
         <article className="feed-item feed-reveal">
-          {meta}
-          {event.title && <h3>{event.title}</h3>}
+          {head(event.title || 'El máster describe')}
           <p className="prewrap">{event.body}</p>
         </article>
       );
     case 'note':
       return (
         <article className="feed-item feed-note">
-          {meta}
+          {head('Nota')}
           <p className="prewrap">{event.text}</p>
         </article>
       );
     case 'roll':
       return (
-        <article className={superseded ? 'feed-item feed-superseded' : 'feed-item'}>
-          {meta}
+        <article
+          className={superseded ? 'feed-item feed-roll feed-superseded' : 'feed-item feed-roll'}
+        >
+          {head(
+            <>
+              {event.roll.actor.label}
+              {event.roll.actor.check && <span className="muted"> · {event.roll.actor.check}</span>}
+            </>,
+          )}
           {superseded && <p className="roll-superseded">No cuenta: se repitió con Suerte</p>}
-          <RollView roll={event.roll} />
+          <RollView roll={event.roll} heading={false} />
           {children}
         </article>
       );
     case 'speech':
       return (
         <article className="feed-item feed-speech">
-          {meta}
-          <h3>{event.name}</h3>
+          {head(event.name, <Avatar name={event.name} size="small" />)}
           <p className="prewrap">{event.text}</p>
         </article>
       );
     case 'floor':
-      return (
-        <article className="feed-item feed-floor">
-          {meta}
-          <p>{floorLine(event.floor)}</p>
-        </article>
-      );
+      return line(floorLine(event.floor));
     case 'intervention':
       return (
         <article className="feed-item feed-intervention">
-          {meta}
-          <h3>
-            {event.name} · {intentLabel(event.intent, event.target)}
-          </h3>
+          {head(
+            <>
+              {event.name}{' '}
+              <span className="muted">· {intentLabel(event.intent, event.target)}</span>
+            </>,
+            <Avatar name={event.name} id={event.characterId} size="small" />,
+          )}
           {event.text ? (
-            <p className="prewrap">{event.text}</p>
+            <p className="prewrap feed-said">{event.text}</p>
           ) : (
             <p className="muted">Sin texto: lo cuenta de palabra.</p>
           )}
@@ -329,8 +362,10 @@ export function EventCard({
     case 'rollRequest':
       return (
         <article className="feed-item feed-request">
-          {meta}
-          <h3>El máster pide una tirada a {event.name}</h3>
+          {head(
+            `Tirada pedida a ${event.name}`,
+            <Avatar name={event.name} id={event.characterId} size="small" />,
+          )}
           <p>{requestedText(event)}</p>
           <p className={`feed-status status-${settled ?? 'pending'}`}>
             {REQUEST_STATUS[settled ?? 'pending']}
@@ -344,44 +379,36 @@ export function EventCard({
     case 'combatStarted':
       return (
         <article className="feed-item feed-combat">
-          {meta}
-          <h3>¡Combate!</h3>
-          <p className="muted">Orden de iniciativa:</p>
+          {head('¡Combate!')}
           <InitiativeList combatants={event.order} />
-          {event.order[0] && <p>Empieza {event.order[0].name}.</p>}
+          {event.order[0] && <p className="muted">Empieza {event.order[0].name}.</p>}
         </article>
       );
     case 'turn':
-      return (
-        <article className="feed-item feed-floor">
-          {meta}
-          <p>
-            Ronda {event.round} · Le toca a {event.combatant.name}.
-          </p>
-        </article>
+      return line(
+        <>
+          Ronda {event.round} · Le toca a <strong>{event.combatant.name}</strong>.
+        </>,
+        'feed-turn',
       );
     case 'combatJoined':
       return (
         <article className="feed-item feed-combat">
-          {meta}
-          <h3>Se unen al combate</h3>
+          {head('Se unen al combate')}
           <InitiativeList combatants={event.joined} />
         </article>
       );
     case 'combatLeft':
-      return (
-        <article className="feed-item feed-floor">
-          {meta}
-          <p>Sale del combate: {event.left.name}.</p>
-        </article>
+      return line(
+        <>
+          Sale del combate: <strong>{event.left.name}</strong>.
+        </>,
       );
     case 'damage':
       return (
         <article className="feed-item feed-damage">
-          {meta}
-          <p>
-            <strong>{blowLine(event)}</strong> {blowResult(event, master)}
-          </p>
+          {head(blowLine(event))}
+          <p>{blowResult(event, master)}</p>
           {event.target.kind === 'character' && event.target.lethal && (
             <p className="lethal">
               {survived
@@ -393,52 +420,26 @@ export function EventCard({
         </article>
       );
     case 'survived':
-      return (
-        <article className="feed-item feed-floor">
-          {meta}
-          <p>{event.name} gasta un punto de Suerte y sigue con vida.</p>
-        </article>
+      return line(
+        <>
+          <strong>{event.name}</strong> gasta un punto de Suerte y sigue con vida.
+        </>,
       );
-    case 'scene': {
-      const recovered = event.recovered.map(({ name }) => name);
-      return (
-        <article className="feed-item feed-milestone">
-          {meta}
-          <h3>Escena: {event.title}</h3>
-          {recovered.length > 0 && (
-            <p className="muted">
-              {listText(recovered)} {recovered.length === 1 ? 'recupera' : 'recuperan'} el aliento:
-              se borran sus rasguños.
-            </p>
-          )}
-        </article>
-      );
-    }
+    case 'scene':
+      return divider(`Escena: ${event.title}`, recovering(event.recovered));
     case 'ability': {
       const skill = defaultSkillCatalog.get(event.skill);
-      return (
-        <article className="feed-item feed-floor">
-          {meta}
-          <p>
-            <strong>{event.name}</strong> usa {event.label}.
-          </p>
-          {skill && <p className="muted">{skill.description}</p>}
-        </article>
+      return line(
+        <>
+          <strong>{event.name}</strong> usa {event.label}.
+          {skill && <span className="muted"> {skill.description}</span>}
+        </>,
       );
     }
-    case 'combatEnded': {
-      const recovered = event.recovered.map(({ name }) => name);
-      return (
-        <article className="feed-item feed-milestone">
-          {meta}
-          <h3>Fin del combate</h3>
-          <p className="muted">
-            {event.rounds === 1 ? 'Ha durado una ronda.' : `Ha durado ${event.rounds} rondas.`}
-            {recovered.length > 0 &&
-              ` ${listText(recovered)} ${recovered.length === 1 ? 'recupera' : 'recuperan'} el aliento: se borran sus rasguños.`}
-          </p>
-        </article>
+    case 'combatEnded':
+      return divider(
+        'Fin del combate',
+        `${event.rounds === 1 ? 'Ha durado una ronda.' : `Ha durado ${event.rounds} rondas.`} ${recovering(event.recovered)}`.trim(),
       );
-    }
   }
 }
