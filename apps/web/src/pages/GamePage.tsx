@@ -962,7 +962,7 @@ function TalkPanel(props: {
           <details className="npc-summary">
             <summary>Ficha de {npc.name}</summary>
             <NpcSheet npc={npc} />
-            <Link to={`/pnj/${npc.id}`}>Editar la ficha</Link>
+            <Link to={`/campanas/${game.campaignId}/pnj/${npc.id}`}>Editar la ficha</Link>
           </details>
           {aiEnabled ? (
             <NpcChat

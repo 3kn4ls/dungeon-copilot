@@ -4,14 +4,14 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router';
 import { Layout, RequireAuth } from './components/Layout';
 import { PageMessage } from './components/ui';
-import { CampaignPage } from './pages/CampaignPage';
+import { NewNpcDrawer, NpcDrawer, NpcRedirect, CampaignNpcs } from './pages/CampaignNpcs';
+import { CampaignCharacters, CampaignChronicle, CampaignPage } from './pages/CampaignPage';
+import { CampaignTable } from './pages/CampaignTable';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { CharacterPage } from './pages/CharacterPage';
 import { GamePage } from './pages/GamePage';
 import { LoginPage } from './pages/LoginPage';
 import { NewCharacterPage } from './pages/NewCharacterPage';
-import { NewNpcPage } from './pages/NewNpcPage';
-import { NpcPage } from './pages/NpcPage';
 import { RollerPage } from './pages/RollerPage';
 import { ScreenPage } from './pages/ScreenPage';
 import { createQueryClient } from './queries';
@@ -45,11 +45,18 @@ createRoot(document.getElementById('root')!).render(
             <Route path="tirador" element={<RollerPage />} />
             <Route element={<RequireAuth />}>
               <Route path="campanas" element={<CampaignsPage />} />
-              <Route path="campanas/:campaignId" element={<CampaignPage />} />
+              <Route path="campanas/:campaignId" element={<CampaignPage />}>
+                <Route index element={<CampaignChronicle />} />
+                <Route path="personajes" element={<CampaignCharacters />} />
+                <Route path="pnj" element={<CampaignNpcs />}>
+                  <Route path="nuevo" element={<NewNpcDrawer />} />
+                  <Route path=":npcId" element={<NpcDrawer />} />
+                </Route>
+                <Route path="mesa" element={<CampaignTable />} />
+              </Route>
               <Route path="campanas/:campaignId/personajes/nuevo" element={<NewCharacterPage />} />
               <Route path="personajes/:characterId" element={<CharacterPage />} />
-              <Route path="campanas/:campaignId/pnj/nuevo" element={<NewNpcPage />} />
-              <Route path="pnj/:npcId" element={<NpcPage />} />
+              <Route path="pnj/:npcId" element={<NpcRedirect />} />
               <Route path="partidas/:gameId" element={<GamePage />} />
             </Route>
             <Route

@@ -692,3 +692,9 @@
   gap: 8px 14px;
   margin-top: 4px;
 }
+
+/* En la ficha de un PNJ, lo que oculta: solo lo ve el máster. */
+.npc-sheet .secret dt,
+.npc-sheet .secret dd {
+  color: var(--arcane);
+}

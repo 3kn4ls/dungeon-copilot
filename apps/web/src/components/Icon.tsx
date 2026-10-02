@@ -38,6 +38,36 @@ const ICONS = {
       <path d="M12 3.5v17a8.5 8.5 0 000-17z" fill="currentColor" />
     </>
   ),
+  chronicle: (
+    <>
+      <path d="M8 4h10a2 2 0 012 2v2h-4" />
+      <path d="M16 6v12a2 2 0 01-2 2H6a2 2 0 01-2-2v-1h9" />
+      <path d="M8 4a2 2 0 00-2 2v11" />
+      <path d="M10 9h3M10 13h3" />
+    </>
+  ),
+  characters: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0113 0" />
+      <path d="M16 4.6a3.5 3.5 0 010 6.8M18 14a6.5 6.5 0 013.5 6" />
+    </>
+  ),
+  npcs: (
+    <>
+      <path d="M4 6c3-1.5 13-1.5 16 0 0 7-3 12-8 12S4 13 4 6z" />
+      <path d="M8 10h2.5M13.5 10H16" />
+      <path d="M10 14.5c1.2.8 2.8.8 4 0" />
+    </>
+  ),
+  secret: (
+    <>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 018 0v3" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
   enter: (
     <>
       <path d="M10 3h9v18h-9" />
