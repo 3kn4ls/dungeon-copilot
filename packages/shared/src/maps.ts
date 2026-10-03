@@ -26,9 +26,46 @@ const side = (what: string) =>
     .min(MAP_LIMITS.minSide, `El mapa tiene al menos ${MAP_LIMITS.minSide} casillas de ${what}`)
     .max(MAP_LIMITS.maxSide, `El mapa tiene como mucho ${MAP_LIMITS.maxSide} casillas de ${what}`);
 
+/** Las imágenes que se suben como plano de un mapa: de qué tipo, cuánto pesan y cuántas caben. */
+export const MAP_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export type MapImageType = (typeof MAP_IMAGE_TYPES)[number];
+export const MAP_IMAGE_LIMITS = { bytes: 5 * 1024 * 1024, perCampaign: 40 } as const;
+
+/** «5 MB». */
+export const MAP_IMAGE_MAX_TEXT = `${MAP_IMAGE_LIMITS.bytes / 1024 / 1024} MB`;
+
+/** Una imagen de plano de la campaña, sin sus bytes. */
+export interface MapImageView {
+  id: string;
+  contentType: MapImageType;
+  size: number;
+  createdAt: string;
+}
+
+const placement = (what: string, min: number, max: number) =>
+  z
+    .number(`Di ${what} del plano`)
+    .min(min, `${what} del plano no puede bajar de ${min.toLocaleString('es-ES')}`)
+    .max(max, `${what} del plano no puede pasar de ${max.toLocaleString('es-ES')}`);
+
 /**
- * Un plano en casillas de 1,5 m: su tamaño y lo que hay en las casillas que no son suelo (muros,
- * puertas, ventanas y muebles), cada casilla una vez.
+ * El plano de fondo de un mapa: una imagen de la campaña y dónde va respecto a la cuadrícula, en
+ * casillas desde la esquina de arriba a la izquierda (puede salirse por los lados). Se estira a lo
+ * que mida: así se ajusta la cuadrícula encima.
+ */
+export const mapBackgroundSchema = z.object({
+  image: z.uuid('Elige un plano'),
+  x: placement('El lado izquierdo', -MAP_LIMITS.maxSide, MAP_LIMITS.maxSide),
+  y: placement('El lado de arriba', -MAP_LIMITS.maxSide, MAP_LIMITS.maxSide),
+  width: placement('El ancho', 0.5, MAP_LIMITS.maxSide * 4),
+  height: placement('El alto', 0.5, MAP_LIMITS.maxSide * 4),
+});
+
+export type MapBackground = z.output<typeof mapBackgroundSchema>;
+
+/**
+ * Un plano en casillas de 1,5 m: su tamaño, lo que hay en las casillas que no son suelo (muros,
+ * puertas, ventanas y muebles), cada casilla una vez, y si lo lleva, una imagen de fondo.
  */
 export const mapGridSchema = z
   .object({
@@ -38,6 +75,8 @@ export const mapGridSchema = z
       .array(cellSchema.extend({ kind: z.enum(TERRAIN_KINDS, 'Elige qué hay en la casilla') }))
       .max(MAP_LIMITS.maxSide ** 2, 'Hay más casillas que en el mapa más grande')
       .default([]),
+    /** null, al quitarlo; sin él, el suelo de tablas. */
+    background: mapBackgroundSchema.nullable().optional(),
   })
   .superRefine((grid, ctx) => {
     const seen = new Set<string>();

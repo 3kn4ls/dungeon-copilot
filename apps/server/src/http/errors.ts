@@ -2,6 +2,16 @@ import type { ApiErrorBody, ApiIssue } from '@dungeon-copilot/shared';
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /**
+     * Mensajes de una ruta para los errores de Fastify, por su código: «El plano no puede pasar de
+     * 5 MB» en vez de «La petición es demasiado grande».
+     */
+    errorMessages?: Partial<Record<string, string>>;
+  }
+}
+
 /** Error con un código HTTP y un mensaje en español que se puede enseñar tal cual. */
 export class HttpError extends Error {
   readonly statusCode: number;
@@ -60,7 +70,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
     }
     const statusCode = error.statusCode ?? 500;
     if (statusCode >= 400 && statusCode < 500) {
-      const message = CLIENT_ERROR_MESSAGES[error.code] ?? 'La petición no es válida';
+      const message =
+        request.routeOptions.config.errorMessages?.[error.code] ??
+        CLIENT_ERROR_MESSAGES[error.code] ??
+        'La petición no es válida';
       return reply.status(statusCode).send({ error: message } satisfies ApiErrorBody);
     }
     request.log.error(error);
