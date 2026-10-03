@@ -126,6 +126,8 @@ export function BattleMap(props: {
   tokenActions?: (token: MapToken) => ReactNode;
   /** Las casillas que alguien acaba de señalar. */
   pings?: readonly ShownPing[];
+  /** De dónde se piden los planos: en la pantalla, con su enlace. */
+  images?: string;
 }) {
   const { gameId, map, combat, characters, viewer, own = [], asTable = false } = props;
   const { placing = null, onPlaced, aimActions, toolbar, tokenActions, pings = [] } = props;
@@ -360,7 +362,7 @@ export function BattleMap(props: {
           onPointerUp={up}
           onPointerCancel={up}
         >
-          <MapTerrain grid={map.grid} />
+          <MapTerrain grid={map.grid} images={props.images} />
 
           {bands &&
             [RANGE_CELLS.medium, RANGE_CELLS.short].map((reach) => {

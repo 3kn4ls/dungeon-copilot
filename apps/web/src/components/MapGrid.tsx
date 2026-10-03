@@ -6,6 +6,7 @@ import {
   type Cell,
   type Terrain,
 } from '@dungeon-copilot/rules';
+import type { MapGrid } from '@dungeon-copilot/shared';
 import { useId } from 'react';
 
 /** El lado de una casilla en el dibujo del mapa: todo lo demás se mide con él. */
@@ -111,24 +112,52 @@ export function TerrainTile({
   }
 }
 
+/** De dónde salen los planos: la sesión de quien mira o, en la pantalla, su enlace. */
+export const MAP_IMAGES = '/api/map-images';
+
 /**
- * El plano: el suelo de tablas, lo que hay en cada casilla y la cuadrícula. Va dentro de un
- * <svg> con su viewBox de `cols × rows` casillas.
+ * El plano: el suelo de tablas (o la imagen de fondo, si la lleva), lo que hay en cada casilla y
+ * la cuadrícula. Va dentro de un <svg> con su viewBox de `cols × rows` casillas. Sobre una imagen,
+ * los muros y los muebles se dibujan transparentes, para ver lo que hay debajo.
  */
-export function MapTerrain({ grid, lines = true }: { grid: BattleGrid; lines?: boolean }) {
+export function MapTerrain({
+  grid,
+  lines = true,
+  images = MAP_IMAGES,
+}: {
+  grid: MapGrid;
+  lines?: boolean;
+  /** De dónde se piden los planos. */
+  images?: string;
+}) {
   // Cada dibujo, con su propio dibujo de tablas: los id se comparten en toda la página.
   const planks = `planks-${useId().replace(/[^\w-]/g, '')}`;
   const kinds = terrainMap(grid);
   const half = CELL / 2;
+  const { background } = grid;
   return (
-    <g>
+    <g className={background ? 'on-image' : undefined}>
       <defs>
         <pattern id={planks} width={CELL} height={half} patternUnits="userSpaceOnUse">
           <rect width={CELL} height={half} className="m-floor" />
           <path d={`M0 ${half - 0.5}H${CELL}M${CELL * 0.6} 0V${half}`} className="m-plank" />
         </pattern>
       </defs>
-      <rect width={grid.cols * CELL} height={grid.rows * CELL} fill={`url(#${planks})`} />
+      {background ? (
+        <>
+          <rect width={grid.cols * CELL} height={grid.rows * CELL} className="m-floor" />
+          <image
+            href={`${images}/${background.image}`}
+            x={background.x * CELL}
+            y={background.y * CELL}
+            width={background.width * CELL}
+            height={background.height * CELL}
+            preserveAspectRatio="none"
+          />
+        </>
+      ) : (
+        <rect width={grid.cols * CELL} height={grid.rows * CELL} fill={`url(#${planks})`} />
+      )}
       {lines && <path d={gridPath(grid)} className="m-grid" />}
       {grid.terrain.map((tile) => (
         <TerrainTile
@@ -147,7 +176,7 @@ export function MapTerrain({ grid, lines = true }: { grid: BattleGrid; lines?: b
 }
 
 /** El mapa en pequeño, para reconocerlo en la lista: llena su sitio, aunque se corten los bordes. */
-export function MapThumb({ grid }: { grid: BattleGrid }) {
+export function MapThumb({ grid }: { grid: MapGrid }) {
   return (
     <svg
       viewBox={`0 0 ${grid.cols * CELL} ${grid.rows * CELL}`}
