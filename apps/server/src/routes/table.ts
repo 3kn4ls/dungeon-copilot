@@ -117,7 +117,7 @@ export function registerTableRoutes(app: FastifyInstance, ctx: AppContext): void
           target:
             body.targetId === undefined
               ? undefined
-              : await findCombatTarget(tx, gameId, body.targetId),
+              : await findCombatTarget(tx, gameId, body.targetId, body.targetMember),
         },
       };
     });

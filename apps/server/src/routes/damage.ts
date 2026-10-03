@@ -3,6 +3,7 @@ import {
   UNHARMED,
   applyDamage,
   damageNpcs,
+  memberDamage,
   scratchBoxes,
 } from '@dungeon-copilot/rules';
 import {
@@ -10,6 +11,7 @@ import {
   groupSize,
   isSpent,
   leaveCombat,
+  memberName,
   type Blow,
   type CombatantRef,
   type GameRoll,
@@ -87,11 +89,17 @@ async function findHitRoll(
   return row.payload.roll;
 }
 
-/** Quién da el golpe a `targetId`, según quién atacaba a quién en la tirada. */
-function striker(blow: Blow | undefined, targetId: string): CombatantRef | undefined {
-  if (blow?.defender.id === targetId) return blow.attacker;
-  if (blow?.attacker.id === targetId) return blow.defender;
-  return undefined;
+/**
+ * Quién da el golpe a `targetId` y quién lo recibe (con cuál de su grupo, si se apuntó a uno),
+ * según quién atacaba a quién en la tirada.
+ */
+function sidesOf(
+  blow: Blow | undefined,
+  targetId: string,
+): { by?: CombatantRef; struck?: CombatantRef } {
+  if (blow?.defender.id === targetId) return { by: blow.attacker, struck: blow.defender };
+  if (blow?.attacker.id === targetId) return { by: blow.defender, struck: blow.attacker };
+  return {};
 }
 
 /**
@@ -114,7 +122,7 @@ export function registerDamageRoutes(app: FastifyInstance, ctx: AppContext): voi
         body.roll === undefined
           ? undefined
           : await findHitRoll(tx, gameId, body.roll, body.targetId);
-      const by = striker(roll?.blow, body.targetId);
+      const { by, struck } = sidesOf(roll?.blow, body.targetId);
       const hit = { kind: 'damage' as const, roll: body.roll, by };
 
       const combat = await findCombat(tx, gameId);
@@ -127,7 +135,17 @@ export function registerDamageRoutes(app: FastifyInstance, ctx: AppContext): voi
           const fallen = count === 1 ? 'ya ha caído' : 'ya han caído todos';
           throw new HttpError(409, `${npc.name} ${fallen}`);
         }
-        const result = damageNpcs(npc.profile, count, harm, body.amount);
+        const { toughness } = NPC_PROFILES[npc.profile];
+        // A cuál del grupo va: el que se dice o al que se apuntó en la tirada.
+        const chosen = body.member ?? struck?.member;
+        if (chosen !== undefined && chosen >= count) {
+          throw notFound(`${npc.name} ${count === 1 ? 'es uno solo' : `son ${count}`}`);
+        }
+        const member = count === 1 ? undefined : chosen;
+        if (member !== undefined && memberDamage(npc.profile, count, harm)[member]! >= toughness) {
+          throw new HttpError(409, `${memberName(npc, member)} ya ha caído`);
+        }
+        const result = damageNpcs(npc.profile, count, harm, body.amount, member);
         // Si caen todos, salen del combate, salvo que no quede nadie más en él.
         const position =
           result.out && combat.order.length > 1 ? leaveCombat(combat, npc.id) : undefined;
@@ -141,9 +159,10 @@ export function registerDamageRoutes(app: FastifyInstance, ctx: AppContext): voi
               id: npc.id,
               name: npc.name,
               count,
-              toughness: NPC_PROFILES[npc.profile].toughness,
+              toughness,
               harm: result.harm,
               fell: result.fell,
+              member: result.member,
             },
             position,
           },

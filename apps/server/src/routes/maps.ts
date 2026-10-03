@@ -2,6 +2,7 @@ import { canStand } from '@dungeon-copilot/rules';
 import {
   groupSize,
   mapSchema,
+  memberName,
   placeTokenSchema,
   setGameMapSchema,
   tokenKey,
@@ -198,6 +199,11 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
         }
         case 'combatant': {
           if (!master) throw forbidden(MASTER_ONLY);
+          // Ya en el mapa, se mueve o se quita aunque haya dejado de pelear.
+          if (placed) {
+            name = placed.name;
+            break;
+          }
           const combat = await requireCombat(tx, gameId);
           const combatant = combat.order.find(
             (other) => other.id === token.id && other.kind === 'npc',
@@ -209,7 +215,7 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
           if (token.member >= count) {
             throw notFound(`${combatant.name} ${count === 1 ? 'es uno' : `son ${count}`}`);
           }
-          name = count === 1 ? combatant.name : `${combatant.name} ${token.member + 1}`;
+          name = memberName(combatant, token.member);
           break;
         }
         case 'figure': {
