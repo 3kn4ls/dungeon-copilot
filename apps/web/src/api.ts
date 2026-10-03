@@ -45,6 +45,7 @@ import type {
   NpcRequest,
   NpcView,
   OpenGameRequest,
+  PingRequest,
   PlaceTokenRequest,
   RecapDraftRequest,
   RecapRequest,
@@ -358,6 +359,8 @@ export const api = {
   /** Pone, mueve o quita una ficha del mapa en juego. */
   placeToken: (id: string, body: PlaceTokenRequest) =>
     post<EventResponse>(`/api/games/${id}/tokens`, body).then((r) => r.event),
+  /** Señala una casilla del mapa: la ve la mesa un momento, por el directo. */
+  ping: (id: string, body: PingRequest) => post<void>(`/api/games/${id}/pings`, body),
 
   roll: (body: RollRequest) => post<RollResponse>('/api/rolls', body),
 };

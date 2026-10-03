@@ -24,7 +24,7 @@ import { BattleMap } from '../components/BattleMap';
 import { harmText } from '../components/Combat';
 import { RollView, blowLine, blowResult, requestedText } from '../components/GameEvents';
 import { useDocumentTitle } from '../components/ui';
-import { LIVE_STATUS_LABELS, useLiveEvents } from '../live';
+import { LIVE_STATUS_LABELS, useLiveEvents, usePings } from '../live';
 import { keys } from '../queries';
 
 /** Frases que se ven bajo la escena: lo último que dicen los PNJ y los personajes. */
@@ -66,6 +66,7 @@ export function ScreenPage() {
   });
   useDocumentTitle(screen.data ? `Pantalla · ${screen.data.campaignName}` : 'Pantalla');
   useWakeLock();
+  const [pings, addPing] = usePings();
 
   // Con el enlace cambiado, lo que quedó guardado ya no vale.
   const gone = screen.error instanceof ApiError && screen.error.status === 404;
@@ -82,6 +83,7 @@ export function ScreenPage() {
       queryClient.setQueryData<ScreenState>(keys.screen(token), mergeScreenEvent(current, event));
     },
     onRefused: () => void queryClient.invalidateQueries({ queryKey: keys.screen(token) }),
+    onPing: addPing,
   });
 
   if (!screen.data || gone) {
@@ -165,6 +167,7 @@ export function ScreenPage() {
                 combat={combat}
                 characters={[]}
                 viewer="screen"
+                pings={pings}
               />
             )}
             {scene && reveal && <p className="screen-scene">{scene.title}</p>}

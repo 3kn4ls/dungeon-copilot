@@ -142,6 +142,20 @@ export const placeTokenSchema = z.object({
 export type PlaceTokenRequest = z.input<typeof placeTokenSchema>;
 
 /**
+ * Señalar una casilla del mapa en juego: toda la mesa (y la pantalla) la ve un momento. Llega por
+ * el directo y no se guarda: no es un evento de la partida.
+ */
+export const pingSchema = z.object({ at: cellSchema });
+
+export type PingRequest = z.input<typeof pingSchema>;
+
+/** Una casilla señalada y quién la señala. */
+export interface MapPing {
+  at: Cell;
+  by: string;
+}
+
+/**
  * Los eventos que lee el mapa: los suyos, los que meten en el combate figuras del mapa y los
  * golpes, que dicen quién cae.
  */

@@ -1,4 +1,4 @@
-import type { GameEvent } from '@dungeon-copilot/shared';
+import type { GameEvent, MapPing } from '@dungeon-copilot/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { GameHub, Subscriber } from './hub';
 
@@ -9,7 +9,7 @@ const RETRY_MS = 3_000;
 
 export interface EventStreamOptions {
   hub: GameHub;
-  subscriber: Omit<Subscriber, 'send' | 'close'>;
+  subscriber: Omit<Subscriber, 'send' | 'signal' | 'close'>;
   /** Último evento que tiene el cliente; se le envía lo posterior antes de pasar al directo. */
   after: number;
   /** Eventos posteriores a `after`, del más antiguo al más reciente. */
@@ -33,6 +33,7 @@ export function lastEventId(request: FastifyRequest<{ Querystring: { after?: str
  * Abre un directo con Server-Sent Events: primero lo que el cliente se perdió y luego lo que
  * vaya pasando. Se suscribe antes de consultar la base de datos y guarda lo que llega mientras
  * tanto, así no se pierde nada entre la consulta y el directo; los repetidos se descartan por id.
+ * Las casillas señaladas van aparte (`event: ping`), sin id: no se guardan ni se recuperan.
  */
 export function openEventStream(
   request: FastifyRequest,
@@ -70,11 +71,16 @@ export function openEventStream(
     if (options.isLast?.(event)) end();
   };
 
+  const signal = (ping: MapPing) => {
+    if (!ended) raw.write(`event: ping\ndata: ${JSON.stringify(ping)}\n\n`);
+  };
+
   raw.on('close', end);
   raw.on('error', end);
   unsubscribe = options.hub.subscribe({
     ...options.subscriber,
     send: (event) => (pending ? pending.push(event) : write(event)),
+    signal,
     close: end,
   });
   // Si el cliente se fue antes de llegar aquí, "close" ya pasó y no volverá a avisar.

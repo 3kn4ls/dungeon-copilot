@@ -17,6 +17,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
+import type { ShownPing } from '../live';
 import { useMaps, useStoreGameEvent } from '../queries';
 import type { MapAttack, MapFighter, RollPreset } from '../rolling';
 import { BattleMap, type Placing } from './BattleMap';
@@ -132,8 +133,9 @@ export function MasterMap(props: {
   combat: Combat | null;
   characters: CharacterView[];
   onPrepare: (preset: RollPreset) => void;
+  pings: readonly ShownPing[];
 }) {
-  const { game, events, combat, characters, onPrepare } = props;
+  const { game, events, combat, characters, onPrepare, pings } = props;
   const map = currentMap(events);
   const storeEvent = useStoreGameEvent(game.id);
   const [asTable, setAsTable] = useState(false);
@@ -208,6 +210,7 @@ export function MasterMap(props: {
         combat={combat}
         characters={characters}
         viewer="master"
+        pings={pings}
         asTable={asTable}
         placing={placing}
         onPlaced={() => setPlacing(null)}
@@ -344,8 +347,9 @@ export function PlayerMap(props: {
   characters: CharacterView[];
   /** Los personajes de quien mira. */
   mine: CharacterView[];
+  pings: readonly ShownPing[];
 }) {
-  const { game, map, combat, characters, mine } = props;
+  const { game, map, combat, characters, mine, pings } = props;
   const storeEvent = useStoreGameEvent(game.id);
   const [placing, setPlacing] = useState<Placing | null>(null);
   const [sent, setSent] = useState<string | null>(null);
@@ -377,6 +381,7 @@ export function PlayerMap(props: {
         combat={combat}
         characters={characters}
         viewer="player"
+        pings={pings}
         own={mine.map((character) => character.id)}
         placing={placing}
         onPlaced={() => setPlacing(null)}

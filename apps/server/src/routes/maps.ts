@@ -1,8 +1,9 @@
-import { canStand } from '@dungeon-copilot/rules';
+import { canStand, insideGrid } from '@dungeon-copilot/rules';
 import {
   groupSize,
   mapSchema,
   memberName,
+  pingSchema,
   placeTokenSchema,
   setGameMapSchema,
   tokenKey,
@@ -18,10 +19,12 @@ import type { Executor } from '../db';
 import { campaignMembers, maps } from '../db/schema';
 import { findCombat, requireCombat } from '../games/combat';
 import {
+  GAME_CLOSED,
   GAME_NOT_FOUND,
   MASTER_ONLY,
   createAddEvent,
   findCampaignCharacter,
+  findGame,
   requireMasterOf,
 } from '../games/events';
 import { findMap, requireMap } from '../games/maps';
@@ -67,10 +70,11 @@ async function findCampaignMap(db: Executor, user: PublicUser, id: string): Prom
  * Los mapas de combate. El máster los prepara en la campaña y pone uno en la partida, guardado
  * como era entonces (`map`). Las fichas se ponen, se mueven y se quitan (`token`): el máster,
  * todas; cada jugador, la de su personaje y, en combate, en su turno. Las que el máster esconde
- * son eventos solo suyos hasta que las enseña.
+ * son eventos solo suyos hasta que las enseña. Señalar una casilla no es un evento: se reparte
+ * por el directo y no se guarda.
  */
 export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
-  const { db } = ctx;
+  const { db, hub } = ctx;
   const addEvent = createAddEvent(ctx);
 
   app.get<{ Params: IdParams }>('/api/campaigns/:id/maps', async (request) => {
@@ -150,6 +154,19 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
       };
     });
     return reply.status(201).send({ event });
+  });
+
+  /** Señalar una casilla del mapa en juego: la ve toda la mesa un momento. */
+  app.post<{ Params: IdParams }>('/api/games/:id/pings', async (request, reply) => {
+    const user = requireUser(request);
+    const gameId = parseId(request.params.id, GAME_NOT_FOUND);
+    const { at } = parseBody(pingSchema, request.body, 'Revisa qué casilla señalas');
+    const found = await findGame(db, user, gameId);
+    if (found.game.status !== 'open') throw new HttpError(409, GAME_CLOSED);
+    const map = await requireMap(db, gameId);
+    if (!insideGrid(map.grid, at)) throw new HttpError(409, 'Esa casilla no está en el mapa');
+    hub.signal(found.game.campaignId, gameId, { at, by: user.displayName });
+    return reply.status(204).send();
   });
 
   /**

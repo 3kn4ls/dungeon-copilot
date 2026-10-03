@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
-import type { GameEvent } from '@dungeon-copilot/shared';
+import type { GameEvent, MapPing } from '@dungeon-copilot/shared';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import pg from 'pg';
@@ -149,6 +149,8 @@ export interface TestStream {
   status: number;
   /** Siguiente evento, o "end" si el servidor cerró el directo. */
   next(): Promise<GameEvent | 'end'>;
+  /** Siguiente casilla señalada, saltando los eventos que lleguen antes. */
+  nextPing(): Promise<MapPing | 'end'>;
   close(): void;
 }
 
@@ -188,26 +190,40 @@ export function useLiveStreams(t: { readonly app: FastifyInstance }) {
     response.setEncoding('utf8');
     const chunks: AsyncIterator<string> = response[Symbol.asyncIterator]();
     let buffer = '';
+    /** El siguiente mensaje con datos: un evento o, con `event: ping`, una casilla señalada. */
+    const read = async (): Promise<{ ping: boolean; data: unknown } | 'end'> => {
+      for (;;) {
+        const boundary = buffer.indexOf('\n\n');
+        if (boundary >= 0) {
+          const block = buffer.slice(0, boundary).split('\n');
+          buffer = buffer.slice(boundary + 2);
+          const data = block
+            .filter((line) => line.startsWith('data: '))
+            .map((line) => line.slice('data: '.length))
+            .join('\n');
+          // Los bloques sin datos son el "retry" inicial o los comentarios de latido.
+          if (data) return { ping: block.includes('event: ping'), data: JSON.parse(data) };
+          continue;
+        }
+        const { value, done } = await chunks.next();
+        if (done) return 'end';
+        buffer += value;
+      }
+    };
     const stream: TestStream = {
       status: response.statusCode ?? 0,
       async next() {
         for (;;) {
-          const boundary = buffer.indexOf('\n\n');
-          if (boundary >= 0) {
-            const block = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            const data = block
-              .split('\n')
-              .filter((line) => line.startsWith('data: '))
-              .map((line) => line.slice('data: '.length))
-              .join('\n');
-            // Los bloques sin datos son el "retry" inicial o los comentarios de latido.
-            if (data) return JSON.parse(data) as GameEvent;
-            continue;
-          }
-          const { value, done } = await chunks.next();
-          if (done) return 'end';
-          buffer += value;
+          const message = await read();
+          if (message === 'end') return 'end';
+          if (!message.ping) return message.data as GameEvent;
+        }
+      },
+      async nextPing() {
+        for (;;) {
+          const message = await read();
+          if (message === 'end') return 'end';
+          if (message.ping) return message.data as MapPing;
         }
       },
       close: () => response.destroy(),

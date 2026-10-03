@@ -107,7 +107,13 @@ import {
   useDocumentTitle,
 } from '../components/ui';
 import { useRememberCampaign } from '../current-campaign';
-import { LIVE_STATUS_LABELS, useLiveEvents, type LiveStatus } from '../live';
+import {
+  LIVE_STATUS_LABELS,
+  useLiveEvents,
+  usePings,
+  type LiveStatus,
+  type ShownPing,
+} from '../live';
 import {
   changesSheets,
   keys,
@@ -160,6 +166,7 @@ export function GamePage() {
   const characters = useCharacters(game?.campaignId ?? '');
   useRememberCampaign(game?.campaignId);
   const [filter, setFilter] = useState<FeedFilter>('all');
+  const [pings, addPing] = usePings();
 
   const live = useLiveEvents({
     url: game?.status === 'open' ? `/api/games/${gameId}/stream` : null,
@@ -174,6 +181,7 @@ export function GamePage() {
     endsWith: (event) => event.kind === 'closed',
     // Ya no deja conectar (por ejemplo, han echado a quien mira): se vuelve a pedir la partida.
     onRefused: () => void queryClient.invalidateQueries({ queryKey: keys.game(gameId) }),
+    onPing: addPing,
   });
 
   // Lo que espera a quien mira: al máster, las intervenciones de la mesa; a un jugador, la
@@ -343,7 +351,7 @@ export function GamePage() {
           {game.screenToken && <ScreenLink campaignId={game.campaignId} token={game.screenToken} />}
           <CloseGame game={game} />
         </aside>
-        <MasterDesk state={state.data} feed={feed} />
+        <MasterDesk state={state.data} feed={feed} pings={pings} />
       </div>
     );
   }
@@ -359,7 +367,7 @@ export function GamePage() {
         waiting={0}
       />
       {isOpen ? (
-        <PlayerDesk state={state.data} settled={settled} feed={feed} />
+        <PlayerDesk state={state.data} settled={settled} feed={feed} pings={pings} />
       ) : (
         <div className="room">
           <div className="room-actions">
@@ -558,10 +566,12 @@ function PlayerDesk({
   state,
   settled,
   feed,
+  pings,
 }: {
   state: GameState;
   settled: ReadonlyMap<number, SettledHow>;
   feed: ReactNode;
+  pings: readonly ShownPing[];
 }) {
   const { game, events } = state;
   const { data: me } = useMe();
@@ -668,7 +678,7 @@ function PlayerDesk({
   const log = <div className="player-pane pane-log">{feed}</div>;
   const mapPane = map && (
     <div className="player-pane pane-map">
-      <PlayerMap game={game} map={map} combat={combat} characters={all} mine={mine} />
+      <PlayerMap game={game} map={map} combat={combat} characters={all} mine={mine} pings={pings} />
     </div>
   );
   // Si el máster quita el mapa, la pestaña vuelve a la mesa.
@@ -732,7 +742,15 @@ interface Handoff {
  * del registro (`feed`). Lo que elige hacer con una intervención, o con el turno de unos PNJ,
  * abre la acción que toca, lista para usarla.
  */
-function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
+function MasterDesk({
+  state,
+  feed,
+  pings,
+}: {
+  state: GameState;
+  feed: ReactNode;
+  pings: readonly ShownPing[];
+}) {
   const { game, events } = state;
   const [action, setAction] = useState<Action>('reveal');
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -828,6 +846,7 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
           combat={combat}
           characters={characters}
           onPrepare={(preset) => hand('roll', { roll: preset })}
+          pings={pings}
         />
 
         {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo

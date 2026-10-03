@@ -8,12 +8,13 @@ import {
   type PlaceTokenRequest,
 } from '@dungeon-copilot/shared';
 import { describe, expect, it } from 'vitest';
-import { useTestApp, type TestClient } from '../testing';
+import { useLiveStreams, useTestApp, type TestClient } from '../testing';
 
 let dice: Random = () => {
   throw new Error('Esta prueba no esperaba ninguna tirada');
 };
 const t = useTestApp({ random: () => dice() });
+const connect = useLiveStreams(t);
 
 /** La posada: 12 × 8, con un muro en (5, 0) y una mesa en (3, 3). */
 const inn: MapRequest = {
@@ -491,5 +492,34 @@ describe('el mapa en combate', () => {
     expect((await place(master, url, { token, at: null })).statusCode).toBe(201);
     // Sin combate, una nueva no se pone.
     expect((await place(master, url, { token, at: { x: 8, y: 2 } })).statusCode).toBe(409);
+  });
+});
+
+describe('señalar', () => {
+  it('toda la mesa y la pantalla ven la casilla señalada, y no se guarda', async () => {
+    const { master, ana, url, screenUrl } = await onTheMap();
+    const streams = [
+      await connect(`${url}/stream`, master),
+      await connect(`${url}/stream`, ana),
+      await connect(`${screenUrl}/stream`),
+    ];
+    expect((await ana.post(`${url}/pings`, { at: { x: 3, y: 4 } })).statusCode).toBe(204);
+    for (const stream of streams) {
+      expect(await stream.nextPing()).toEqual({ at: { x: 3, y: 4 }, by: 'Ana' });
+    }
+    const kinds = (await events(master, url)).map((event) => event.kind);
+    expect(kinds).toEqual(['opened', 'map']);
+  });
+
+  it('solo en el mapa en juego, y lo señala quien es de la campaña', async () => {
+    const { master, carla, campaign, url } = await table();
+    const noMap = await master.post(`${url}/pings`, { at: { x: 1, y: 1 } });
+    expect(noMap.statusCode).toBe(409);
+    expect(noMap.json().error).toBe('No hay ningún mapa en la partida');
+
+    const map = await createMap(master, campaign.id);
+    await master.put(`${url}/map`, { mapId: map.id });
+    expect((await master.post(`${url}/pings`, { at: { x: 12, y: 0 } })).statusCode).toBe(409);
+    expect((await carla.post(`${url}/pings`, { at: { x: 1, y: 1 } })).statusCode).toBe(404);
   });
 });

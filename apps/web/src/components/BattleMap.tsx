@@ -36,6 +36,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api';
+import type { ShownPing } from '../live';
 import { useStoreGameEvent } from '../queries';
 import { mapAttacks, presetOdds, type MapAttack, type MapFighter } from '../rolling';
 import { toneOf } from './Avatar';
@@ -47,7 +48,7 @@ import { ErrorNote, Segmented } from './ui';
 /** Quién mira el mapa: el máster lo mueve todo; un jugador, los suyos; la pantalla, nada. */
 export type MapViewer = 'master' | 'player' | 'screen';
 
-type Tool = 'move' | 'measure';
+type Tool = 'move' | 'measure' | 'ping';
 
 const RANGE_LABELS: Record<Range, string> = { short: 'corta', medium: 'media', long: 'larga' };
 
@@ -123,9 +124,11 @@ export function BattleMap(props: {
   toolbar?: ReactNode;
   /** Lo que el máster puede hacer con la ficha elegida. */
   tokenActions?: (token: MapToken) => ReactNode;
+  /** Las casillas que alguien acaba de señalar. */
+  pings?: readonly ShownPing[];
 }) {
   const { gameId, map, combat, characters, viewer, own = [], asTable = false } = props;
-  const { placing = null, onPlaced, aimActions, toolbar, tokenActions } = props;
+  const { placing = null, onPlaced, aimActions, toolbar, tokenActions, pings = [] } = props;
   const interactive = viewer !== 'screen';
   const svg = useRef<SVGSVGElement>(null);
   const [tool, setTool] = useState<Tool>('move');
@@ -145,6 +148,8 @@ export function BattleMap(props: {
     onSuccess: (event: GameEvent) => storeEvent(event),
     onSettled: () => setPending(null),
   });
+  // Lo señalado llega a todos por el directo, también a quien lo señala.
+  const ping = useMutation({ mutationFn: (at: Cell) => api.ping(gameId, { at }) });
 
   const tokens = map.tokens.filter((token) => !token.hidden || (viewer === 'master' && !asTable));
   const byKey = new Map(tokens.map((token) => [tokenKey(token.token), token]));
@@ -222,6 +227,10 @@ export function BattleMap(props: {
         place.mutate({ ...placing.request, at: cell });
         onPlaced?.();
       } else setBlocked(true);
+      return;
+    }
+    if (tool === 'ping') {
+      if (insideGrid(map.grid, cell)) ping.mutate({ x: cell.x, y: cell.y });
       return;
     }
     svg.current.setPointerCapture(event.pointerId);
@@ -314,6 +323,7 @@ export function BattleMap(props: {
             options={[
               ['move', 'Mover y apuntar'],
               ['measure', 'Medir'],
+              ['ping', 'Señalar'],
             ]}
             onChange={(next) => {
               setTool(next);
@@ -334,7 +344,7 @@ export function BattleMap(props: {
       <div className={zoomed ? 'map-frame zoomed' : 'map-frame'}>
         <svg
           ref={svg}
-          className={`map-svg${placing || tool === 'measure' ? ' map-canvas' : ''}`}
+          className={`map-svg${placing || tool !== 'move' ? ' map-canvas' : ''}`}
           viewBox={`0 0 ${map.grid.cols * CELL} ${map.grid.rows * CELL}`}
           width={map.grid.cols * MAP_SCALE}
           height={map.grid.rows * MAP_SCALE}
@@ -465,6 +475,18 @@ export function BattleMap(props: {
             );
           })}
 
+          {pings.map((shown) => {
+            const { x, y } = cellCenter(shown.at);
+            return (
+              <g key={shown.key} className="m-ping" transform={`translate(${x} ${y})`}>
+                <circle r={18} />
+                <text y={-26} textAnchor="middle">
+                  {shown.by}
+                </text>
+              </g>
+            );
+          })}
+
           {dragging && dragCell && (
             <text
               x={drag.fx * CELL}
@@ -538,9 +560,11 @@ export function BattleMap(props: {
               <Icon name="pointer" size={16} />
               {tool === 'measure'
                 ? 'Arrastra de una casilla a otra para medir.'
-                : viewer === 'master'
-                  ? 'Arrastra las fichas para moverlas. Elige una y toca a un rival para apuntar.'
-                  : 'Toca tu ficha y luego a un rival para ver qué puedes hacer.'}
+                : tool === 'ping'
+                  ? 'Toca una casilla para señalarla: la verá toda la mesa.'
+                  : viewer === 'master'
+                    ? 'Arrastra las fichas para moverlas. Elige una y toca a un rival para apuntar.'
+                    : 'Toca tu ficha y luego a un rival para ver qué puedes hacer.'}
             </p>
           )}
           {blocked && (
@@ -548,7 +572,7 @@ export function BattleMap(props: {
               Ahí no se puede: hay un muro, una ventana, un mueble o alguien en pie.
             </p>
           )}
-          <ErrorNote error={place.error} />
+          <ErrorNote error={place.error ?? ping.error} />
         </div>
       )}
     </div>
