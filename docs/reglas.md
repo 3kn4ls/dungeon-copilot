@@ -191,6 +191,16 @@ Un objetivo con Destreza 2 a distancia media está a dificultad 10. Un PNJ de pe
 | Fallo           | Fallas.                                                                                             |
 | Pifia           | Algo sale mal: se rompe la cuerda, se encasquilla el arma o casi alcanzas a un aliado.              |
 
+### En un mapa
+
+Si el combate se juega sobre un plano en casillas, la distancia y la cobertura salen de él. Cada casilla mide 1,5 m.
+
+- **Distancia**: se cuentan las casillas hasta el objetivo, y las diagonales cuentan como una. Es **corta** hasta 6 casillas (9 m), **media** hasta 12 (18 m) y **larga** más allá.
+- **Cuerpo a cuerpo**: contra quien está en una casilla de al lado, también en diagonal.
+- **Línea de visión**: se traza del centro de una casilla al de la otra. Un muro la corta, y entre dos muros en diagonal tampoco se ve; una puerta abierta, no.
+- **Cobertura parcial**: si la línea pasa por un mueble o una ventana. No cuenta el que está al lado de quien dispara: se dispara por encima de la mesa propia o desde la ventana. Los demás que pelean no dan cobertura.
+- **Dónde se puede estar**: en el suelo o en una puerta, no en un muro, una ventana ni un mueble.
+
 ### Daño
 
 | Arma   | Daño | Ejemplos                                         |

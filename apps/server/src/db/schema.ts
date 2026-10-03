@@ -9,6 +9,7 @@ import type {
   GameEventPayload,
   GameEventVisibility,
   GameStatus,
+  MapGrid,
   MemberRole,
 } from '@dungeon-copilot/shared';
 import { sql } from 'drizzle-orm';
@@ -135,6 +136,25 @@ export const npcs = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [index('npcs_campaign_id_idx').on(table.campaignId)],
+);
+
+/**
+ * Mapas de combate de una campaña: planos en casillas. Son del máster; la mesa los ve cuando pone
+ * uno en la partida, que lo guarda tal como era entonces.
+ */
+export const maps = pgTable(
+  'maps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => campaigns.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    grid: jsonb('grid').$type<MapGrid>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [index('maps_campaign_id_idx').on(table.campaignId)],
 );
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */

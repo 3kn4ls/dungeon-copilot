@@ -366,6 +366,22 @@ describe('resumen de una partida', () => {
     expect(hasLog([events[0]!, events.at(-1)!])).toBe(false);
   });
 
+  it('el mapa y dónde está cada uno no son la historia', () => {
+    const grid = { cols: 6, rows: 6, terrain: [] };
+    const events: GameEventPayload[] = [
+      { kind: 'opened', number: 2, title: '', luckRefilled: true },
+      { kind: 'map', map: { id: 'm', name: 'Cripta', grid } },
+      {
+        kind: 'token',
+        token: { kind: 'figure', id: 'f' },
+        name: 'Emboscada',
+        at: { x: 1, y: 1 },
+      },
+      { kind: 'closed', xpAwarded: 2 },
+    ];
+    expect(hasLog(events)).toBe(false);
+  });
+
   it('si el registro no cabe, quita antes las tiradas y luego lo más antiguo', () => {
     const reveals = Array.from({ length: 16 }, (_, index) => ({
       kind: 'reveal' as const,

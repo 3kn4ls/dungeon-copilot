@@ -67,7 +67,7 @@ Se reutilizan los componentes de hoy (`Interventions`, `RollRequests`, `Damage`,
   - el mapa que se pone en la partida, guardado entero como era entonces;
   - una ficha que se coloca, se mueve o se quita.
 - **Cálculo**: `currentMap` calcula el mapa y dónde está cada uno según quién mira, como `currentCombat`.
-- **Fichas ocultas**: las de los PNJ que el máster coloca antes del combate pueden ser eventos `master`. Al empezar el combate o unirse a él, pasan a públicas con su sitio. Las fichas de un grupo van una por cada uno de sus miembros.
+- **Fichas ocultas**: las figuras y los PNJ que el máster coloca y la mesa aún no ve son eventos `master`. Se enseñan al moverlas sin esconderlas. Lo que la mesa ya ha visto no se esconde (se quita), y los personajes nunca. Las fichas de un grupo van una por cada uno de sus miembros.
 - **Servidor**:
   - La tabla `maps` de cada campaña, con su migración.
   - Las rutas `routes/maps.ts`. Los mapas de la campaña son del máster: a un jugador, 403, y a quien no es miembro, 404.
@@ -80,6 +80,8 @@ Se reutilizan los componentes de hoy (`Interventions`, `RollRequests`, `Damage`,
 - La pestaña **Mapas** de la campaña: la biblioteca y un editor de cuadrícula para pintar muros, puertas y ventanas, poner muebles y elegir su tamaño.
 - El mapa en la sala, con mover, medir y «Ver como la mesa». Para apuntar, se elige una ficha y luego un rival: salen la distancia, el alcance, la línea de visión y la cobertura, que rellenan solas el disparo (`Shot` de `rolling.ts`). Desde ahí se prepara la tirada.
 - El mapa en el móvil del jugador (mueve su ficha y apunta) y en la pantalla (solo lo público).
+- Empezar el combate desde el mapa: las figuras que pelean pasan a ser los PNJ del combate, cada una en su sitio (y a la vista).
+- Qué ficha de un grupo cae al recibir un golpe. Hoy el servidor solo cuenta cuántos caen: el golpe tendrá que decir a cuál del grupo va.
 - «Señalar» necesita un mensaje del directo que no se guarda. Va al final de la fase, si cabe.
 
 ### Fase 8 (opcional). Imagen de fondo para los mapas

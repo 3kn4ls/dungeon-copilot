@@ -1,5 +1,6 @@
 import {
   ATTRIBUTES,
+  type Cell,
   type NpcHarm,
   type OpposedSide,
   type Situation,
@@ -8,6 +9,7 @@ import {
 import { z } from 'zod';
 import type { MemberRole } from './campaigns';
 import type { Combatant, CombatantRef, CombatPosition } from './combat';
+import type { MapSnapshot, TokenRef } from './maps';
 import type { RollResponse } from './rolls';
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */
@@ -505,7 +507,14 @@ export type GameEventPayload =
   /** Empieza una escena y termina la anterior. `recovered`: quienes recuperan el aliento. */
   | { kind: 'scene'; title: string; recovered: CharacterRef[] }
   /** Un personaje usa una técnica que se gasta: una vez por escena o por sesión. */
-  | { kind: 'ability'; characterId: string; name: string; skill: string; label: string };
+  | { kind: 'ability'; characterId: string; name: string; skill: string; label: string }
+  /** El máster pone un mapa en la partida, como era entonces, o lo quita (null). */
+  | { kind: 'map'; map: MapSnapshot | null }
+  /**
+   * Una ficha se pone o se mueve a una casilla del mapa en juego, o se quita (`at` null). El
+   * nombre se guarda tal cual era. Si es solo del máster, la mesa no la ve.
+   */
+  | { kind: 'token'; token: TokenRef; name: string; at: Cell | null };
 
 export type GameEventKind = GameEventPayload['kind'];
 

@@ -269,7 +269,9 @@ export function GamePage() {
       <ol className="feed" aria-live="polite">
         {[...state.data.events]
           .reverse()
-          .filter((event) => event.kind !== 'settled' && shows(filter, event))
+          .filter(
+            (event) => event.kind !== 'settled' && event.kind !== 'token' && shows(filter, event),
+          )
           .map((event) => (
             <li key={event.id}>
               <EventCard
