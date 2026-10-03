@@ -19,6 +19,7 @@ import type { Executor } from '../db';
 import { characters } from '../db/schema';
 import { enterCombat, findCombat, requireCombat } from '../games/combat';
 import { GAME_NOT_FOUND, createAddEvent, requireMasterOf, type FoundGame } from '../games/events';
+import { figuresInCombat } from '../games/maps';
 import { answeredIntervention } from '../games/pending';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { requireUser } from './auth';
@@ -64,9 +65,15 @@ export function registerCombatRoutes(app: FastifyInstance, ctx: AppContext): voi
       }
       await answeredIntervention(tx, gameId, body.answers);
       const order = await enterCombat(tx, found, body.combatants, [], random);
+      const placed = await figuresInCombat(tx, gameId, body.combatants, order);
       return {
         visibility: 'public',
-        payload: { kind: 'combatStarted', order: order.sort(byInitiative), answers: body.answers },
+        payload: {
+          kind: 'combatStarted',
+          order: [...order].sort(byInitiative),
+          answers: body.answers,
+          placed,
+        },
       };
     });
     return reply.status(201).send({ event });
@@ -110,12 +117,14 @@ export function registerCombatRoutes(app: FastifyInstance, ctx: AppContext): voi
       const combat = await requireCombat(tx, gameId);
       await answeredIntervention(tx, gameId, body.answers);
       const joined = await enterCombat(tx, found, body.combatants, combat.order, random);
+      const placed = await figuresInCombat(tx, gameId, body.combatants, joined);
       return {
         visibility: 'public',
         payload: {
           kind: 'combatJoined',
           joined: [...joined].sort(byInitiative),
           answers: body.answers,
+          placed,
           ...joinCombat(combat, joined),
         },
       };

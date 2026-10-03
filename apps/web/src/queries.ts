@@ -3,6 +3,7 @@ import type {
   GameEvent,
   GameState,
   InterventionEvent,
+  MapView,
   MeResponse,
   NpcView,
 } from '@dungeon-copilot/shared';
@@ -20,6 +21,8 @@ export const keys = {
   screen: (token: string) => ['screens', token] as const,
   npcs: (campaignId: string) => ['campaigns', campaignId, 'npcs'] as const,
   npc: (id: string) => ['npcs', id] as const,
+  maps: (campaignId: string) => ['campaigns', campaignId, 'maps'] as const,
+  map: (id: string) => ['maps', id] as const,
   ai: ['ai'] as const,
   check: (gameId: string, eventId: number) => ['games', gameId, 'check', eventId] as const,
   enemy: (gameId: string, combatantId: string, moment: string, targets: boolean) =>
@@ -190,6 +193,26 @@ export const useNpcs = (campaignId: string, enabled = true) =>
 
 export const useNpc = (id: string) =>
   useQuery({ queryKey: keys.npc(id), queryFn: () => api.npc(id), enabled: id !== '' });
+
+/** Los mapas de una campaña. Son del máster: a los jugadores ni se les piden. */
+export const useMaps = (campaignId: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.maps(campaignId),
+    queryFn: () => api.maps(campaignId),
+    enabled: enabled && campaignId !== '',
+  });
+
+export const useMap = (id: string) =>
+  useQuery({ queryKey: keys.map(id), queryFn: () => api.map(id), enabled: id !== '' });
+
+/** Guarda el mapa que devuelve el servidor y marca como vieja la lista de su campaña. */
+export function useStoreMap() {
+  const queryClient = useQueryClient();
+  return (map: MapView) => {
+    queryClient.setQueryData(keys.map(map.id), map);
+    void queryClient.invalidateQueries({ queryKey: keys.maps(map.campaignId) });
+  };
+}
 
 /**
  * Guarda el PNJ que devuelve el servidor, también en la lista de su campaña para que se pueda

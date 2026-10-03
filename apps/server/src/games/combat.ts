@@ -9,6 +9,8 @@ import {
 import {
   COMBAT_EVENT_KINDS,
   currentCombat,
+  groupSize,
+  memberName,
   type Blow,
   type BlowRequest,
   type Combat,
@@ -30,7 +32,7 @@ export const NO_COMBAT = 'No hay ningún combate en juego';
 const NPC_NOT_HERE = 'Ese PNJ no está en esta campaña';
 
 /** Quien entra en el combate, tal como lo pide el máster. */
-type Entering = z.output<typeof joinCombatSchema>['combatants'][number];
+export type Entering = z.output<typeof joinCombatSchema>['combatants'][number];
 
 /** El combate en juego en una partida, o null si se está narrando. */
 export async function findCombat(db: Executor, gameId: string): Promise<Combat | null> {
@@ -56,15 +58,30 @@ export async function requireCombat(db: Executor, gameId: string): Promise<Comba
 
 const NOT_FIGHTING = 'Quien eliges no está en el combate';
 
+/**
+ * Alguien que pelea, con su nombre y, si es uno de un grupo en concreto, cuál: 404 si no está en
+ * el combate o el grupo no es de tantos.
+ */
+function fighterRef(combat: Combat | null, id: string, member?: number): CombatantRef {
+  const combatant = combat?.order.find((other) => other.id === id);
+  if (!combatant) throw notFound(NOT_FIGHTING);
+  if (member === undefined) return { id: combatant.id, name: combatant.name };
+  if (combatant.kind !== 'npc') throw new HttpError(400, `${combatant.name} no es de un grupo`);
+  const count = groupSize(combatant);
+  if (member >= count) {
+    throw notFound(`${combatant.name} ${count === 1 ? 'es uno solo' : `son ${count}`}`);
+  }
+  return { id: combatant.id, name: memberName(combatant, member), member };
+}
+
 /** Alguien que pelea, contra quien va una intervención: 404 si no está en el combate. */
 export async function findCombatTarget(
   db: Executor,
   gameId: string,
   id: string,
+  member?: number,
 ): Promise<CombatantRef> {
-  const target = (await findCombat(db, gameId))?.order.find((combatant) => combatant.id === id);
-  if (!target) throw notFound(NOT_FIGHTING);
-  return { id: target.id, name: target.name };
+  return fighterRef(await findCombat(db, gameId), id, member);
 }
 
 /**
@@ -73,12 +90,10 @@ export async function findCombatTarget(
  */
 export async function findBlow(db: Executor, gameId: string, blow: BlowRequest): Promise<Blow> {
   const combat = await requireCombat(db, gameId);
-  const ref = (id: string): CombatantRef => {
-    const combatant = combat.order.find((other) => other.id === id);
-    if (!combatant) throw notFound(NOT_FIGHTING);
-    return { id: combatant.id, name: combatant.name };
+  return {
+    attacker: fighterRef(combat, blow.attackerId, blow.attackerMember),
+    defender: fighterRef(combat, blow.defenderId, blow.defenderMember),
   };
-  return { attacker: ref(blow.attackerId), defender: ref(blow.defenderId) };
 }
 
 /**

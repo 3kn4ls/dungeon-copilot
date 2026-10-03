@@ -6,7 +6,14 @@ import {
   type NpcProfile,
 } from '@dungeon-copilot/rules';
 import { z } from 'zod';
-import { answersSchema, type Floor, type GameEvent, type GameEventKind } from './games';
+import {
+  GROUP_MAX,
+  answersSchema,
+  groupMemberSchema,
+  type Floor,
+  type GameEvent,
+  type GameEventKind,
+} from './games';
 
 // El combate por rondas. Empieza con `combatStarted`, que trae quién pelea en el orden de
 // iniciativa; el turno pasa con `turn`; quien se une o sale cambia el orden con `combatJoined` y
@@ -53,10 +60,18 @@ export function groupLabel(combatant: Combatant): string {
   return `${combatant.name} (${groupSize(combatant)})`;
 }
 
-/** Alguien del combate, con el nombre que tenía entonces. */
+/** Uno de un grupo, dicho para la mesa: «Bandidos 2» es el 1. Si es uno solo, su nombre. */
+export const memberName = (combatant: NpcCombatant, member: number): string =>
+  groupSize(combatant) === 1 ? combatant.name : `${combatant.name} ${member + 1}`;
+
+/**
+ * Alguien del combate, con el nombre que tenía entonces. Si es uno de un grupo en concreto (en el
+ * mapa), `member` dice cuál, y el nombre lo lleva: «Bandidos 2».
+ */
 export interface CombatantRef {
   id: string;
   name: string;
+  member?: number;
 }
 
 /** Un combate en juego. */
@@ -91,10 +106,12 @@ const combatantSchema = z.discriminatedUnion('kind', [
       .number('Di cuántos son')
       .int('Di cuántos son')
       .min(1, 'Al menos tiene que ser uno')
-      .max(20, 'Un grupo es de 20 como mucho')
+      .max(GROUP_MAX, `Un grupo es de ${GROUP_MAX} como mucho`)
       .default(1),
     /** Si es un PNJ de la campaña. */
     npcId: z.uuid('Elige un PNJ').optional(),
+    /** Las figuras del mapa que pasan a ser ellos: una por cada uno, en su orden. */
+    figures: z.array(z.uuid('Elige una figura del mapa')).max(GROUP_MAX).optional(),
   }),
 ]);
 
@@ -109,7 +126,15 @@ const combatantsSchema = (min: number, message: string) =>
     .refine((list) => {
       const ids = list.flatMap((c) => (c.kind === 'character' ? [c.characterId] : []));
       return new Set(ids).size === ids.length;
-    }, 'Un personaje no puede entrar dos veces en el combate');
+    }, 'Un personaje no puede entrar dos veces en el combate')
+    .refine(
+      (list) => list.every((c) => c.kind !== 'npc' || !c.figures || c.figures.length === c.count),
+      'Elige una figura del mapa por cada uno del grupo',
+    )
+    .refine((list) => {
+      const figures = list.flatMap((c) => (c.kind === 'npc' ? (c.figures ?? []) : []));
+      return new Set(figures).size === figures.length;
+    }, 'Una figura no puede entrar dos veces en el combate');
 
 /** El máster empieza un combate: quién pelea. El servidor tira la iniciativa por todos. */
 export const startCombatSchema = z.object({
@@ -157,11 +182,12 @@ export type EndCombatRequest = z.input<typeof endCombatSchema>;
 
 /**
  * Alguien recibe un golpe: un personaje de la campaña (su ficha) o PNJ del combate (el id de su
- * sitio en el orden). `roll`: la tirada del golpe, si sale de una. Con `dodge`, el personaje gasta
- * Esquiva prodigiosa y el daño se queda en 1.
+ * sitio en el orden y, si son un grupo, a cuál va: `member`). `roll`: la tirada del golpe, si sale
+ * de una. Con `dodge`, el personaje gasta Esquiva prodigiosa y el daño se queda en 1.
  */
 export const dealDamageSchema = z.object({
   targetId: z.uuid('Elige quién recibe el golpe'),
+  member: groupMemberSchema.optional(),
   amount: z
     .number('Di cuánto daño')
     .int('El daño es un número entero')

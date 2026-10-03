@@ -8,12 +8,13 @@ import {
   type PlaceTokenRequest,
 } from '@dungeon-copilot/shared';
 import { describe, expect, it } from 'vitest';
-import { useTestApp, type TestClient } from '../testing';
+import { useLiveStreams, useTestApp, type TestClient } from '../testing';
 
 let dice: Random = () => {
   throw new Error('Esta prueba no esperaba ninguna tirada');
 };
 const t = useTestApp({ random: () => dice() });
+const connect = useLiveStreams(t);
 
 /** La posada: 12 × 8, con un muro en (5, 0) y una mesa en (3, 3). */
 const inn: MapRequest = {
@@ -180,7 +181,7 @@ describe('las fichas', () => {
     expect((await place(master, url, { token, at: { x: 1, y: 1 } })).statusCode).toBe(201);
     expect((await place(master, url, { token, at: { x: 2, y: 1 } })).statusCode).toBe(201);
     expect(currentMap(await events(bruno, url))?.tokens).toEqual([
-      { token, name: 'Kael', at: { x: 2, y: 1 }, hidden: false },
+      { token, name: 'Kael', at: { x: 2, y: 1 }, hidden: false, down: false },
     ]);
     expect((await place(master, url, { token, at: null })).statusCode).toBe(201);
     expect(currentMap(await events(bruno, url))?.tokens).toEqual([]);
@@ -260,6 +261,7 @@ describe('las fichas', () => {
       name: 'Bandidos 2',
       at: { x: 8, y: 4 },
       hidden: false,
+      down: false,
     });
   });
 
@@ -288,7 +290,7 @@ describe('las fichas ocultas', () => {
     expect(hidden.json().event).toMatchObject({ visibility: 'master', name: 'Emboscada' });
 
     expect(currentMap(await events(master, url))?.tokens).toEqual([
-      { token: ambush, name: 'Emboscada', at: { x: 10, y: 6 }, hidden: true },
+      { token: ambush, name: 'Emboscada', at: { x: 10, y: 6 }, hidden: true, down: false },
     ]);
     const screen = async () => (await t.anonymous().get(screenUrl)).json().events;
     for (const list of [await events(ana, url), await screen()]) {
@@ -299,7 +301,7 @@ describe('las fichas ocultas', () => {
     // Moverla sin esconderla la enseña, con su nombre.
     expect((await place(master, url, { token: ambush, at: { x: 9, y: 6 } })).statusCode).toBe(201);
     expect(currentMap(await events(ana, url))?.tokens).toEqual([
-      { token: ambush, name: 'Emboscada', at: { x: 9, y: 6 }, hidden: false },
+      { token: ambush, name: 'Emboscada', at: { x: 9, y: 6 }, hidden: false, down: false },
     ]);
   });
 
@@ -332,5 +334,192 @@ describe('las fichas ocultas', () => {
     const response = await place(master, url, { token: ambush, at: { x: 1, y: 1 } });
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe('Ponle un nombre a la figura');
+  });
+});
+
+describe('el mapa en combate', () => {
+  const SECOND = '2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d';
+  const figure = (id: string) => ({ kind: 'figure' as const, id });
+  const bandit = (id: string, member: number) => ({ kind: 'combatant' as const, id, member });
+
+  /** Kael contra tres bandidos soldados (aguantan 3 cada uno), sin fichas en el mapa. */
+  async function brawl() {
+    const setup = await onTheMap();
+    dice = fixedDice(3, 3, 2, 2);
+    const started = await setup.master.post(`${setup.url}/combat`, {
+      combatants: [
+        { kind: 'character', characterId: setup.kael.id },
+        { kind: 'npc', name: 'Bandidos', profile: 'soldier', count: 3 },
+      ],
+    });
+    expect(started.statusCode).toBe(201);
+    const bandits = started.json().event.order.find((one: { kind: string }) => one.kind === 'npc');
+    return { ...setup, bandits };
+  }
+
+  it('las figuras entran en el combate en su casilla y a la vista', async () => {
+    const { master, ana, kael, url } = await onTheMap();
+    for (const [id, x] of [
+      [FIGURE, 9],
+      [SECOND, 10],
+    ] as const) {
+      await place(master, url, {
+        token: figure(id),
+        at: { x, y: 6 },
+        hidden: true,
+        name: 'Bandido',
+      });
+    }
+    const start = (figures: string[]) =>
+      master.post(`${url}/combat`, {
+        combatants: [
+          { kind: 'character', characterId: kael.id },
+          { kind: 'npc', name: 'Bandidos', profile: 'minion', count: 2, figures },
+        ],
+      });
+
+    dice = fixedDice(3, 3, 2, 2);
+    const missing = await start([FIGURE, '3b4c5d6e-7f8a-4b9c-8d1e-2f3a4b5c6d7e']);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toBe('Esa figura no está en el mapa');
+
+    dice = fixedDice(3, 3, 2, 2);
+    const started = await start([FIGURE, SECOND]);
+    expect(started.statusCode).toBe(201);
+    const bandits = started.json().event.order.find((one: { kind: string }) => one.kind === 'npc');
+    const tokens = [
+      { token: bandit(bandits.id, 0), name: 'Bandidos 1', at: { x: 9, y: 6 }, hidden: false },
+      { token: bandit(bandits.id, 1), name: 'Bandidos 2', at: { x: 10, y: 6 }, hidden: false },
+    ];
+    // La mesa no vio las figuras, pero ve a los bandidos donde estaban; el máster, igual.
+    for (const client of [ana, master]) {
+      expect(currentMap(await events(client, url))?.tokens).toMatchObject(tokens);
+    }
+  });
+
+  it('sin mapa, las figuras no entran', async () => {
+    const { master, kael, url } = await table();
+    dice = fixedDice(3, 3, 2, 2);
+    const response = await master.post(`${url}/combat`, {
+      combatants: [
+        { kind: 'character', characterId: kael.id },
+        { kind: 'npc', name: 'Rata', profile: 'minion', figures: [FIGURE] },
+      ],
+    });
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('un golpe dice a cuál del grupo va, y su ficha cae', async () => {
+    const { master, ana, url, bandits } = await brawl();
+    for (const member of [0, 1, 2]) {
+      await place(master, url, { token: bandit(bandits.id, member), at: { x: 8, y: member } });
+    }
+    const hit = (body: { amount: number; member?: number }) =>
+      master.post(`${url}/damage`, { targetId: bandits.id, ...body });
+
+    const first = await hit({ amount: 2, member: 1 });
+    expect(first.json().event.target).toMatchObject({
+      harm: { down: 0, damage: 2, members: [0, 2, 0] },
+      fell: false,
+      member: 1,
+    });
+    const second = await hit({ amount: 3, member: 2 });
+    expect(second.json().event.target).toMatchObject({ fell: true, member: 2 });
+    expect(
+      currentMap(await events(ana, url))?.tokens.map(({ name, down }) => [name, down]),
+    ).toEqual([
+      ['Bandidos 1', false],
+      ['Bandidos 2', false],
+      ['Bandidos 3', true],
+    ]);
+
+    const again = await hit({ amount: 1, member: 2 });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('Bandidos 3 ya ha caído');
+    expect((await hit({ amount: 1, member: 3 })).statusCode).toBe(404);
+    // Sin decir a cuál, al más herido.
+    expect((await hit({ amount: 1 })).json().event.target).toMatchObject({ member: 1, fell: true });
+  });
+
+  it('la tirada que apunta a uno del grupo lleva el golpe a ese', async () => {
+    const { master, kael, url, bandits } = await brawl();
+    dice = fixedDice(6, 6, 1, 1);
+    const roll = await master.post(`${url}/rolls`, {
+      actor: { kind: 'character', characterId: kael.id, skill: 'melee-weapons' },
+      target: { kind: 'opposed', opponent: { kind: 'free', label: 'Bandidos', bonus: 4 } },
+      situation: 'melee',
+      blow: { attackerId: kael.id, defenderId: bandits.id, defenderMember: 1 },
+    });
+    expect(roll.statusCode).toBe(201);
+    expect(roll.json().event.roll.blow.defender).toEqual({
+      id: bandits.id,
+      name: 'Bandidos 2',
+      member: 1,
+    });
+    const hit = await master.post(`${url}/damage`, {
+      targetId: bandits.id,
+      amount: 3,
+      roll: roll.json().event.id,
+    });
+    expect(hit.json().event).toMatchObject({
+      by: { id: kael.id, name: 'Kael' },
+      target: { member: 1, fell: true },
+    });
+  });
+
+  it('un jugador apunta a uno del grupo', async () => {
+    const { ana, kael, url, bandits } = await brawl();
+    const response = await ana.post(`${url}/interventions`, {
+      characterId: kael.id,
+      intent: 'melee',
+      targetId: bandits.id,
+      targetMember: 2,
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().event.target).toEqual({
+      id: bandits.id,
+      name: 'Bandidos 3',
+      member: 2,
+    });
+  });
+
+  it('las fichas de quien ya no pelea se mueven y se quitan', async () => {
+    const { master, url, bandits } = await brawl();
+    const token = bandit(bandits.id, 0);
+    await place(master, url, { token, at: { x: 8, y: 1 } });
+    expect((await master.post(`${url}/combat/end`, {})).statusCode).toBe(201);
+    expect((await place(master, url, { token, at: { x: 8, y: 2 } })).statusCode).toBe(201);
+    expect((await place(master, url, { token, at: null })).statusCode).toBe(201);
+    // Sin combate, una nueva no se pone.
+    expect((await place(master, url, { token, at: { x: 8, y: 2 } })).statusCode).toBe(409);
+  });
+});
+
+describe('señalar', () => {
+  it('toda la mesa y la pantalla ven la casilla señalada, y no se guarda', async () => {
+    const { master, ana, url, screenUrl } = await onTheMap();
+    const streams = [
+      await connect(`${url}/stream`, master),
+      await connect(`${url}/stream`, ana),
+      await connect(`${screenUrl}/stream`),
+    ];
+    expect((await ana.post(`${url}/pings`, { at: { x: 3, y: 4 } })).statusCode).toBe(204);
+    for (const stream of streams) {
+      expect(await stream.nextPing()).toEqual({ at: { x: 3, y: 4 }, by: 'Ana' });
+    }
+    const kinds = (await events(master, url)).map((event) => event.kind);
+    expect(kinds).toEqual(['opened', 'map']);
+  });
+
+  it('solo en el mapa en juego, y lo señala quien es de la campaña', async () => {
+    const { master, carla, campaign, url } = await table();
+    const noMap = await master.post(`${url}/pings`, { at: { x: 1, y: 1 } });
+    expect(noMap.statusCode).toBe(409);
+    expect(noMap.json().error).toBe('No hay ningún mapa en la partida');
+
+    const map = await createMap(master, campaign.id);
+    await master.put(`${url}/map`, { mapId: map.id });
+    expect((await master.post(`${url}/pings`, { at: { x: 12, y: 0 } })).statusCode).toBe(409);
+    expect((await carla.post(`${url}/pings`, { at: { x: 1, y: 1 } })).statusCode).toBe(404);
   });
 });

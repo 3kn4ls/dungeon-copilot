@@ -68,11 +68,13 @@ export function npcIsDown(profile: NpcProfile, damageTaken: number): boolean {
 
 /**
  * Cómo va un grupo de PNJ del mismo perfil (o uno solo): cuántos han caído y el daño que lleva el
- * que sigue peleando.
+ * que sigue peleando. Si algún golpe ha dicho a cuál del grupo iba (en un mapa), `members` lleva el
+ * daño de cada uno, por su número desde 0, y `damage` es el del más herido de los que siguen.
  */
 export interface NpcHarm {
   down: number;
   damage: number;
+  members?: number[];
 }
 
 export const UNHARMED: NpcHarm = { down: 0, damage: 0 };
@@ -80,6 +82,8 @@ export const UNHARMED: NpcHarm = { down: 0, damage: 0 };
 /** Lo que pasa cuando unos PNJ reciben un golpe. */
 export interface NpcDamage {
   harm: NpcHarm;
+  /** A cuál del grupo alcanza, por su número desde 0. */
+  member: number;
   /** Cae uno con este golpe. */
   fell: boolean;
   /** Ya no queda ninguno en pie. */
@@ -87,14 +91,37 @@ export interface NpcDamage {
 }
 
 /**
+ * El daño que lleva cada uno de un grupo, por su número desde 0; los que han caído, su aguante.
+ * Mientras ningún golpe dice a cuál va, caen por orden: primero el 0, luego el 1...
+ */
+export function memberDamage(profile: NpcProfile, count: number, harm: NpcHarm): number[] {
+  if (harm.members) return harm.members;
+  const { toughness } = NPC_PROFILES[profile];
+  return Array.from({ length: count }, (_, member) =>
+    member < harm.down ? toughness : member === harm.down ? harm.damage : 0,
+  );
+}
+
+/** El que sigue peleando: el más herido de los que quedan en pie (a igualdad, el primero). */
+function mostHurt(members: readonly number[], toughness: number): number {
+  let found = -1;
+  members.forEach((damage, member) => {
+    if (damage < toughness && (found < 0 || damage > members[found]!)) found = member;
+  });
+  return found;
+}
+
+/**
  * Un impacto a un grupo de PNJ alcanza a uno solo: cae al llegar a lo que aguanta su perfil, y el
- * daño que sobra no pasa al siguiente. `count` es cuántos son.
+ * daño que sobra no pasa al siguiente. `count` es cuántos son, y `member`, a cuál va, si se sabe
+ * (en un mapa); si no, al que sigue peleando, el más herido de los que quedan en pie.
  */
 export function damageNpcs(
   profile: NpcProfile,
   count: number,
   harm: NpcHarm,
   amount: number,
+  member?: number,
 ): NpcDamage {
   if (!Number.isInteger(amount) || amount < 0) {
     throw new Error(`El daño debe ser un entero no negativo, llegó ${amount}`);
@@ -103,8 +130,28 @@ export function damageNpcs(
     throw new Error(`Un grupo tiene al menos uno, llegó ${count}`);
   }
   if (harm.down >= count) throw new Error('No queda ninguno en pie');
-  const damage = harm.damage + amount;
-  const fell = npcIsDown(profile, damage);
-  const next = fell ? { down: harm.down + 1, damage: 0 } : { down: harm.down, damage };
-  return { harm: next, fell, out: next.down >= count };
+  if (member === undefined && !harm.members) {
+    const damage = harm.damage + amount;
+    const fell = npcIsDown(profile, damage);
+    const next = fell ? { down: harm.down + 1, damage: 0 } : { down: harm.down, damage };
+    return { harm: next, member: harm.down, fell, out: next.down >= count };
+  }
+
+  const { toughness } = NPC_PROFILES[profile];
+  const members = [...memberDamage(profile, count, harm)];
+  const hit = member ?? mostHurt(members, toughness);
+  const taken = members[hit];
+  if (!Number.isInteger(hit) || taken === undefined) {
+    throw new Error(`El grupo es de ${count}, llegó el número ${hit}`);
+  }
+  if (taken >= toughness) throw new Error(`El número ${hit} del grupo ya ha caído`);
+  members[hit] = Math.min(toughness, taken + amount);
+  const standing = members.filter((damage) => damage < toughness);
+  const down = count - standing.length;
+  return {
+    harm: { down, damage: Math.max(0, ...standing), members },
+    member: hit,
+    fell: members[hit] >= toughness,
+    out: down >= count,
+  };
 }

@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router';
 import { Layout, RequireAuth } from './components/Layout';
 import { PageMessage } from './components/ui';
+import { CampaignMapEditor, CampaignMaps } from './pages/CampaignMaps';
 import { NewNpcDrawer, NpcDrawer, NpcRedirect, CampaignNpcs } from './pages/CampaignNpcs';
 import { CampaignCharacters, CampaignChronicle, CampaignPage } from './pages/CampaignPage';
 import { CampaignTable } from './pages/CampaignTable';
@@ -52,6 +53,8 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="nuevo" element={<NewNpcDrawer />} />
                   <Route path=":npcId" element={<NpcDrawer />} />
                 </Route>
+                <Route path="mapas" element={<CampaignMaps />} />
+                <Route path="mapas/:mapId" element={<CampaignMapEditor />} />
                 <Route path="mesa" element={<CampaignTable />} />
               </Route>
               <Route path="campanas/:campaignId/personajes/nuevo" element={<NewCharacterPage />} />

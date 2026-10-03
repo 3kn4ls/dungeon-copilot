@@ -1,11 +1,13 @@
 import { TERRAIN_KINDS, type Cell } from '@dungeon-copilot/rules';
 import { z } from 'zod';
-import type { GameEvent, GameEventKind } from './games';
+import { groupMemberSchema, type GameEvent, type GameEventKind } from './games';
 
 // Los mapas de combate. El máster los prepara en la campaña (solo los ve él) y pone uno en la
 // partida con `map`: se guarda tal como era entonces, para toda la mesa. Las fichas se ponen, se
 // mueven y se quitan con `token`; las que el máster aún no enseña son eventos solo del máster, y
-// se hacen públicas cuando las enseña. Al poner otro mapa, las fichas empiezan de cero.
+// se hacen públicas cuando las enseña. Al poner otro mapa, las fichas empiezan de cero. Las
+// figuras que entran en un combate pasan a ser las fichas de quien pelea, y los golpes dicen qué
+// fichas de un grupo caen.
 
 /** Los topes de un mapa: lado en casillas y largo del nombre. */
 export const MAP_LIMITS = { minSide: 4, maxSide: 60, name: 80, figureName: 40 } as const;
@@ -112,7 +114,7 @@ export const tokenRefSchema = z.discriminatedUnion(
     z.object({
       kind: z.literal('combatant'),
       id: z.uuid('Elige quién pelea'),
-      member: z.number().int().min(0, 'Elige quién del grupo').max(99, 'Elige quién del grupo'),
+      member: groupMemberSchema,
     }),
     z.object({ kind: z.literal('figure'), id: z.uuid('La figura necesita un id') }),
   ],
@@ -139,8 +141,31 @@ export const placeTokenSchema = z.object({
 
 export type PlaceTokenRequest = z.input<typeof placeTokenSchema>;
 
-/** Los eventos que dicen qué mapa hay en juego y dónde están las fichas. */
-export const MAP_EVENT_KINDS = ['map', 'token'] as const satisfies GameEventKind[];
+/**
+ * Señalar una casilla del mapa en juego: toda la mesa (y la pantalla) la ve un momento. Llega por
+ * el directo y no se guarda: no es un evento de la partida.
+ */
+export const pingSchema = z.object({ at: cellSchema });
+
+export type PingRequest = z.input<typeof pingSchema>;
+
+/** Una casilla señalada y quién la señala. */
+export interface MapPing {
+  at: Cell;
+  by: string;
+}
+
+/**
+ * Los eventos que lee el mapa: los suyos, los que meten en el combate figuras del mapa y los
+ * golpes, que dicen quién cae.
+ */
+export const MAP_EVENT_KINDS = [
+  'map',
+  'token',
+  'combatStarted',
+  'combatJoined',
+  'damage',
+] as const satisfies GameEventKind[];
 
 /** Una ficha, para reconocerla entre eventos: cada miembro de un grupo es una ficha distinta. */
 export const tokenKey = (token: TokenRef) =>
@@ -155,6 +180,19 @@ export interface MapToken {
   at: Cell;
   /** Solo la ve el máster. */
   hidden: boolean;
+  /** Uno de un grupo que ha caído. */
+  down: boolean;
+}
+
+/**
+ * Una figura del mapa que entra en el combate: pasa a ser la ficha de uno de los que pelean
+ * (`token`), en su misma casilla y a la vista de la mesa.
+ */
+export interface FigureInCombat {
+  figure: string;
+  token: TokenRef & { kind: 'combatant' };
+  name: string;
+  at: Cell;
 }
 
 export interface MapInPlay extends MapSnapshot {
@@ -169,20 +207,39 @@ export interface MapInPlay extends MapSnapshot {
 export function currentMap(events: readonly GameEvent[]): MapInPlay | null {
   let map: MapSnapshot | null = null;
   let tokens = new Map<string, MapToken>();
+  // Quienes han caído, de todos los combates: cada uno tiene su id.
+  const fallen = new Set<string>();
+  const place = (token: TokenRef, name: string, at: Cell, hidden: boolean) => {
+    const key = tokenKey(token);
+    tokens.set(key, { token, name, at, hidden, down: fallen.has(key) });
+  };
   for (const event of events) {
-    if (event.kind === 'map') {
-      map = event.map;
-      tokens = new Map();
-    } else if (event.kind === 'token' && map) {
-      const key = tokenKey(event.token);
-      if (event.at === null) tokens.delete(key);
-      else {
-        tokens.set(key, {
-          token: event.token,
-          name: event.name,
-          at: event.at,
-          hidden: event.visibility === 'master',
-        });
+    switch (event.kind) {
+      case 'map':
+        map = event.map;
+        tokens = new Map();
+        break;
+      case 'token':
+        if (!map) break;
+        if (event.at === null) tokens.delete(tokenKey(event.token));
+        else place(event.token, event.name, event.at, event.visibility === 'master');
+        break;
+      case 'combatStarted':
+      case 'combatJoined':
+        if (!map) break;
+        for (const figure of event.placed ?? []) {
+          tokens.delete(tokenKey({ kind: 'figure', id: figure.figure }));
+          place(figure.token, figure.name, figure.at, false);
+        }
+        break;
+      case 'damage': {
+        const { target } = event;
+        if (target.kind !== 'npc' || !target.fell || target.member === undefined) break;
+        const key = tokenKey({ kind: 'combatant', id: target.id, member: target.member });
+        fallen.add(key);
+        const token = tokens.get(key);
+        if (token) tokens.set(key, { ...token, down: true });
+        break;
       }
     }
   }

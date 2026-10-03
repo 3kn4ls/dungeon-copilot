@@ -35,6 +35,8 @@ import type {
   JoinCombatRequest,
   LeaveCombatRequest,
   LoginRequest,
+  MapRequest,
+  MapView,
   MeResponse,
   NarrationRequest,
   NextTurnRequest,
@@ -43,6 +45,8 @@ import type {
   NpcRequest,
   NpcView,
   OpenGameRequest,
+  PingRequest,
+  PlaceTokenRequest,
   RecapDraftRequest,
   RecapRequest,
   RecoverRequest,
@@ -55,6 +59,7 @@ import type {
   RollResponse,
   ScreenState,
   SecretLeak,
+  SetGameMapRequest,
   SpeechRequest,
   StartCombatRequest,
   StartSceneRequest,
@@ -62,6 +67,7 @@ import type {
   TalkRequest,
   UpdateCampaignRequest,
   UpdateCharacterRequest,
+  UpdateMapRequest,
   UpdateNpcRequest,
   UseAbilityRequest,
 } from '@dungeon-copilot/shared';
@@ -170,6 +176,7 @@ type CampaignResponse = { campaign: CampaignDetail };
 type CharacterResponse = { character: CharacterView };
 type EventResponse = { event: GameEvent };
 type NpcResponse = { npc: NpcView };
+type MapResponse = { map: MapView };
 
 export const api = {
   me: () => get<MeResponse>('/api/auth/me'),
@@ -337,6 +344,23 @@ export const api = {
   /** Lo que responde un PNJ a lo que le dice la mesa. No guarda nada. */
   talk: (npcId: string, body: TalkRequest, options: AiTextOptions) =>
     aiText(`/api/npcs/${npcId}/talk`, body, options),
+
+  maps: (campaignId: string) =>
+    get<{ maps: MapView[] }>(`/api/campaigns/${campaignId}/maps`).then((r) => r.maps),
+  createMap: (campaignId: string, body: MapRequest) =>
+    post<MapResponse>(`/api/campaigns/${campaignId}/maps`, body).then((r) => r.map),
+  map: (id: string) => get<MapResponse>(`/api/maps/${id}`).then((r) => r.map),
+  updateMap: (id: string, body: UpdateMapRequest) =>
+    patch<MapResponse>(`/api/maps/${id}`, body).then((r) => r.map),
+  deleteMap: (id: string) => del(`/api/maps/${id}`),
+  /** El máster pone un mapa de la campaña en la partida, o lo quita. */
+  setGameMap: (id: string, body: SetGameMapRequest) =>
+    put<EventResponse>(`/api/games/${id}/map`, body).then((r) => r.event),
+  /** Pone, mueve o quita una ficha del mapa en juego. */
+  placeToken: (id: string, body: PlaceTokenRequest) =>
+    post<EventResponse>(`/api/games/${id}/tokens`, body).then((r) => r.event),
+  /** Señala una casilla del mapa: la ve la mesa un momento, por el directo. */
+  ping: (id: string, body: PingRequest) => post<void>(`/api/games/${id}/pings`, body),
 
   roll: (body: RollRequest) => post<RollResponse>('/api/rolls', body),
 };

@@ -81,8 +81,9 @@ Se reutilizan los componentes de hoy (`Interventions`, `RollRequests`, `Damage`,
 - El mapa en la sala, con mover, medir y «Ver como la mesa». Para apuntar, se elige una ficha y luego un rival: salen la distancia, el alcance, la línea de visión y la cobertura, que rellenan solas el disparo (`Shot` de `rolling.ts`). Desde ahí se prepara la tirada.
 - El mapa en el móvil del jugador (mueve su ficha y apunta) y en la pantalla (solo lo público).
 - Empezar el combate desde el mapa: las figuras que pelean pasan a ser los PNJ del combate, cada una en su sitio (y a la vista).
-- Qué ficha de un grupo cae al recibir un golpe. Hoy el servidor solo cuenta cuántos caen: el golpe tendrá que decir a cuál del grupo va.
-- «Señalar» necesita un mensaje del directo que no se guarda. Va al final de la fase, si cabe.
+- Qué ficha de un grupo cae al recibir un golpe: el golpe dice a cuál va (`member`) y cada uno lleva la cuenta de su daño. Sin decirlo, va al más herido, y los golpes de antes cuentan por orden.
+- «Señalar»: un mensaje del directo que no se guarda (`event: ping`).
+- En el móvil, el mapa cabe en la pantalla y se amplía para mover las fichas con el dedo.
 
 ### Fase 8 (opcional). Imagen de fondo para los mapas
 

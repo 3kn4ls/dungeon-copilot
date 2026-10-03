@@ -9,12 +9,14 @@ import {
   groupLabel,
   joinCombat,
   leaveCombat,
+  memberName,
   nextTurn,
   nextTurnSchema,
   startCombatSchema,
   turnOf,
   type Combat,
   type Combatant,
+  type NpcCombatant,
 } from './combat';
 import { settledEvents, type DamageTarget, type GameEvent, type GameEventPayload } from './games';
 
@@ -145,6 +147,31 @@ describe('empezar un combate', () => {
     expect(group(21).error?.issues.map((issue) => issue.message)).toEqual([
       'Un grupo es de 20 como mucho',
     ]);
+  });
+
+  it('las figuras del mapa entran una por cada uno del grupo, y una sola vez', () => {
+    const start = (...npcs: object[]) =>
+      startCombatSchema.safeParse({
+        combatants: [{ kind: 'character', characterId: KAEL }, ...npcs],
+      });
+    const messages = (result: ReturnType<typeof start>) =>
+      result.error?.issues.map((issue) => issue.message);
+    const bandits = { kind: 'npc', name: 'Bandidos', profile: 'minion', count: 2 };
+    expect(start({ ...bandits, figures: [MIRA, BANDITS] }).success).toBe(true);
+    expect(messages(start({ ...bandits, figures: [MIRA] }))).toEqual([
+      'Elige una figura del mapa por cada uno del grupo',
+    ]);
+    const garrick = { kind: 'npc', name: 'Garrick', profile: 'veteran', figures: [MIRA] };
+    expect(messages(start({ ...bandits, figures: [MIRA, BANDITS] }, garrick))).toEqual([
+      'Una figura no puede entrar dos veces en el combate',
+    ]);
+  });
+
+  it('uno de un grupo lleva su número en el nombre', () => {
+    expect(memberName(npc(BANDITS, 'Bandidos', 9, 'minion', 3) as NpcCombatant, 1)).toBe(
+      'Bandidos 2',
+    );
+    expect(memberName(npc(BANDITS, 'Garrick', 9) as NpcCombatant, 0)).toBe('Garrick');
   });
 
   it('al terminar se recupera el aliento si no se dice otra cosa', () => {

@@ -35,7 +35,7 @@ const inn: MapSnapshot = {
 const crypt: MapSnapshot = { ...inn, id: 'c0ffee00-0000-4000-8000-000000000001', name: 'Cripta' };
 
 const kael: TokenRef = { kind: 'character', id: KAEL };
-const bandit = (member: number): TokenRef => ({ kind: 'combatant', id: BANDITS, member });
+const bandit = (member: number) => ({ kind: 'combatant' as const, id: BANDITS, member });
 const ambush: TokenRef = { kind: 'figure', id: AMBUSH };
 
 describe('mapGridSchema', () => {
@@ -109,8 +109,8 @@ describe('currentMap', () => {
     ]);
     expect(map).toMatchObject({ name: 'Posada del Ciervo Blanco', grid: inn.grid });
     expect(map?.tokens).toEqual([
-      { token: kael, name: 'Kael', at: { x: 2, y: 1 }, hidden: false },
-      { token: bandit(0), name: 'Bandidos 1', at: { x: 6, y: 2 }, hidden: false },
+      { token: kael, name: 'Kael', at: { x: 2, y: 1 }, hidden: false, down: false },
+      { token: bandit(0), name: 'Bandidos 1', at: { x: 6, y: 2 }, hidden: false, down: false },
     ]);
   });
 
@@ -147,11 +147,58 @@ describe('currentMap', () => {
     const opened = event(1, { kind: 'map', map: inn });
     // El máster recibe todos los eventos; un jugador, solo los públicos.
     expect(currentMap([opened, hidden])?.tokens).toEqual([
-      { token: ambush, name: 'Emboscada', at: { x: 9, y: 6 }, hidden: true },
+      { token: ambush, name: 'Emboscada', at: { x: 9, y: 6 }, hidden: true, down: false },
     ]);
     expect(currentMap([opened])?.tokens).toEqual([]);
     expect(currentMap([opened, hidden, shown])?.tokens).toEqual([
-      { token: ambush, name: 'Emboscada', at: { x: 8, y: 6 }, hidden: false },
+      { token: ambush, name: 'Emboscada', at: { x: 8, y: 6 }, hidden: false, down: false },
+    ]);
+  });
+
+  it('las figuras que entran en el combate pasan a ser sus fichas, a la vista', () => {
+    const hidden = event(
+      2,
+      { kind: 'token', token: ambush, name: 'Emboscada', at: { x: 9, y: 6 } },
+      'master',
+    );
+    const started = event(3, {
+      kind: 'combatStarted',
+      order: [],
+      placed: [{ figure: AMBUSH, token: bandit(0), name: 'Bandidos 1', at: { x: 9, y: 6 } }],
+    });
+    const opened = event(1, { kind: 'map', map: inn });
+    const shown = [{ token: bandit(0), name: 'Bandidos 1', at: { x: 9, y: 6 }, hidden: false }];
+    // El máster y la mesa los ven igual, aunque la mesa no viera la figura.
+    expect(currentMap([opened, hidden, started])?.tokens).toMatchObject(shown);
+    expect(currentMap([opened, started])?.tokens).toMatchObject(shown);
+  });
+
+  it('los golpes dicen qué ficha de un grupo cae, también si se pone después', () => {
+    const hit = (id: number, member: number, fell: boolean) =>
+      event(id, {
+        kind: 'damage',
+        amount: 1,
+        target: {
+          kind: 'npc',
+          id: BANDITS,
+          name: 'Bandidos',
+          count: 3,
+          toughness: 1,
+          harm: { down: fell ? 1 : 0, damage: 0 },
+          fell,
+          member,
+        },
+      });
+    const map = currentMap([
+      event(1, { kind: 'map', map: inn }),
+      event(2, { kind: 'token', token: bandit(0), name: 'Bandidos 1', at: { x: 6, y: 2 } }),
+      hit(3, 1, true),
+      hit(4, 0, false),
+      event(5, { kind: 'token', token: bandit(1), name: 'Bandidos 2', at: { x: 7, y: 2 } }),
+    ]);
+    expect(map?.tokens.map((token) => [token.name, token.down])).toEqual([
+      ['Bandidos 1', false],
+      ['Bandidos 2', true],
     ]);
   });
 });

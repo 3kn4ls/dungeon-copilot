@@ -1,0 +1,618 @@
+/* Los mapas: la lista de la campaña, el editor y el plano con sus casillas. */
+
+.map-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+
+.map-card {
+  display: grid;
+  gap: 4px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+
+.map-card:hover {
+  border-color: var(--accent);
+}
+
+.map-card strong {
+  margin-top: 6px;
+  font-family: var(--display);
+  font-size: 19px;
+}
+
+.map-card .muted {
+  font-size: 14px;
+}
+
+.map-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius);
+  background: var(--map-wall);
+}
+
+/* Crear un mapa y, en el editor, su nombre y su tamaño. */
+.map-size,
+.map-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, 110px);
+  align-items: end;
+  gap: 12px;
+}
+
+.map-editor-head {
+  grid-template-columns: minmax(0, 1fr) repeat(2, 90px) auto;
+}
+
+@media (max-width: 760px) {
+  .map-size,
+  .map-editor-head {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-size > :first-child,
+  .map-editor-head > :first-child,
+  .map-editor-head .actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.map-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.map-editor .back {
+  justify-self: start;
+}
+
+.map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.map-toolbar .segmented button {
+  flex: 0 1 auto;
+}
+
+/* El plano */
+
+/* El marco se ajusta al mapa, que se encoge para caber a lo ancho y en la pantalla. */
+.map-frame {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-panel);
+  background: var(--map-wall);
+  box-shadow: var(--shadow);
+}
+
+.map-svg {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 75vh;
+  touch-action: none;
+  user-select: none;
+}
+
+.map-svg:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.map-canvas {
+  cursor: crosshair;
+}
+
+/* En juego, el mapa se recorre con el dedo; las fichas, al medir y al poner, no. */
+.battle-map .map-svg {
+  touch-action: pan-x pan-y;
+}
+
+.battle-map .map-svg.map-canvas,
+.tk.draggable {
+  touch-action: none;
+}
+
+/* Ampliado: cada casilla mide lo suyo y el marco se desplaza. */
+.map-frame.zoomed {
+  width: auto;
+  max-height: 75vh;
+  overflow: auto;
+}
+
+.map-frame.zoomed .map-svg {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}
+
+.m-floor {
+  fill: var(--map-floor);
+}
+
+.m-plank {
+  fill: none;
+  stroke: var(--map-plank);
+  stroke-width: 1;
+}
+
+.m-grid {
+  fill: none;
+  stroke: var(--map-grid);
+  stroke-width: 1;
+}
+
+.m-wall {
+  fill: var(--map-wall);
+}
+
+.m-door {
+  fill: var(--map-wood);
+  stroke: var(--map-wood-edge);
+  stroke-width: 2;
+}
+
+.m-window {
+  fill: var(--map-glass);
+}
+
+.m-cover {
+  fill: var(--map-wood);
+}
+
+.m-cover-edge {
+  fill: none;
+  stroke: var(--map-wood-edge);
+  stroke-width: 2;
+}
+
+/* Lo que se va a pintar al soltar y dónde está el cursor del teclado. */
+.m-preview {
+  fill: color-mix(in srgb, var(--accent) 35%, transparent);
+  pointer-events: none;
+}
+
+.m-cursor {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+.map-canvas:not(:focus) .m-cursor {
+  display: none;
+}
+
+.map-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 14px;
+}
+
+.map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-legend svg {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+
+/* El mapa en juego: en la sala del máster, en la del jugador y en la pantalla. */
+
+.map-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.map-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.map-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-picker select {
+  width: auto;
+  min-height: 32px;
+  padding-block: 4px;
+}
+
+.battle-map {
+  display: grid;
+  gap: 10px;
+}
+
+.map-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.map-tools .field-label {
+  display: none;
+}
+
+.map-tools .segmented button {
+  flex: 0 1 auto;
+}
+
+/* Las fichas: el color de cada personaje, rojo los enemigos y gris las figuras. */
+.tk {
+  cursor: pointer;
+  outline: none;
+}
+
+.tk.draggable {
+  cursor: grab;
+}
+
+.tk-halo {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 3;
+}
+
+.tk-base {
+  fill: color-mix(in srgb, var(--tone) 35%, var(--map-wall));
+  stroke: var(--tone);
+  stroke-width: 3;
+}
+
+.tk-initials {
+  fill: #f4efe6;
+  font-family: var(--body);
+  font-size: 15px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.tk-name {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+/* Los nombres se pisan entre fichas vecinas: en la sala salen al elegir una o pasar por encima,
+   y en la pantalla de la mesa, siempre. */
+.battle-map:not(.names) .tk:not(:hover, :focus-visible, .selected, .target, .turn) .tk-name {
+  display: none;
+}
+
+.tk.turn .tk-halo {
+  fill: color-mix(in srgb, var(--ember) 20%, transparent);
+  stroke: var(--ember);
+  animation: tk-glow 1.8s ease-in-out infinite;
+}
+
+.tk.selected .tk-halo,
+.tk:focus-visible .tk-halo {
+  stroke: var(--ink);
+  stroke-dasharray: 5 4;
+}
+
+.tk.target .tk-base {
+  stroke: var(--ember);
+  stroke-width: 4.5;
+}
+
+.tk.hidden {
+  opacity: 0.5;
+}
+
+.tk.hidden .tk-base {
+  stroke-dasharray: 4 3;
+}
+
+.tk.down .tk-base {
+  fill: var(--map-wall);
+  stroke: var(--neutral);
+}
+
+.tk-down {
+  stroke: var(--foe);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.tk-harm rect {
+  fill: var(--map-wall);
+  stroke: var(--foe);
+  stroke-width: 1;
+}
+
+.tk-harm rect.on {
+  fill: var(--foe);
+}
+
+@keyframes tk-glow {
+  50% {
+    stroke-opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Los nombres se pisan entre fichas vecinas: en la sala salen al elegir una o pasar por encima,
+   y en la pantalla de la mesa, siempre. */
+  .battle-map:not(.names) .tk:not(:hover, :focus-visible, .selected, .target, .turn) .tk-name {
+    display: none;
+  }
+
+  .tk.turn .tk-halo {
+    animation: none;
+  }
+}
+
+/* Lo que se dibuja encima: el alcance, la línea al apuntar, la medida y dónde va una ficha. */
+.m-band {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.m-band.band-medium {
+  stroke: var(--ember);
+  opacity: 0.5;
+}
+
+.m-aim line {
+  stroke: var(--ember);
+  stroke-width: 3;
+  stroke-dasharray: 10 6;
+  pointer-events: none;
+}
+
+.m-aim.blocked line {
+  stroke: var(--foe);
+}
+
+.m-measure line {
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-dasharray: 2 6;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.m-measure text,
+.m-drag-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  pointer-events: none;
+}
+
+.m-drag-label.blocked {
+  fill: var(--foe);
+}
+
+.m-ghost {
+  fill: color-mix(in srgb, var(--accent) 25%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+.m-ghost.blocked {
+  fill: color-mix(in srgb, var(--foe) 25%, transparent);
+  stroke: var(--foe);
+}
+
+/* Una casilla señalada: un aro que crece y se apaga, con quién la señala. */
+.m-ping {
+  pointer-events: none;
+}
+
+.m-ping circle {
+  fill: none;
+  stroke: var(--ember);
+  stroke-width: 4;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: m-ping 1.2s ease-out 2;
+}
+
+.m-ping text {
+  fill: var(--ember);
+  font-size: 14px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+}
+
+@keyframes m-ping {
+  from {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-ping circle {
+    animation: none;
+  }
+}
+
+/* Debajo del mapa: la ficha elegida y, al apuntar, los ataques con su probabilidad. */
+.map-info {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.map-info-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.map-info-head strong {
+  font-family: var(--display);
+  font-size: 19px;
+}
+
+.map-info-head .actions {
+  margin-left: auto;
+}
+
+.map-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.map-hint.blocked {
+  color: var(--foe);
+}
+
+.aim {
+  display: grid;
+  gap: 10px;
+}
+
+.aim-geo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.badge.foe {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--foe) 16%, transparent);
+  color: var(--foe);
+}
+
+.aim-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+
+.aim-text {
+  display: grid;
+  flex: 1 1 240px;
+  gap: 6px;
+}
+
+.aim-text strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aim-odds {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aim-odds .odds {
+  flex: 1;
+}
+
+/* Poner fichas: personajes, quien pelea y figuras nuevas. */
+.token-palette {
+  display: grid;
+  gap: 8px;
+}
+
+.token-palette h3 {
+  margin: 0;
+}
+
+.chip.foe {
+  border-color: color-mix(in srgb, var(--foe) 45%, var(--line));
+}
+
+.figure-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.figure-form input:not([type='checkbox']) {
+  flex: 1 1 200px;
+  width: auto;
+}
+
+/* El jugador, en una pantalla ancha: el mapa arriba, a lo ancho. */
+.player-room.wide.has-map {
+  grid-template-areas:
+    'banner banner'
+    'map map'
+    'table log'
+    'sheet log';
+}
+
+.player-room.wide .pane-map {
+  grid-area: map;
+}

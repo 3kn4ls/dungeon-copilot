@@ -2,11 +2,13 @@ import {
   COST_BLOW,
   DAMAGE_CAP_LABELS,
   NPC_PROFILES,
+  UNHARMED,
   WEAPON_CLASSES,
   attackExtras,
   attackWeapon,
   combatBlows,
   hitDamage,
+  memberDamage,
   weaponLabel,
   type ArmorClass,
   type DamagePart,
@@ -14,7 +16,9 @@ import {
   type WeaponClass,
 } from '@dungeon-copilot/rules';
 import {
+  groupSize,
   isSpent,
+  memberName,
   type CharacterView,
   type Combat,
   type GameDetail,
@@ -29,6 +33,7 @@ import { refreshCharacters, useEnemyDecision, useMe, useStoreGameEvent } from '.
 import { buildOf } from '../rolling';
 import { signed } from '../rules-text';
 import { MoraleAdvice } from './Decisions';
+import { struckName } from './GameEvents';
 import { ARMOR_OPTIONS, WEAPON_OPTIONS } from './Gear';
 import { ConfirmButton, ErrorNote, Segmented, Stepper } from './ui';
 
@@ -44,6 +49,8 @@ export interface Candidate {
   name: string;
   /** Su ficha, si es un personaje. */
   character?: CharacterView | undefined;
+  /** Si son PNJ del combate, quiénes son y el daño que lleva cada uno del grupo. */
+  npc?: { combatant: NpcCombatant; members: number[] } | undefined;
 }
 
 /** A quién se le puede dar un golpe: a quien pelea o, sin combate, a los personajes. */
@@ -55,6 +62,17 @@ export function candidatesOf(combat: Combat | null, characters: CharacterView[])
     character:
       combatant.kind === 'character'
         ? characters.find((character) => character.id === combatant.id)
+        : undefined,
+    npc:
+      combatant.kind === 'npc'
+        ? {
+            combatant,
+            members: memberDamage(
+              combatant.profile,
+              groupSize(combatant),
+              combat.harm[combatant.id] ?? UNHARMED,
+            ),
+          }
         : undefined,
   }));
 }
@@ -93,6 +111,8 @@ export function DamageForm(props: {
   striker: Striker;
   /** A quién va, si se sabe; si no, se elige entre `candidates`. */
   targetId?: string | undefined;
+  /** Si va a uno de un grupo y se sabe a cuál (se apuntó en el mapa). */
+  member?: number | undefined;
   candidates: Candidate[];
   critical?: boolean;
   /** El resultado de la tirada del golpe: Golpe demoledor depende de él. */
@@ -126,9 +146,24 @@ export function DamageForm(props: {
   );
   const [dodgeFor, setDodgeFor] = useState<string | null>(null);
   const [override, setOverride] = useState<{ inputs: string; amount: number } | null>(null);
+  // A cuál de un grupo: el que se elige o, si no, al que se apuntó (o el que sigue peleando).
+  const [memberChoice, setMemberChoice] = useState<{
+    targetId: string;
+    member: number | undefined;
+  } | null>(null);
 
   const targetId = props.targetId ?? chosen;
   const target = props.candidates.find((candidate) => candidate.id === targetId);
+  const group = target?.npc && groupSize(target.npc.combatant) > 1 ? target.npc : undefined;
+  const member =
+    memberChoice?.targetId === targetId
+      ? memberChoice.member
+      : targetId === props.targetId
+        ? props.member
+        : undefined;
+  const toughness = group ? NPC_PROFILES[group.combatant.profile].toughness : 0;
+  const targetName =
+    group && member !== undefined ? memberName(group.combatant, member) : target?.name;
   const sheet = target?.character;
   const armor =
     armorChoice?.targetId === targetId ? armorChoice.armor : (sheet?.gear.armor ?? 'none');
@@ -169,7 +204,13 @@ export function DamageForm(props: {
 
   const apply = useMutation({
     mutationFn: () =>
-      api.dealDamage(game.id, { targetId, amount, roll: props.roll, dodge: dodging }),
+      api.dealDamage(game.id, {
+        targetId,
+        member: group ? member : undefined,
+        amount,
+        roll: props.roll,
+        dodge: dodging,
+      }),
     onSuccess: (event) => {
       storeEvent(event);
       if (event.kind === 'damage' && event.target.kind === 'character') {
@@ -192,6 +233,30 @@ export function DamageForm(props: {
                 {candidate.name}
               </option>
             ))}
+          </select>
+        </label>
+      )}
+      {group && (
+        <label className="field">
+          <span className="field-label">A cuál de {group.combatant.name}</span>
+          <select
+            value={member ?? ''}
+            onChange={(event) =>
+              setMemberChoice({
+                targetId,
+                member: event.target.value === '' ? undefined : Number(event.target.value),
+              })
+            }
+          >
+            <option value="">Al que sigue peleando: el más herido</option>
+            {group.members.map((taken, index) =>
+              taken >= toughness ? null : (
+                <option key={index} value={index}>
+                  {memberName(group.combatant, index)}
+                  {taken > 0 ? ` (lleva ${taken} de ${toughness})` : ''}
+                </option>
+              ),
+            )}
           </select>
         </label>
       )}
@@ -263,7 +328,7 @@ export function DamageForm(props: {
           disabled={!target || apply.isPending}
           onClick={() => apply.mutate()}
         >
-          {target ? `Aplicar ${amount} de daño a ${target.name}` : 'Aplicar el daño'}
+          {target ? `Aplicar ${amount} de daño a ${targetName}` : 'Aplicar el daño'}
         </button>
         {props.onCancel && (
           <button type="button" className="link-button" onClick={props.onCancel}>
@@ -329,7 +394,7 @@ export function RollDamage(props: {
     <div className="roll-damage stack tight">
       {applied.map((blow) => (
         <p key={blow.id} className="muted">
-          Aplicado: {blow.amount} de daño a {blow.target.name}.
+          Aplicado: {blow.amount} de daño a {struckName(blow.target)}.
         </p>
       ))}
       {blows.hit && !hitDone && (
@@ -340,6 +405,7 @@ export function RollDamage(props: {
           }
           striker={strikerOf(attackerId, combat, characters)}
           targetId={known(defenderId)}
+          member={roll.blow?.defender.member}
           candidates={candidates}
           critical={blows.critical}
           outcome={roll.result.outcome}
@@ -362,6 +428,7 @@ export function RollDamage(props: {
             title={`Golpe de ${defenderName} a ${attackerName}`}
             striker={strikerOf(defenderId, combat, characters)}
             targetId={known(attackerId)}
+            member={roll.blow?.attacker.member}
             candidates={candidates}
             extras={blows.counter === 'cost' ? [COST_BLOW] : []}
             roll={event.id}

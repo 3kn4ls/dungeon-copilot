@@ -234,7 +234,7 @@ Los PNJ importantes llevan ficha completa. Los secundarios usan un perfil: el m�
 
 "Aguanta" es el daño total que soporta antes de caer. La **Destreza** es la mitad del bonificador: con ella tira la iniciativa y es la que cuenta para dispararle.
 
-**Grupos**: unos enemigos iguales, como tres bandidos, comparten perfil y tiran juntos la iniciativa, pero cada uno aguanta lo suyo. Un impacto alcanza a uno solo: cae al llegar a su aguante, y el daño que sobra no pasa al siguiente. El grupo deja de pelear cuando caen todos.
+**Grupos**: unos enemigos iguales, como tres bandidos, comparten perfil y tiran juntos la iniciativa, pero cada uno aguanta lo suyo. Un impacto alcanza a uno solo: en un mapa, al que se apunta; si no, al más herido de los que siguen en pie. Cae al llegar a su aguante, y el daño que sobra no pasa al siguiente. El grupo deja de pelear cuando caen todos.
 
 ## Magia
 

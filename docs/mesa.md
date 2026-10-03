@@ -122,7 +122,7 @@ El máster ve de dónde sale («Espada larga (media) 2 · Crítico +1 · Armadur
 
 **Los personajes** llevan el daño en su ficha: rasguños, luego herido, grave y fuera de combate. Quien queda fuera de combate sigue en el orden. Si el golpe es **mortal**, su jugador (o el máster) pulsa **Gastar Suerte y seguir con vida**; si tiene Imparable sin usar en la sesión, puede aguantar en pie hasta el final de su siguiente turno.
 
-**Los enemigos**, uno a uno: cada golpe alcanza a uno del grupo, que cae al llegar a lo que aguanta su perfil, y el daño que sobra no pasa al siguiente. La mesa ve cuántos quedan en pie y quién está herido; el máster, además, cuánto lleva cada uno. Cuando caen todos, **salen solos del combate**; si era su turno, le toca al siguiente.
+**Los enemigos**, uno a uno: cada golpe alcanza a uno del grupo, que cae al llegar a lo que aguanta su perfil, y el daño que sobra no pasa al siguiente. En el mapa va a quien se apuntó; si no se dice a cuál, al más herido de los que siguen en pie. La mesa ve cuántos quedan en pie y quién está herido; el máster, además, cuánto lleva cada uno. Cuando caen todos, **salen solos del combate**; si era su turno, le toca al siguiente.
 
 ### Quien llega y quien se va
 
@@ -153,15 +153,18 @@ La pantalla enseña la ronda, el orden de iniciativa con quien tiene el turno de
 
 ## El mapa
 
-El combate se puede jugar sobre un mapa: un plano en casillas de 1,5 m que el máster prepara en la campaña, con muros, puertas, ventanas y muebles. Los mapas de la campaña solo los ve él.
+El combate se puede jugar sobre un mapa: un plano en casillas de 1,5 m con muros, puertas, ventanas y muebles. El máster lo dibuja en la pestaña **Mapas** de la campaña: pinta casilla a casilla, en rectángulo o el borde de una habitación, y puede deshacer y cambiar el tamaño. Los mapas de la campaña solo los ve él.
 
-- **Ponerlo**: el máster pone un mapa en la partida, y lo ve toda la mesa y la pantalla. Se guarda tal como era: si después lo cambia en la campaña, la partida no cambia. Al poner otro, las fichas empiezan de cero, y también se puede quitar.
-- **Las fichas**: cada personaje; cada uno de los PNJ que pelean (los de un grupo, uno a uno: «Bandidos 2»), mientras hay combate; y las figuras que pone el máster con su nombre, como un PNJ que no pelea. No se puede estar en un muro, una ventana ni un mueble.
-- **Quién las mueve**: el máster, todas. Cada jugador, la de su personaje; si pelea, solo en su turno.
-- **Ocultas**: el máster pone a la vista solo de él lo que la mesa aún no ve, como una emboscada. Cuando las mueve sin esconderlas, aparecen para todos. Lo que la mesa ya ha visto no se esconde (se quita), y los personajes nunca.
-- **Las reglas**: la distancia, el cuerpo a cuerpo, la línea de visión y la cobertura salen del mapa, como dice el [reglamento](reglas.md#en-un-mapa).
-
-Por ahora lo guarda y lo reparte el servidor; la sala, el móvil y la pantalla lo enseñarán con la fase 7 del [plan del nuevo frontend](prototipo/plan.md).
+- **Ponerlo**: el máster elige un mapa en la sala y lo ve toda la mesa: en el móvil, en la pestaña Mapa, y en la pantalla, en grande. Se guarda tal como era: si después lo cambia en la campaña, la partida no cambia. Al poner otro, las fichas se quitan, y también se puede quitar.
+- **Las fichas**: cada personaje; cada uno de los PNJ que pelean (los de un grupo, uno a uno: «Bandidos 2»), mientras hay combate; y las figuras que pone el máster con su nombre, como un PNJ que no pelea. No se puede estar en un muro, una ventana ni un mueble, ni donde ya hay alguien en pie.
+- **Quién las mueve**: el máster, todas. Cada jugador pone y mueve la de su personaje; si pelea, solo en su turno. Se arrastran o, con el teclado, se mueven con las flechas e Intro.
+- **Ocultas**: el máster pone a la vista solo de él lo que la mesa aún no ve, como una emboscada, y mira el mapa **como la mesa** para comprobarlo. Con **Enseñar a la mesa** (o al moverlas sin esconderlas) aparecen para todos. Lo que la mesa ya ha visto no se esconde (se quita), y los personajes nunca.
+- **Empezar el combate desde el mapa**: al empezar un combate o sumar refuerzos, el máster elige figuras del mapa («Bandido ×2»): pasan a ser los PNJ del combate, cada una en su casilla y a la vista.
+- **Medir**: de una casilla a otra, en casillas, metros y la distancia del reglamento. Con un arma a distancia, al elegir al personaje se ven las bandas de distancia corta y media.
+- **Apuntar**: se elige una ficha y luego un rival. Salen la distancia, si se ve y si está a cubierto, como dice el [reglamento](reglas.md#en-un-mapa), y los ataques que puede hacer, con su probabilidad: cuerpo a cuerpo si está al lado y, si no y le ve, disparar (un personaje, si lleva arma a distancia). El máster pulsa **Preparar la tirada** y se abre Tirar con todo puesto (el golpe va a ese del grupo); un jugador, en su ficha, pulsa **Atacar** o **Disparar**, que es una intervención contra ese del grupo. Al atenderla, la tirada también toma la distancia y la cobertura del mapa.
+- **Quién cae**: un golpe a un grupo va a quien se apuntó; a mano, el máster elige a cuál. Su ficha queda tachada en el mapa.
+- **Señalar**: cualquiera toca una casilla y la mesa la ve destacada un momento, con su nombre. No se guarda.
+- **En el móvil**: el mapa cabe en la pantalla y se puede **Ampliar** para mover las fichas con el dedo.
 
 ## Escenas
 
@@ -243,13 +246,13 @@ Solo sugiere, y el máster decide: nada de lo que sugiere queda en la partida ni
   - `damage`: un golpe. A un personaje, con su ficha antes y después y si es mortal; a PNJ, con cómo queda el grupo y, si caen todos, el orden nuevo (`position`). `roll` es la tirada de la que sale, y `by`, quién lo da.
   - `survived`: un personaje gasta Suerte para no morir de un golpe.
   - `scene`: empieza una escena; `ability`: un personaje usa una técnica que se gasta.
-  - `map`: el máster pone un mapa (como era entonces) o lo quita; `token`: una ficha se pone, se mueve o se quita (`at` null). Las ocultas son eventos `master`.
+  - `map`: el máster pone un mapa (como era entonces) o lo quita; `token`: una ficha se pone, se mueve o se quita (`at` null). Las ocultas son eventos `master`. `combatStarted` y `combatJoined` llevan en `placed` las figuras que pasan a pelear, y un golpe a un grupo dice a cuál alcanza (`member`).
 - Las tiradas de combate guardan quién ataca a quién (`blow`), con los nombres de entonces.
 - Una intervención deja de esperar cuando otro evento la cita en `answers` (la palabra, una tirada pedida, una frase, una descripción o el combate que empieza o al que se une) o con un `settled`. Una tirada pedida se cumple con la tirada que la cita en `requested`. Lo calculan `settledEvents`, `pendingInterventions` y `pendingRollRequests`, y en el servidor, `apps/server/src/games/pending.ts`.
 - El combate en juego lo calcula `currentCombat`, con el daño de los PNJ (`harm`), y quién tiene la palabra, `currentFloor`, los dos en `packages/shared/src/combat.ts` y con los eventos, igual en la web que en el servidor. Allí están también los cambios de turno y de orden (`nextTurn`, `joinCombat`, `leaveCombat`). Un golpe solo quita la palabra si con él alguien sale del orden.
 - La escena en juego la calcula `currentScene`, y las técnicas gastadas, `spentAbilities` (`packages/shared/src/scenes.ts`).
 - La iniciativa la tira el servidor (`apps/server/src/games/combat.ts`) con las reglas de `packages/rules` (`initiativeEdge`, `compareInitiative` y la Destreza de los perfiles). El daño se calcula con `hitDamage`, `attackExtras` y `combatBlows`, y el de los grupos, con `damageNpcs`.
 - Las rutas están en `apps/server/src/routes/table.ts`, `combat.ts`, `damage.ts` y `scenes.ts`; las de la IA en combate, con el resto de la ayuda para narrar, en `routes/games.ts`. `addEvent` y la lectura del registro según quién mira están en `apps/server/src/games/events.ts`.
-- El mapa en juego y sus fichas, según quién mira, los calcula `currentMap` (`packages/shared/src/maps.ts`), y en el servidor, `findMap` (`apps/server/src/games/maps.ts`). La distancia, el alcance, la línea de visión y la cobertura están en `packages/rules/src/battlemap.ts`. Las rutas de los mapas y las fichas, en `apps/server/src/routes/maps.ts`, y los mapas de la campaña, en la tabla `maps`.
+- El mapa en juego y sus fichas, según quién mira, los calcula `currentMap` (`packages/shared/src/maps.ts`), y en el servidor, `findMap` (`apps/server/src/games/maps.ts`). La distancia, el alcance, la línea de visión y la cobertura están en `packages/rules/src/battlemap.ts`, y el daño de cada uno de un grupo, en `damageNpcs` (`packages/rules/src/npc.ts`). Las rutas de los mapas, las fichas y las casillas señaladas, en `apps/server/src/routes/maps.ts`, y los mapas de la campaña, en la tabla `maps`. Señalar no es un evento: `GameHub.signal` lo reparte por el directo (`event: ping`). En la web, el mapa es `BattleMap`, y los ataques que salen de apuntar, `mapAttacks` (`apps/web/src/rolling.ts`).
 - Lo secreto es la visibilidad `private`, con el jugador en `game_events.player_id`.
 - Las sugerencias de Nimble están en `apps/server/src/routes/decisions.ts`, con sus preguntas en `apps/server/src/ai/decisions.ts`, y no escriben eventos. Qué tirada pedir se lee como `CheckSuggestion` (`packages/shared/src/decisions.ts`, con los umbrales a partir de los que se aplica cada cosa, `SUGGESTION_THRESHOLDS`), y la web la aplica con `interventionPreset`. Qué hacen los enemigos es `EnemyDecision`, y lo que se cuenta del combate (quién pelea, lo que se sabe de un PNJ y los últimos golpes) lo montan `findFighters`, `findNpcKnown` y `findCombatBlows` (`apps/server/src/games/prompt-context.ts`), que comparte con las ideas para los PNJ. El guardián es `SecretLeak`, con los PNJ y sus secretos de `findNpcSecrets`: es lo único que manda lo que ocultan los PNJ a la IA que decide.

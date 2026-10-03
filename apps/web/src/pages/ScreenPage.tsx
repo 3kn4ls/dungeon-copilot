@@ -3,6 +3,7 @@ import {
   INTERVENTION_LABELS,
   currentCombat,
   currentFloor,
+  currentMap,
   currentScene,
   gameName,
   groupLabel,
@@ -19,10 +20,11 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { ApiError, api } from '../api';
 import { Avatar } from '../components/Avatar';
+import { BattleMap } from '../components/BattleMap';
 import { harmText } from '../components/Combat';
 import { RollView, blowLine, blowResult, requestedText } from '../components/GameEvents';
 import { useDocumentTitle } from '../components/ui';
-import { LIVE_STATUS_LABELS, useLiveEvents } from '../live';
+import { LIVE_STATUS_LABELS, useLiveEvents, usePings } from '../live';
 import { keys } from '../queries';
 
 /** Frases que se ven bajo la escena: lo último que dicen los PNJ y los personajes. */
@@ -64,6 +66,7 @@ export function ScreenPage() {
   });
   useDocumentTitle(screen.data ? `Pantalla · ${screen.data.campaignName}` : 'Pantalla');
   useWakeLock();
+  const [pings, addPing] = usePings();
 
   // Con el enlace cambiado, lo que quedó guardado ya no vale.
   const gone = screen.error instanceof ApiError && screen.error.status === 404;
@@ -80,6 +83,7 @@ export function ScreenPage() {
       queryClient.setQueryData<ScreenState>(keys.screen(token), mergeScreenEvent(current, event));
     },
     onRefused: () => void queryClient.invalidateQueries({ queryKey: keys.screen(token) }),
+    onPing: addPing,
   });
 
   if (!screen.data || gone) {
@@ -115,6 +119,8 @@ export function ScreenPage() {
   const playing = game?.status === 'open';
   const floor = currentFloor(events);
   const combat = playing ? currentCombat(events) : null;
+  // El mapa en juego, con lo que ve la mesa: a la pantalla no llega nada oculto.
+  const map = playing ? currentMap(events) : null;
   const hands = playing ? pendingInterventions(events) : [];
   const asked = playing ? pendingRollRequests(events) : [];
   // Una tirada repetida con Suerte ya no cuenta: solo se ve la repetición.
@@ -153,7 +159,17 @@ export function ScreenPage() {
         <p className="screen-waiting">Esperando a que empiece la partida…</p>
       ) : (
         <main className="screen-main">
-          <section className="screen-reveal" aria-live="polite">
+          <section className={map ? 'screen-reveal with-map' : 'screen-reveal'} aria-live="polite">
+            {map && (
+              <BattleMap
+                gameId={game.id}
+                map={map}
+                combat={combat}
+                characters={[]}
+                viewer="screen"
+                pings={pings}
+              />
+            )}
             {scene && reveal && <p className="screen-scene">{scene.title}</p>}
             {scene && !reveal && <h1>{scene.title}</h1>}
             {reveal?.kind === 'reveal' && (
@@ -182,7 +198,7 @@ export function ScreenPage() {
                 <blockquote className="prewrap">{line.text}</blockquote>
               </figure>
             ))}
-            {!reveal && !scene && dialogue.length === 0 && (
+            {!reveal && !scene && dialogue.length === 0 && !map && (
               <p className="screen-waiting">Aquí aparecerá lo que enseñe el máster.</p>
             )}
             {game.status === 'closed' && <p className="screen-banner">La partida ha terminado</p>}

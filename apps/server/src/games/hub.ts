@@ -1,4 +1,4 @@
-import type { GameEvent } from '@dungeon-copilot/shared';
+import type { GameEvent, MapPing } from '@dungeon-copilot/shared';
 
 /** Alguien conectado al directo: un miembro en la sala de una partida o la pantalla de la mesa. */
 export interface Subscriber {
@@ -10,6 +10,8 @@ export interface Subscriber {
   /** El máster ve también sus notas, las tiradas secretas y todo lo que es en secreto. */
   seesMasterEvents: boolean;
   send(event: GameEvent): void;
+  /** Una casilla señalada en el mapa: de paso, sin guardarla. */
+  signal(ping: MapPing): void;
   /** Corta la conexión; el navegador volverá a intentarlo y el servidor decidirá si puede. */
   close(): void;
 }
@@ -51,6 +53,14 @@ export class GameHub {
       if (subscriber.gameId !== null && subscriber.gameId !== event.gameId) continue;
       if (!canSee(subscriber, event, playerId)) continue;
       subscriber.send(event);
+    }
+  }
+
+  /** Una casilla señalada en el mapa de una partida: la ven todos los que la siguen. */
+  signal(campaignId: string, gameId: string, ping: MapPing): void {
+    for (const subscriber of this.#campaigns.get(campaignId) ?? []) {
+      if (subscriber.gameId !== null && subscriber.gameId !== gameId) continue;
+      subscriber.signal(ping);
     }
   }
 

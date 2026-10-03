@@ -120,11 +120,19 @@ function InitiativeList({ combatants }: { combatants: Combatant[] }) {
 
 type DamageEvent = GameEvent & { kind: 'damage' };
 
-/** «Golpe de Garrick a Kael: 2 de daño.», o «Golpe a Bandidos: 1 de daño.» si no se sabe de quién. */
+/** Quien recibe un golpe: «Kael», «Garrick» o, si es uno de un grupo, «Bandidos 2». */
+export function struckName(target: DamageEvent['target']): string {
+  if (target.kind !== 'npc' || target.member === undefined || target.count === 1) {
+    return target.name;
+  }
+  return `${target.name} ${target.member + 1}`;
+}
+
+/** «Golpe de Garrick a Kael: 2 de daño.», o «Golpe a Bandidos 2: 1 de daño.» si no se sabe de quién. */
 export function blowLine(event: DamageEvent): string {
   const from = event.by ? ` de ${event.by.name}` : '';
   const dodged = event.dodged ? ', con Esquiva prodigiosa' : '';
-  return `Golpe${from} a ${event.target.name}: ${event.amount} de daño${dodged}.`;
+  return `Golpe${from} a ${struckName(event.target)}: ${event.amount} de daño${dodged}.`;
 }
 
 /**
@@ -141,11 +149,18 @@ export function blowResult(event: DamageEvent, master: boolean): string {
   }
   const standing = target.count - target.harm.down;
   const out = event.position ? ' Sale del combate.' : '';
+  // Si se sabe a cuál del grupo alcanza, cae ese; si no, «uno».
+  const known = target.member !== undefined;
   if (target.fell) {
     if (target.count === 1) return `Cae.${out}`;
-    return standing === 0 ? `Caen todos.${out}` : `Cae uno: quedan ${standing} de ${target.count}.`;
+    if (standing === 0) return `Caen todos.${out}`;
+    return `${known ? 'Cae' : 'Cae uno'}: quedan ${standing} de ${target.count}.`;
   }
-  return master ? `Lleva ${target.harm.damage} de ${target.toughness}.` : 'Aguanta.';
+  const taken =
+    target.member === undefined
+      ? target.harm.damage
+      : (target.harm.members?.[target.member] ?? target.harm.damage);
+  return master ? `Lleva ${taken} de ${target.toughness}.` : 'Aguanta.';
 }
 
 /** Una tirada de la partida: quién, contra qué, los dados y qué significa el resultado. */

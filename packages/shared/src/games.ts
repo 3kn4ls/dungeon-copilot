@@ -9,7 +9,7 @@ import {
 import { z } from 'zod';
 import type { MemberRole } from './campaigns';
 import type { Combatant, CombatantRef, CombatPosition } from './combat';
-import type { MapSnapshot, TokenRef } from './maps';
+import type { FigureInCombat, MapSnapshot, TokenRef } from './maps';
 import type { RollResponse } from './rolls';
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */
@@ -225,6 +225,16 @@ export const INTERVENTION_LABELS: Record<InterventionIntent, string> = {
   spell: 'Hechizo',
 };
 
+/** Cuántos pueden ser los PNJ de un grupo que pelea. */
+export const GROUP_MAX = 20;
+
+/** Uno de un grupo que pelea, por su número desde 0: «Bandidos 2» es el 1. */
+export const groupMemberSchema = z
+  .number('Elige a cuál del grupo')
+  .int('Elige a cuál del grupo')
+  .min(0, 'Elige a cuál del grupo')
+  .max(GROUP_MAX - 1, `Un grupo es de ${GROUP_MAX} como mucho`);
+
 /** Tope de lo que escribe un jugador al intervenir. */
 export const INTERVENTION_MAX = 1000;
 
@@ -243,8 +253,9 @@ export const interventionSchema = z.object({
     .default(''),
   /** En secreto: solo la ven el máster y quien la escribe, como pasarle una nota. */
   secret: z.boolean().default(false),
-  /** En combate, contra quién: alguien que pelea. */
+  /** En combate, contra quién: alguien que pelea y, si es un grupo, a cuál (en el mapa). */
   targetId: z.uuid('Elige contra quién').optional(),
+  targetMember: groupMemberSchema.optional(),
 });
 
 export type InterventionRequest = z.input<typeof interventionSchema>;
@@ -288,10 +299,15 @@ const rollSideSchema = z.discriminatedUnion('kind', [characterSideSchema, freeSi
 
 export type RollSideRequest = z.input<typeof rollSideSchema>;
 
-/** En combate, quién ataca a quién: sus ids en el combate. Así se sabe a quién va el daño. */
+/**
+ * En combate, quién ataca a quién: sus ids en el combate y, si son de un grupo, cuál (en el mapa).
+ * Así se sabe a quién va el daño.
+ */
 const blowSchema = z.object({
   attackerId: z.uuid('Di quién ataca'),
+  attackerMember: groupMemberSchema.optional(),
   defenderId: z.uuid('Di a quién ataca'),
+  defenderMember: groupMemberSchema.optional(),
 });
 
 export type BlowRequest = z.input<typeof blowSchema>;
@@ -432,6 +448,8 @@ export type DamageTarget =
       toughness: number;
       harm: NpcHarm;
       fell: boolean;
+      /** A cuál del grupo alcanza, por su número desde 0 (los golpes de antes de los mapas, no). */
+      member?: number;
     };
 
 export type GameEventPayload =
@@ -478,12 +496,20 @@ export type GameEventPayload =
     }
   /** Se cierra una intervención o una tirada pedida sin nada más. */
   | { kind: 'settled'; of: number; how: SettledHow }
-  /** Empieza un combate: quien pelea, de mayor a menor iniciativa. Le toca al primero. */
-  | { kind: 'combatStarted'; order: Combatant[]; answers?: number }
+  /**
+   * Empieza un combate: quien pelea, de mayor a menor iniciativa. Le toca al primero. `placed`: las
+   * figuras del mapa que pasan a ser las fichas de quien pelea.
+   */
+  | { kind: 'combatStarted'; order: Combatant[]; answers?: number; placed?: FigureInCombat[] }
   /** Pasa el turno: le toca a `combatant`, que está en el sitio `turn` del orden. */
   | { kind: 'turn'; round: number; turn: number; combatant: CombatantRef }
-  /** Se unen al combate con su iniciativa, y así queda. */
-  | ({ kind: 'combatJoined'; joined: Combatant[]; answers?: number } & CombatPosition)
+  /** Se unen al combate con su iniciativa, y así queda. `placed`, como al empezar. */
+  | ({
+      kind: 'combatJoined';
+      joined: Combatant[];
+      answers?: number;
+      placed?: FigureInCombat[];
+    } & CombatPosition)
   /** Sale del combate alguien que cae o huye, y así queda. */
   | ({ kind: 'combatLeft'; left: CombatantRef } & CombatPosition)
   /** Termina el combate en la ronda `rounds`. `recovered`: quienes recuperan el aliento. */
