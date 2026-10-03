@@ -24,6 +24,8 @@ export interface TestClient {
   put(url: string, payload: object): Promise<LightMyRequestResponse>;
   patch(url: string, payload: object): Promise<LightMyRequestResponse>;
   delete(url: string): Promise<LightMyRequestResponse>;
+  /** Manda bytes tal cual, como al subir una imagen. */
+  upload(url: string, data: Buffer, contentType: string): Promise<LightMyRequestResponse>;
 }
 
 export function createClient(app: FastifyInstance, cookie?: string): TestClient {
@@ -40,6 +42,16 @@ export function createClient(app: FastifyInstance, cookie?: string): TestClient 
     put: (url, payload) => client.request('PUT', url, payload),
     patch: (url, payload) => client.request('PATCH', url, payload),
     delete: (url) => client.request('DELETE', url),
+    upload: (url, data, contentType) =>
+      app.inject({
+        method: 'POST',
+        url,
+        payload: data,
+        headers: {
+          'content-type': contentType,
+          ...(client.cookie ? { cookie: client.cookie } : {}),
+        },
+      }),
   };
   return client;
 }

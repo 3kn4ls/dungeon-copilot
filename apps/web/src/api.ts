@@ -35,6 +35,7 @@ import type {
   JoinCombatRequest,
   LeaveCombatRequest,
   LoginRequest,
+  MapImageView,
   MapRequest,
   MapView,
   MeResponse,
@@ -105,6 +106,23 @@ async function request<T>(
     throw new ApiError(0, { error: 'No hay conexión con el servidor' });
   }
   if (response.status === 204) return undefined as T;
+  const data: unknown = await response.json().catch(() => null);
+  if (!response.ok) throw new ApiError(response.status, data as ApiErrorBody | null);
+  return data as T;
+}
+
+/** Sube un archivo tal cual, con su tipo, como un plano de mapa. */
+async function upload<T>(url: string, file: Blob): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': file.type },
+      body: file,
+    });
+  } catch {
+    throw new ApiError(0, { error: 'No hay conexión con el servidor' });
+  }
   const data: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new ApiError(response.status, data as ApiErrorBody | null);
   return data as T;
@@ -353,6 +371,11 @@ export const api = {
   updateMap: (id: string, body: UpdateMapRequest) =>
     patch<MapResponse>(`/api/maps/${id}`, body).then((r) => r.map),
   deleteMap: (id: string) => del(`/api/maps/${id}`),
+  /** Sube una imagen como plano de los mapas de la campaña. */
+  uploadMapImage: (campaignId: string, file: Blob) =>
+    upload<{ image: MapImageView }>(`/api/campaigns/${campaignId}/map-images`, file).then(
+      (r) => r.image,
+    ),
   /** El máster pone un mapa de la campaña en la partida, o lo quita. */
   setGameMap: (id: string, body: SetGameMapRequest) =>
     put<EventResponse>(`/api/games/${id}/map`, body).then((r) => r.event),

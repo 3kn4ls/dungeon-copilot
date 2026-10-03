@@ -1,5 +1,8 @@
 import { canStand, insideGrid } from '@dungeon-copilot/rules';
 import {
+  MAP_IMAGE_LIMITS,
+  MAP_IMAGE_MAX_TEXT,
+  MAP_IMAGE_TYPES,
   groupSize,
   mapSchema,
   memberName,
@@ -9,14 +12,16 @@ import {
   tokenKey,
   turnOf,
   updateMapSchema,
+  type MapGrid,
+  type MapImageView,
   type MapView,
   type PublicUser,
 } from '@dungeon-copilot/shared';
-import { and, asc, eq, sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import { and, asc, count, eq, sql } from 'drizzle-orm';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppContext } from '../context';
 import type { Executor } from '../db';
-import { campaignMembers, maps } from '../db/schema';
+import { campaignMembers, mapImages, maps } from '../db/schema';
 import { findCombat, requireCombat } from '../games/combat';
 import {
   GAME_CLOSED,
@@ -27,7 +32,9 @@ import {
   findGame,
   requireMasterOf,
 } from '../games/events';
+import { IMAGE_NOT_FOUND, collectImages, imageType, requireImage } from '../games/map-images';
 import { findMap, requireMap } from '../games/maps';
+import { findScreenCampaign } from '../games/screens';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster } from './access';
 import { requireUser } from './auth';
@@ -36,9 +43,28 @@ interface IdParams {
   id: string;
 }
 
+interface ScreenImageParams extends IdParams {
+  token: string;
+}
+
 type MapRow = typeof maps.$inferSelect;
 
 const MAP_NOT_FOUND = 'Ese mapa no existe o no es de tus campañas';
+const NOT_AN_IMAGE = 'Sube una imagen PNG, JPEG o WebP';
+
+/** Si el mapa lleva plano, tiene que ser de su campaña. */
+async function checkBackground(db: Executor, campaignId: string, grid: MapGrid | undefined) {
+  if (grid?.background) await requireImage(db, campaignId, grid.background.image);
+}
+
+/** Un plano, para el navegador: no cambia nunca, así que se guarda sin volver a pedirlo. */
+function sendImage(reply: FastifyReply, image: { contentType: string; data: Buffer }) {
+  return reply
+    .header('content-type', image.contentType)
+    .header('cache-control', 'private, max-age=31536000, immutable')
+    .header('x-content-type-options', 'nosniff')
+    .send(image.data);
+}
 
 function toView(row: MapRow): MapView {
   return {
@@ -94,6 +120,7 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
     const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
     const body = parseBody(mapSchema, request.body, 'Revisa el mapa');
     await requireMaster(db, campaignId, user);
+    await checkBackground(db, campaignId, body.grid);
     const [row] = await db
       .insert(maps)
       .values({ campaignId, ...body })
@@ -112,7 +139,8 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
     const user = requireUser(request);
     const id = parseId(request.params.id, MAP_NOT_FOUND);
     const body = parseBody(updateMapSchema, request.body, 'Revisa el mapa');
-    await findCampaignMap(db, user, id);
+    const map = await findCampaignMap(db, user, id);
+    await checkBackground(db, map.campaignId, body.grid);
     const [row] = await db
       .update(maps)
       .set({ ...body, updatedAt: new Date() })
@@ -120,6 +148,8 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
       .returning();
     // Borrado justo entre medias por otra pestaña.
     if (!row) throw notFound(MAP_NOT_FOUND);
+    // El plano de antes, si lo ha cambiado, ya no hace falta.
+    await collectImages(db, map.campaignId);
     return { map: toView(row) };
   });
 
@@ -127,10 +157,100 @@ export function registerMapRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.delete<{ Params: IdParams }>('/api/maps/:id', async (request, reply) => {
     const user = requireUser(request);
     const id = parseId(request.params.id, MAP_NOT_FOUND);
-    await findCampaignMap(db, user, id);
+    const map = await findCampaignMap(db, user, id);
     await db.delete(maps).where(eq(maps.id, id));
+    await collectImages(db, map.campaignId);
     return reply.status(204).send();
   });
+
+  /**
+   * El máster sube una imagen como plano: llega tal cual, con su tipo, hasta 5 MB. Se guarda en
+   * la campaña y luego se pone de fondo en un mapa. Solo esta ruta acepta imágenes.
+   */
+  void app.register(async (scope) => {
+    scope.addContentTypeParser(
+      [...MAP_IMAGE_TYPES],
+      { parseAs: 'buffer', bodyLimit: MAP_IMAGE_LIMITS.bytes },
+      (_request, body, done) => done(null, body),
+    );
+    scope.post<{ Params: IdParams }>(
+      '/api/campaigns/:id/map-images',
+      {
+        bodyLimit: MAP_IMAGE_LIMITS.bytes,
+        config: {
+          errorMessages: {
+            FST_ERR_CTP_BODY_TOO_LARGE: `El plano no puede pasar de ${MAP_IMAGE_MAX_TEXT}`,
+            FST_ERR_CTP_INVALID_MEDIA_TYPE: NOT_AN_IMAGE,
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = requireUser(request);
+        const campaignId = parseId(request.params.id, CAMPAIGN_NOT_FOUND);
+        await requireMaster(db, campaignId, user);
+        const data = request.body;
+        const contentType = Buffer.isBuffer(data) ? imageType(data) : null;
+        if (!Buffer.isBuffer(data) || !contentType) throw new HttpError(400, NOT_AN_IMAGE);
+        await collectImages(db, campaignId);
+        const [stored] = await db
+          .select({ count: count() })
+          .from(mapImages)
+          .where(eq(mapImages.campaignId, campaignId));
+        if ((stored?.count ?? 0) >= MAP_IMAGE_LIMITS.perCampaign) {
+          throw new HttpError(
+            409,
+            `La campaña ya tiene ${MAP_IMAGE_LIMITS.perCampaign} planos: borra los mapas que no uses`,
+          );
+        }
+        const [row] = await db
+          .insert(mapImages)
+          .values({ campaignId, contentType, size: data.length, data })
+          .returning({
+            id: mapImages.id,
+            contentType: mapImages.contentType,
+            size: mapImages.size,
+            createdAt: mapImages.createdAt,
+          });
+        if (!row) throw new Error('La base de datos no devolvió el plano subido');
+        const image: MapImageView = { ...row, createdAt: row.createdAt.toISOString() };
+        return reply.status(201).send({ image });
+      },
+    );
+  });
+
+  /** Un plano, para quien es de su campaña. */
+  app.get<{ Params: IdParams }>('/api/map-images/:id', async (request, reply) => {
+    const user = requireUser(request);
+    const id = parseId(request.params.id, IMAGE_NOT_FOUND);
+    const [image] = await db
+      .select({ contentType: mapImages.contentType, data: mapImages.data })
+      .from(mapImages)
+      .innerJoin(
+        campaignMembers,
+        and(
+          eq(campaignMembers.campaignId, mapImages.campaignId),
+          eq(campaignMembers.userId, user.id),
+        ),
+      )
+      .where(eq(mapImages.id, id));
+    if (!image) throw notFound(IMAGE_NOT_FOUND);
+    return sendImage(reply, image);
+  });
+
+  /** Un plano, para la pantalla de su campaña. */
+  app.get<{ Params: ScreenImageParams }>(
+    '/api/screens/:token/map-images/:id',
+    async (request, reply) => {
+      const campaign = await findScreenCampaign(db, request.params.token);
+      const id = parseId(request.params.id, IMAGE_NOT_FOUND);
+      const [image] = await db
+        .select({ contentType: mapImages.contentType, data: mapImages.data })
+        .from(mapImages)
+        .where(and(eq(mapImages.id, id), eq(mapImages.campaignId, campaign.id)));
+      if (!image) throw notFound(IMAGE_NOT_FOUND);
+      return sendImage(reply, image);
+    },
+  );
 
   /** El máster pone un mapa de la campaña en la partida, o lo quita. Las fichas empiezan de cero. */
   app.put<{ Params: IdParams }>('/api/games/:id/map', async (request, reply) => {

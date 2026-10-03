@@ -66,6 +66,22 @@ describe('mapGridSchema', () => {
     expect(twice.error?.issues[0]?.message).toBe('En la casilla 2, 2 hay dos cosas a la vez');
   });
 
+  it('con un plano de fondo, colocado en casillas', () => {
+    const background = { image: AMBUSH, x: -0.5, y: 0, width: 12.5, height: 8 };
+    expect(mapGridSchema.parse({ cols: 10, rows: 6, background })).toMatchObject({ background });
+    expect(mapGridSchema.parse({ cols: 10, rows: 6, background: null }).background).toBeNull();
+    const flat = mapGridSchema.safeParse({
+      cols: 10,
+      rows: 6,
+      background: { ...background, width: 0 },
+    });
+    expect(flat.error?.issues[0]?.message).toBe('El ancho del plano no puede bajar de 0,5');
+    expect(
+      mapGridSchema.safeParse({ cols: 10, rows: 6, background: { ...background, image: 'plano' } })
+        .success,
+    ).toBe(false);
+  });
+
   it('al cambiar un mapa hay que cambiar algo', () => {
     expect(updateMapSchema.safeParse({}).success).toBe(false);
     expect(updateMapSchema.safeParse({ name: 'Cripta' }).success).toBe(true);

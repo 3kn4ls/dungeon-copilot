@@ -181,6 +181,22 @@
   fill: var(--map-wood);
 }
 
+/* Sobre un plano de imagen, lo dibujado deja ver lo que hay debajo. */
+.on-image .m-wall {
+  fill-opacity: 0.55;
+}
+
+.on-image .m-cover {
+  fill-opacity: 0.45;
+}
+
+/* En el editor, sobre un plano, lo pintado lleva borde: así se ve qué cuenta en el combate. */
+.map-editor .on-image .m-wall,
+.map-editor .on-image .m-cover {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
 .m-cover-edge {
   fill: none;
   stroke: var(--map-wood-edge);
@@ -615,4 +631,29 @@
 
 .player-room.wide .pane-map {
   grid-area: map;
+}
+
+/* El plano de fondo en el editor: subirlo y colocarlo en casillas. */
+.map-background {
+  display: grid;
+  gap: 10px;
+}
+
+.map-background h3 {
+  margin: 0;
+}
+
+.background-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+}
+
+.file-button {
+  cursor: pointer;
+}
+
+.file-button:focus-within {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }

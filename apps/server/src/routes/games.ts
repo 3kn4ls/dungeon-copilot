@@ -80,6 +80,7 @@ import {
 import { findRecaps } from '../games/recaps';
 import { rerollGameRoll, resolveGameRoll } from '../games/rolls';
 import { findSceneTitle } from '../games/scenes';
+import { findScreenCampaign } from '../games/screens';
 import { lastEventId, openEventStream } from '../games/stream';
 import { HttpError, forbidden, notFound, parseBody, parseId } from '../http/errors';
 import { CAMPAIGN_NOT_FOUND, requireMaster, requireMember } from './access';
@@ -97,7 +98,6 @@ interface StreamQuery {
   after?: string;
 }
 
-const SCREEN_NOT_FOUND = 'Esta pantalla no existe o el máster ha cambiado su enlace';
 const GAME_STILL_OPEN = 'La partida sigue en juego: el resumen se escribe al terminarla';
 /**
  * El resumen lee la partida entera: sin GPU, el modelo puede tardar minutos solo en leerla.
@@ -109,9 +109,6 @@ const ROLL_WENT_WELL =
   'Esa tirada salió bien: las complicaciones son para los éxitos con coste, los fallos y las pifias';
 const ROLL_REPEATED = 'Esa tirada ya se ha repetido: cuenta la segunda';
 const ROLL_DAMAGED = 'Ya se ha aplicado el daño de esa tirada: no se puede repetir';
-
-/** Los enlaces de pantalla son 32 caracteres hexadecimales (ver el esquema de campaigns). */
-const SCREEN_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
 
 /**
  * A quién va algo que enseña el máster: a toda la mesa o, con `to`, en secreto a un personaje
@@ -736,16 +733,6 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   // Pantalla de la mesa: sin sesión, con el enlace secreto de la campaña. Solo lo público.
 
-  async function findScreenCampaign(token: string) {
-    if (!SCREEN_TOKEN_PATTERN.test(token)) throw notFound(SCREEN_NOT_FOUND);
-    const [campaign] = await db
-      .select({ id: campaigns.id, name: campaigns.name })
-      .from(campaigns)
-      .where(eq(campaigns.screenToken, token));
-    if (!campaign) throw notFound(SCREEN_NOT_FOUND);
-    return campaign;
-  }
-
   /** La partida en juego o, si no hay, la última que se jugó. */
   async function latestGame(campaignId: string): Promise<GameRow | undefined> {
     const [game] = await db
@@ -758,7 +745,7 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
   }
 
   app.get<{ Params: TokenParams }>('/api/screens/:token', async (request): Promise<ScreenState> => {
-    const campaign = await findScreenCampaign(request.params.token);
+    const campaign = await findScreenCampaign(db, request.params.token);
     const game = await latestGame(campaign.id);
     return {
       campaignName: campaign.name,
@@ -770,7 +757,7 @@ export function registerGameRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get<{ Params: TokenParams; Querystring: StreamQuery }>(
     '/api/screens/:token/stream',
     async (request, reply) => {
-      const { id: campaignId } = await findScreenCampaign(request.params.token);
+      const { id: campaignId } = await findScreenCampaign(db, request.params.token);
       openEventStream(request, reply, {
         hub,
         // Sin partida fija: la pantalla pasa sola a la siguiente cuando el máster la abre.

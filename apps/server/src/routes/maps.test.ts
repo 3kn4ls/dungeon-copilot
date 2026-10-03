@@ -1,13 +1,16 @@
 import type { Random } from '@dungeon-copilot/rules';
 import { fixedDice, kael } from '@dungeon-copilot/rules/testing';
 import {
+  MAP_IMAGE_LIMITS,
   currentMap,
   type GameEvent,
   type MapRequest,
   type MapView,
   type PlaceTokenRequest,
 } from '@dungeon-copilot/shared';
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { mapImages } from '../db/schema';
 import { useLiveStreams, useTestApp, type TestClient } from '../testing';
 
 let dice: Random = () => {
@@ -521,5 +524,98 @@ describe('señalar', () => {
     await master.put(`${url}/map`, { mapId: map.id });
     expect((await master.post(`${url}/pings`, { at: { x: 12, y: 0 } })).statusCode).toBe(409);
     expect((await carla.post(`${url}/pings`, { at: { x: 1, y: 1 } })).statusCode).toBe(404);
+  });
+});
+
+describe('los planos', () => {
+  /** Lo justo para que parezca un PNG: la firma y unos bytes. */
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const upload = (client: TestClient, campaignId: string, data = PNG, type = 'image/png') =>
+    client.upload(`/api/campaigns/${campaignId}/map-images`, data, type);
+  const withImage = (image: string): MapRequest => ({
+    ...inn,
+    grid: { ...inn.grid, background: { image, x: -0.5, y: 0, width: 12.5, height: 8 } },
+  });
+
+  it('el máster sube un plano y lo pone de fondo; la mesa y la pantalla lo ven', async () => {
+    const { master, ana, carla, campaign, url, screenUrl } = await table();
+    const uploaded = await upload(master, campaign.id);
+    expect(uploaded.statusCode).toBe(201);
+    const { image } = uploaded.json();
+    expect(image).toMatchObject({ contentType: 'image/png', size: PNG.length });
+
+    const map = await createMap(master, campaign.id, withImage(image.id));
+    const background = withImage(image.id).grid.background;
+    expect(map.grid.background).toEqual(background);
+    await master.put(`${url}/map`, { mapId: map.id });
+    expect(currentMap(await events(ana, url))?.grid.background).toEqual(background);
+
+    const viewers: [TestClient, string][] = [
+      [master, `/api/map-images/${image.id}`],
+      [ana, `/api/map-images/${image.id}`],
+      [t.anonymous(), `${screenUrl}/map-images/${image.id}`],
+    ];
+    for (const [client, path] of viewers) {
+      const response = await client.get(path);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toBe('image/png');
+      expect(response.rawPayload).toEqual(PNG);
+    }
+    expect((await carla.get(`/api/map-images/${image.id}`)).statusCode).toBe(404);
+    expect((await t.anonymous().get(`/api/map-images/${image.id}`)).statusCode).toBe(401);
+  });
+
+  it('solo imágenes PNG, JPEG o WebP, del máster y hasta 5 MB', async () => {
+    const { master, ana, campaign } = await table();
+    expect((await upload(ana, campaign.id)).statusCode).toBe(403);
+    const svg = await upload(master, campaign.id, Buffer.from('<svg></svg>'));
+    expect(svg.statusCode).toBe(400);
+    expect(svg.json().error).toBe('Sube una imagen PNG, JPEG o WebP');
+    const gif = await upload(master, campaign.id, Buffer.from('GIF89a'), 'image/gif');
+    expect(gif.statusCode).toBe(415);
+    expect(gif.json().error).toBe('Sube una imagen PNG, JPEG o WebP');
+    const big = await upload(
+      master,
+      campaign.id,
+      Buffer.concat([PNG, Buffer.alloc(MAP_IMAGE_LIMITS.bytes)]),
+    );
+    expect(big.statusCode).toBe(413);
+    expect(big.json().error).toBe('El plano no puede pasar de 5 MB');
+    // El tipo sale de los bytes: un JPEG que dice ser PNG se guarda como JPEG.
+    const jpeg = await upload(master, campaign.id, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]));
+    expect(jpeg.json().image.contentType).toBe('image/jpeg');
+  });
+
+  it('un mapa solo lleva planos de su campaña', async () => {
+    const { master, campaign } = await table();
+    const other = (await master.post('/api/campaigns', { name: 'Otra' })).json().campaign;
+    const { image } = (await upload(master, other.id)).json();
+    const response = await master.post(`/api/campaigns/${campaign.id}/maps`, withImage(image.id));
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error).toBe('Ese plano no existe o no es de esta campaña');
+  });
+
+  it('los planos que ya no usa nadie se borran; los de una partida, no', async () => {
+    const { master, campaign, url } = await table();
+    const ids: string[] = [];
+    for (let index = 0; index < 4; index++) {
+      ids.push((await upload(master, campaign.id)).json().image.id);
+    }
+    const [kept = '', played = '', unused = '', fresh = ''] = ids;
+    await createMap(master, campaign.id, withImage(kept));
+    const old = await createMap(master, campaign.id, withImage(played));
+    await master.put(`${url}/map`, { mapId: old.id });
+    // Ya no son nuevos, salvo el último: el máster aún puede estar ajustándolo.
+    await t.db
+      .update(mapImages)
+      .set({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) })
+      .where(sql`${mapImages.id} <> ${fresh}`);
+    expect((await master.delete(`/api/maps/${old.id}`)).statusCode).toBe(204);
+
+    const status = async (id: string) => (await master.get(`/api/map-images/${id}`)).statusCode;
+    expect(await status(kept)).toBe(200);
+    expect(await status(played)).toBe(200);
+    expect(await status(unused)).toBe(404);
+    expect(await status(fresh)).toBe(200);
   });
 });

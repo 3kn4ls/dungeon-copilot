@@ -5,7 +5,15 @@ import {
   type Cell,
   type Terrain,
 } from '@dungeon-copilot/rules';
-import { MAP_LIMITS, type MapGrid, type MapView } from '@dungeon-copilot/shared';
+import {
+  MAP_IMAGE_LIMITS,
+  MAP_IMAGE_MAX_TEXT,
+  MAP_IMAGE_TYPES,
+  MAP_LIMITS,
+  type MapBackground,
+  type MapGrid,
+  type MapView,
+} from '@dungeon-copilot/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -133,6 +141,180 @@ function SideInput(props: { label: string; value: number; onChange: (value: numb
   );
 }
 
+/** Un número con decimales que cambia el mapa según se escribe (o con las flechas). */
+function DecimalInput(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  const { label, value, min, max, step, onChange } = props;
+  const [text, setText] = useState(String(value));
+  // Si cambia desde fuera (al subir otro plano), se ve el valor nuevo.
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    setShown(value);
+    setText(String(value));
+  }
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        max={max}
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          const next = event.target.valueAsNumber;
+          if (Number.isFinite(next) && next >= min && next <= max) {
+            setShown(next);
+            onChange(next);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+const round = (value: number) => Math.round(value * 100) / 100;
+
+const clampSide = (value: number) =>
+  Math.min(MAP_LIMITS.maxSide, Math.max(MAP_LIMITS.minSide, Math.ceil(value)));
+
+/** El alto entre el ancho de una imagen, para estirarla sin deformarla. */
+function imageRatio(file: Blob): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image.naturalHeight / image.naturalWidth);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('No se puede leer esa imagen'));
+    };
+    image.src = url;
+  });
+}
+
+/**
+ * El plano de fondo de un mapa: subir una imagen y ajustar la cuadrícula encima, diciendo cuántas
+ * casillas mide a lo ancho y moviéndola hasta que sus líneas coincidan con las de la cuadrícula.
+ */
+function BackgroundPanel(props: {
+  campaignId: string;
+  background: MapBackground | null;
+  cols: number;
+  onChange: (background: MapBackground | null) => void;
+  onFit: (size: { cols: number; rows: number }) => void;
+}) {
+  const { campaignId, background, cols, onChange, onFit } = props;
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      if (!(MAP_IMAGE_TYPES as readonly string[]).includes(file.type)) {
+        throw new Error('Sube una imagen PNG, JPEG o WebP');
+      }
+      if (file.size > MAP_IMAGE_LIMITS.bytes) {
+        throw new Error(`El plano no puede pasar de ${MAP_IMAGE_MAX_TEXT}`);
+      }
+      const ratio = await imageRatio(file);
+      const image = await api.uploadMapImage(campaignId, file);
+      return { image, ratio };
+    },
+    // De entrada, a lo ancho del mapa y sin deformar; luego se ajusta.
+    onSuccess: ({ image, ratio }) =>
+      onChange({ image: image.id, x: 0, y: 0, width: cols, height: round(cols * ratio) }),
+  });
+  const ratio = background ? background.height / background.width : 1;
+
+  return (
+    <section className="panel map-background" aria-labelledby="background-heading">
+      <h3 id="background-heading">Plano de fondo</h3>
+      <p className="hint">
+        Una imagen del lugar debajo de la cuadrícula: PNG, JPEG o WebP, hasta {MAP_IMAGE_MAX_TEXT}.
+        Los muros, las ventanas y los muebles se pintan encima, porque son los que cuentan para la
+        línea de visión y la cobertura.
+      </p>
+      <div className="actions">
+        <label className="button small file-button">
+          <input
+            type="file"
+            accept={MAP_IMAGE_TYPES.join(',')}
+            className="visually-hidden"
+            disabled={upload.isPending}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Que se pueda volver a elegir la misma imagen.
+              event.target.value = '';
+              if (file) upload.mutate(file);
+            }}
+          />
+          {upload.isPending ? 'Subiendo…' : background ? 'Cambiar el plano' : 'Subir un plano'}
+        </label>
+        {background && (
+          <button type="button" className="link-button" onClick={() => onChange(null)}>
+            Quitar el plano
+          </button>
+        )}
+      </div>
+      {background && (
+        <>
+          <div className="background-fields">
+            <DecimalInput
+              label="Casillas a lo ancho del plano"
+              value={background.width}
+              min={0.5}
+              max={MAP_LIMITS.maxSide * 4}
+              step={0.5}
+              onChange={(width) => onChange({ ...background, width, height: round(width * ratio) })}
+            />
+            <DecimalInput
+              label="Desde la izquierda"
+              value={background.x}
+              min={-MAP_LIMITS.maxSide}
+              max={MAP_LIMITS.maxSide}
+              step={0.1}
+              onChange={(x) => onChange({ ...background, x })}
+            />
+            <DecimalInput
+              label="Desde arriba"
+              value={background.y}
+              min={-MAP_LIMITS.maxSide}
+              max={MAP_LIMITS.maxSide}
+              step={0.1}
+              onChange={(y) => onChange({ ...background, y })}
+            />
+          </div>
+          <p className="hint">
+            Si el plano trae su propia cuadrícula, cuenta sus casillas de un lado a otro y ponlas en
+            el ancho; luego muévelo, en casillas, hasta que las líneas coincidan.
+          </p>
+          <div className="actions">
+            <button
+              type="button"
+              className="button small"
+              onClick={() =>
+                onFit({
+                  cols: clampSide(background.x + background.width),
+                  rows: clampSide(background.y + background.height),
+                })
+              }
+            >
+              Ajustar el mapa al plano
+            </button>
+          </div>
+        </>
+      )}
+      <ErrorNote error={upload.error} />
+    </section>
+  );
+}
+
 function NewMap({ campaignId, onCancel }: { campaignId: string; onCancel: () => void }) {
   const [name, setName] = useState('');
   const [cols, setCols] = useState(20);
@@ -254,6 +436,21 @@ function rectCells(a: Cell, b: Cell, outline: boolean): Cell[] {
   return cells;
 }
 
+/**
+ * El plano de fondo con sus campos siempre en el mismo orden: la base de datos los guarda en el
+ * suyo, y así se compara lo guardado con lo que hay.
+ */
+const placed = (background: MapBackground | null | undefined): MapBackground | null =>
+  background
+    ? {
+        image: background.image,
+        x: background.x,
+        y: background.y,
+        width: background.width,
+        height: background.height,
+      }
+    : null;
+
 const clampCell = (cell: Cell, { cols, rows }: { cols: number; rows: number }): Cell => ({
   x: Math.min(cols - 1, Math.max(0, cell.x)),
   y: Math.min(rows - 1, Math.max(0, cell.y)),
@@ -275,6 +472,7 @@ function MapEditor({ map }: { map: MapView }) {
   const [name, setName] = useState(map.name);
   const [size, setSize] = useState({ cols: map.grid.cols, rows: map.grid.rows });
   const [cells, setCells] = useState(() => toCells(map.grid));
+  const [background, setBackground] = useState<MapBackground | null>(map.grid.background ?? null);
   const [history, setHistory] = useState<TerrainCells[]>([]);
   const [paint, setPaint] = useState<Paint>('wall');
   const [shape, setShape] = useState<Shape>('brush');
@@ -285,11 +483,16 @@ function MapEditor({ map }: { map: MapView }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const grid: MapGrid = { ...size, terrain: toTerrain(cells, size.cols, size.rows) };
+  const grid: MapGrid = {
+    ...size,
+    terrain: toTerrain(cells, size.cols, size.rows),
+    background: placed(background),
+  };
   const saved: MapGrid = {
     cols: map.grid.cols,
     rows: map.grid.rows,
     terrain: toTerrain(toCells(map.grid), map.grid.cols, map.grid.rows),
+    background: placed(map.grid.background),
   };
   const dirty = name.trim() !== map.name || JSON.stringify(grid) !== JSON.stringify(saved);
 
@@ -395,12 +598,19 @@ function MapEditor({ map }: { map: MapView }) {
             onChange={(event) => setName(event.target.value)}
           />
         </label>
+        {/* Si el tamaño cambia desde fuera (al ajustarlo al plano), los campos empiezan de nuevo. */}
         <SideInput
+          key={`cols-${size.cols}`}
           label="Ancho"
           value={size.cols}
           onChange={(cols) => setSize({ ...size, cols })}
         />
-        <SideInput label="Alto" value={size.rows} onChange={(rows) => setSize({ ...size, rows })} />
+        <SideInput
+          key={`rows-${size.rows}`}
+          label="Alto"
+          value={size.rows}
+          onChange={(rows) => setSize({ ...size, rows })}
+        />
         <div className="actions">
           <button type="button" className="button" disabled={history.length === 0} onClick={undo}>
             <Icon name="undo" size={18} />
@@ -470,6 +680,13 @@ function MapEditor({ map }: { map: MapView }) {
       </p>
       <p className="muted">{sizeText(size)}</p>
       <MapLegend />
+      <BackgroundPanel
+        campaignId={map.campaignId}
+        background={background}
+        cols={size.cols}
+        onChange={setBackground}
+        onFit={setSize}
+      />
 
       <div className="danger-zone">
         <ConfirmButton

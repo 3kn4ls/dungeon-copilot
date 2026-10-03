@@ -10,10 +10,12 @@ import type {
   GameEventVisibility,
   GameStatus,
   MapGrid,
+  MapImageType,
   MemberRole,
 } from '@dungeon-copilot/shared';
 import { sql } from 'drizzle-orm';
 import {
+  customType,
   index,
   integer,
   jsonb,
@@ -24,6 +26,12 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+
+/** Bytes tal cual (bytea). PGlite los devuelve como Uint8Array, y pg como Buffer: aquí, Buffer. */
+const bytea = customType<{ data: Buffer; driverData: Uint8Array }>({
+  dataType: () => 'bytea',
+  fromDriver: (value) => Buffer.from(value),
+});
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
@@ -155,6 +163,25 @@ export const maps = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [index('maps_campaign_id_idx').on(table.campaignId)],
+);
+
+/**
+ * Las imágenes que el máster sube como plano de fondo de sus mapas. No cambian: un plano nuevo es
+ * otra fila, y las que ya no usa ningún mapa ni ninguna partida se borran solas.
+ */
+export const mapImages = pgTable(
+  'map_images',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => campaigns.id, { onDelete: 'cascade' }),
+    contentType: text('content_type').$type<MapImageType>().notNull(),
+    size: integer('size').notNull(),
+    data: bytea('data').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index('map_images_campaign_id_idx').on(table.campaignId)],
 );
 
 /** Una partida: la sesión de juego que el máster abre dentro de una campaña. */

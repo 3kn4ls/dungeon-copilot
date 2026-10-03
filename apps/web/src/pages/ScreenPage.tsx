@@ -168,6 +168,7 @@ export function ScreenPage() {
                 characters={[]}
                 viewer="screen"
                 pings={pings}
+                images={`/api/screens/${token}/map-images`}
               />
             )}
             {scene && reveal && <p className="screen-scene">{scene.title}</p>}
