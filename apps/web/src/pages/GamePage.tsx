@@ -11,7 +11,6 @@ import {
   defaultSkillCatalog,
   needsComplication,
   opposedOdds,
-  rangedDifficulty,
   successChance,
   testOdds,
   type DifficultyLevel,
@@ -22,6 +21,7 @@ import {
 import {
   GAME_STATUS_LABELS,
   currentCombat,
+  currentMap,
   isCheckedIntent,
   currentFloor,
   currentScene,
@@ -84,6 +84,7 @@ import {
   type HandoffTarget,
 } from '../components/Interventions';
 import { LuckReroll } from '../components/Luck';
+import { MasterMap, PlayerMap, interventionShot } from '../components/MapPanels';
 import { NpcChat } from '../components/NpcChat';
 import { NpcSheet, profileText } from '../components/Npcs';
 import { OddsBar, formatChance } from '../components/Odds';
@@ -123,12 +124,14 @@ import {
 } from '../queries';
 import {
   DEFAULT_SHOT,
+  blowRequest,
   characterDraft,
   enemyAttackPreset,
   freeDraft,
   interventionPreset,
   npcDraft,
   previewCheck,
+  shotDifficulty,
   toSideRequest,
   type RollPreset,
   type Shot,
@@ -523,10 +526,11 @@ function refreshCampaign(queryClient: ReturnType<typeof useQueryClient>, campaig
   void queryClient.invalidateQueries({ queryKey: keys.campaigns, exact: true });
 }
 
-type PlayerTab = 'table' | 'sheet' | 'log';
+type PlayerTab = 'table' | 'map' | 'sheet' | 'log';
 
 const PLAYER_TABS: [PlayerTab, string][] = [
   ['table', 'Mesa'],
+  ['map', 'Mapa'],
   ['sheet', 'Ficha'],
   ['log', 'Registro'],
 ];
@@ -546,8 +550,9 @@ function useWide(query = '(min-width: 1000px)') {
 /**
  * La sala del jugador, pensada para el móvil: en pestañas, la mesa (quién tiene la palabra o el
  * turno, las tiradas que le piden, sus botones para intervenir, sus técnicas y lo último que ha
- * enseñado el máster), su ficha y el registro. En una pantalla ancha, todo a la vista en dos
- * columnas. Arriba, si le toca, «¡Te toca!» y por qué.
+ * enseñado el máster), el mapa si hay uno en juego, su ficha y el registro. En una pantalla
+ * ancha, todo a la vista en dos columnas, con el mapa arriba. Arriba del todo, si le toca, «¡Te
+ * toca!» y por qué.
  */
 function PlayerDesk({
   state,
@@ -571,6 +576,7 @@ function PlayerDesk({
   const current = combat ? turnOf(combat) : undefined;
   const asked = pendingRollRequests(events).filter((event) => ids.includes(event.characterId));
   const spent = spentAbilities(events);
+  const map = currentMap(events);
   // Lo último que ha enseñado el máster a la mesa o, en secreto, a uno de sus personajes.
   const reveal = events.findLast((event) => event.kind === 'reveal');
 
@@ -660,9 +666,16 @@ function PlayerDesk({
     </div>
   );
   const log = <div className="player-pane pane-log">{feed}</div>;
+  const mapPane = map && (
+    <div className="player-pane pane-map">
+      <PlayerMap game={game} map={map} combat={combat} characters={all} mine={mine} />
+    </div>
+  );
+  // Si el máster quita el mapa, la pestaña vuelve a la mesa.
+  const shown = tab === 'map' && !map ? 'table' : tab;
 
   return (
-    <div className={wide ? 'player-room wide' : 'player-room'}>
+    <div className={['player-room', wide && 'wide', map && 'has-map'].filter(Boolean).join(' ')}>
       {why && (
         <p className="turn-banner" role="status">
           <strong>¡Te toca!</strong> {why}
@@ -670,6 +683,7 @@ function PlayerDesk({
       )}
       {wide ? (
         <>
+          {mapPane}
           {table}
           {sheet}
           {log}
@@ -677,11 +691,11 @@ function PlayerDesk({
       ) : (
         <>
           <div className="player-tabs" role="group" aria-label="Qué ver">
-            {PLAYER_TABS.map(([value, label]) => (
+            {PLAYER_TABS.filter(([value]) => value !== 'map' || map).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
-                aria-pressed={tab === value}
+                aria-pressed={shown === value}
                 onClick={() => setTab(value)}
               >
                 {label}
@@ -689,7 +703,7 @@ function PlayerDesk({
               </button>
             ))}
           </div>
-          {tab === 'table' ? table : tab === 'sheet' ? sheet : log}
+          {shown === 'table' ? table : shown === 'map' ? mapPane : shown === 'sheet' ? sheet : log}
         </>
       )}
     </div>
@@ -728,6 +742,8 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
   const floor = currentFloor(events);
   const combat = currentCombat(events);
   const spent = spentAbilities(events);
+  const map = currentMap(events);
+  const figures = map?.tokens.filter((token) => token.token.kind === 'figure') ?? [];
   const ai = useAiStatus();
   const waiting = pendingInterventions(events);
   // En cuanto la intervención deja de esperar (atendida o retirada), ya no se responde a ella.
@@ -773,7 +789,13 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
           )}
           {combat ? (
             <>
-              <JoinCombat game={game} combat={combat} characters={characters} npcs={npcs} />
+              <JoinCombat
+                game={game}
+                combat={combat}
+                characters={characters}
+                npcs={npcs}
+                figures={figures}
+              />
               <EndCombat game={game} />
             </>
           ) : (
@@ -783,6 +805,7 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
                 game={game}
                 characters={characters}
                 npcs={npcs}
+                figures={figures}
                 answering={starting?.intervention}
                 onStopAnswering={stopAnswering}
               />
@@ -798,6 +821,14 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
             </>
           )}
         </section>
+
+        <MasterMap
+          game={game}
+          events={events}
+          combat={combat}
+          characters={characters}
+          onPrepare={(preset) => hand('roll', { roll: preset })}
+        />
 
         {/* Todas siguen ahí aunque solo se vea una: cambiar de pestaña para tirar no pierde lo
           que se estaba escribiendo ni las ideas de la IA. */}
@@ -871,7 +902,13 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
                     intervention,
                     roll:
                       to === 'roll'
-                        ? interventionPreset(intervention, characters, combat)
+                        ? interventionPreset(
+                            intervention,
+                            characters,
+                            combat,
+                            undefined,
+                            interventionShot(map, intervention),
+                          )
                         : undefined,
                     // La IA sugiere qué tirada pedir para lo que ha escrito el jugador, si no es cuerpo
                     // a cuerpo (eso lo dice el reglamento). La tirada no espera por ella.
@@ -881,7 +918,13 @@ function MasterDesk({ state, feed }: { state: GameState; feed: ReactNode }) {
                       isCheckedIntent(intervention.intent) &&
                       intervention.text.trim()
                         ? (suggestion) =>
-                            interventionPreset(intervention, characters, combat, suggestion)
+                            interventionPreset(
+                              intervention,
+                              characters,
+                              combat,
+                              suggestion,
+                              interventionShot(map, intervention),
+                            )
                         : undefined,
                   })
                 }
@@ -1469,15 +1512,7 @@ function RollForm(props: {
     actorDraft.kind === 'character'
       ? available.find((character) => character.id === actorDraft.characterId)
       : undefined;
-  const target = shooting
-    ? rangedDifficulty({
-        targetDexterity: shot.dexterity,
-        range: shot.range,
-        cover: shot.cover ? 'partial' : 'none',
-        targetShield: shot.shield,
-        deadeye: shooter?.advancedSkills.includes('deadeye') ?? false,
-      })
-    : DIFFICULTIES[difficulty];
+  const target = shooting ? shotDifficulty(shot, shooter) : DIFFICULTIES[difficulty];
   const actorCheck = previewCheck(actorDraft, available);
   const opponentCheck = against === 'opposed' ? previewCheck(opponent, characters.data) : null;
   const odds =
@@ -1505,7 +1540,7 @@ function RollForm(props: {
           ? { kind: 'difficulty' as const, difficulty: target }
           : { kind: 'opposed' as const, opponent: toSideRequest(opponent) },
       situation,
-      blow: blow && { attackerId: blow.attacker.id, defenderId: blow.defender.id },
+      blow: blow && blowRequest(blow),
     };
     if (asking) askRoll.mutate({ roll: request, secret, answers: answering?.id });
     else roll.mutate({ ...request, secret: isMaster && secret });

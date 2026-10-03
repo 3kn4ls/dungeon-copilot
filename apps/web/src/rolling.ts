@@ -1,4 +1,5 @@
 import {
+  DIFFICULTIES,
   NPC_PROFILES,
   checkBonus,
   combineEdges,
@@ -7,22 +8,28 @@ import {
   meleeAttack,
   meleeDefense,
   opposedOdds,
+  rangedDifficulty,
   testOdds,
+  weaponLabel,
   type Attribute,
   type CharacterBuild,
   type DifficultyLevel,
   type Edge,
+  type MapShot,
   type OutcomeOdds,
   type Range,
   type Situation,
 } from '@dungeon-copilot/rules';
 import {
   SUGGESTION_THRESHOLDS,
+  memberName,
   type Blow,
+  type BlowRequest,
   type CharacterView,
   type CheckSuggestion,
   type Combat,
   type Combatant,
+  type CombatantRef,
   type GameRollRequest,
   type InterventionEvent,
   type InterventionIntent,
@@ -219,6 +226,16 @@ export interface Shot {
 
 export const DEFAULT_SHOT: Shot = { dexterity: 2, range: 'short', cover: false, shield: false };
 
+/** La dificultad de un disparo. Con Disparo certero no cuentan la distancia media ni la cobertura. */
+export const shotDifficulty = (shot: Shot, shooter: CharacterView | undefined) =>
+  rangedDifficulty({
+    targetDexterity: shot.dexterity,
+    range: shot.range,
+    cover: shot.cover ? 'partial' : 'none',
+    targetShield: shot.shield,
+    deadeye: shooter?.advancedSkills.includes('deadeye') ?? false,
+  });
+
 /** Cómo es de difícil dispararle a quien pelea: con su Destreza y, si es un personaje, su escudo. */
 function combatantShot(combatant: Combatant, characters: CharacterView[]): Shot {
   if (combatant.kind === 'npc') {
@@ -235,9 +252,17 @@ const characterShot = (character: CharacterView): Shot => ({
   shield: character.gear.shield,
 });
 
+/** Quién ataca a quién, como lo pide el servidor: con cuál de cada grupo, si se sabe. */
+export const blowRequest = (blow: Blow): BlowRequest => ({
+  attackerId: blow.attacker.id,
+  attackerMember: blow.attacker.member,
+  defenderId: blow.defender.id,
+  defenderMember: blow.defender.member,
+});
+
 /**
- * Una tirada ya preparada para el formulario de Tirar: para atender una intervención o para el
- * turno de unos PNJ. El máster la retoca si quiere antes de pedirla o tirarla.
+ * Una tirada ya preparada para el formulario de Tirar: para atender una intervención, para el
+ * turno de unos PNJ o al apuntar en el mapa. El máster la retoca si quiere antes de tirarla.
  */
 export interface RollPreset {
   actor: SideDraft;
@@ -267,19 +292,23 @@ const INTENT_CHECKS: Record<InterventionIntent, (character: CharacterView) => st
 
 /**
  * La tirada que pide, de entrada, una intervención: la hace su jugador, y en secreto si lo era.
- * Un ataque va contra quien ataca, si se sabe; un disparo, con la Destreza del objetivo. Con
- * `suggestion`, con lo que sugiere la IA (ver withSuggestion).
+ * Un ataque va contra quien ataca, si se sabe; un disparo, con la Destreza del objetivo y, si los
+ * dos están en el mapa (`mapShot`), la distancia y la cobertura que salen de él. Con `suggestion`,
+ * con lo que sugiere la IA (ver withSuggestion), salvo lo que dice el mapa.
  */
 export function interventionPreset(
   intervention: InterventionEvent,
   characters: CharacterView[],
   combat: Combat | null,
   suggestion?: CheckSuggestion,
+  mapShot?: MapShot,
 ): RollPreset | undefined {
   const character = characters.find((c) => c.id === intervention.characterId);
   if (!character) return undefined;
   const target = combat?.order.find((combatant) => combatant.id === intervention.target?.id);
   const fighting = combat?.order.some((combatant) => combatant.id === character.id) ?? false;
+  // Si apuntó a uno de un grupo en el mapa, el golpe va a ese.
+  const targetRef = intervention.target && target ? intervention.target : undefined;
   const preset: RollPreset = {
     actor: characterDraft(character, INTENT_CHECKS[intervention.intent](character)),
     against: 'difficulty',
@@ -290,11 +319,8 @@ export function interventionPreset(
     ask: true,
     secret: intervention.visibility === 'private',
     blow:
-      target && fighting
-        ? {
-            attacker: { id: character.id, name: character.name },
-            defender: { id: target.id, name: target.name },
-          }
+      targetRef && fighting
+        ? { attacker: { id: character.id, name: character.name }, defender: targetRef }
         : undefined,
   };
   switch (intervention.intent) {
@@ -305,7 +331,9 @@ export function interventionPreset(
         actor: attackDraft(character),
         against: 'opposed',
         situation: 'melee',
-        opponent: target ? combatantDraft(target, characters) : preset.opponent,
+        opponent: target
+          ? named(combatantDraft(target, characters), targetRef?.name)
+          : preset.opponent,
       };
     case 'ranged': {
       const shooting: RollPreset = {
@@ -313,7 +341,12 @@ export function interventionPreset(
         situation: 'ranged',
         shot: target ? combatantShot(target, characters) : DEFAULT_SHOT,
       };
-      return suggestion ? withSuggestion(shooting, suggestion, target) : shooting;
+      const suggested = suggestion ? withSuggestion(shooting, suggestion, target) : shooting;
+      if (!mapShot) return suggested;
+      return {
+        ...suggested,
+        shot: { ...suggested.shot, range: mapShot.range, cover: mapShot.cover === 'partial' },
+      };
     }
     default:
       return suggestion ? withSuggestion(preset, suggestion, target) : preset;
@@ -353,6 +386,11 @@ function withSuggestion(
   };
 }
 
+/** Un bando que tira con otro nombre, como «Bandidos 2» en vez de «Bandidos». */
+function named(draft: SideDraft, label: string | undefined): SideDraft {
+  return draft.kind === 'free' && label ? { ...draft, label } : draft;
+}
+
 /** Unos PNJ atacan cuerpo a cuerpo a un personaje: se defiende su jugador, con lo que mejor se le dé. */
 export function enemyAttackPreset(enemy: NpcCombatant, target: CharacterView): RollPreset {
   return {
@@ -369,4 +407,144 @@ export function enemyAttackPreset(enemy: NpcCombatant, target: CharacterView): R
       defender: { id: target.id, name: target.name },
     },
   };
+}
+
+/** La probabilidad de cada resultado de una tirada preparada, como la calcula Tirar. */
+export function presetOdds(preset: RollPreset, characters: CharacterView[]): OutcomeOdds | null {
+  const actor = previewCheck(preset.actor, characters);
+  if (!actor) return null;
+  if (preset.against === 'opposed') {
+    const opponent = previewCheck(preset.opponent, characters);
+    return opponent && opposedOdds(actor, opponent);
+  }
+  const { actor: side } = preset;
+  const shooter =
+    side.kind === 'character' ? characters.find((c) => c.id === side.characterId) : undefined;
+  return testOdds(
+    actor,
+    preset.situation === 'ranged'
+      ? shotDifficulty(preset.shot, shooter)
+      : DIFFICULTIES[preset.difficulty],
+  );
+}
+
+/** Quien pelea en el mapa: un personaje o uno de un grupo de PNJ, por su número (`member`). */
+export type MapFighter =
+  | { kind: 'character'; character: CharacterView }
+  | { kind: 'npc'; combatant: NpcCombatant; member: number };
+
+const fighterRef = (fighter: MapFighter): CombatantRef =>
+  fighter.kind === 'character'
+    ? { id: fighter.character.id, name: fighter.character.name }
+    : {
+        id: fighter.combatant.id,
+        name: memberName(fighter.combatant, fighter.member),
+        member: fighter.member,
+      };
+
+/** Un ataque que sale de apuntar en el mapa, con su tirada ya preparada. */
+export interface MapAttack {
+  situation: 'melee' | 'ranged';
+  label: string;
+  preset: RollPreset;
+}
+
+/**
+ * Lo que puede hacer en el mapa `from` contra `to`, que está a `shot`: cuerpo a cuerpo si está al
+ * lado y, si no y lo ve, disparar con la distancia y la cobertura del mapa. Un personaje dispara si
+ * lleva arma a distancia; los PNJ, siempre (lo decide el máster). Si los dos pelean en el combate
+ * (`fighting`), la tirada es un golpe que va a ese de su grupo.
+ */
+export function mapAttacks(
+  from: MapFighter,
+  to: MapFighter,
+  shot: MapShot,
+  fighting: boolean,
+): MapAttack[] {
+  const blow = fighting ? { attacker: fighterRef(from), defender: fighterRef(to) } : undefined;
+  const base = {
+    against: 'difficulty' as const,
+    difficulty: 'normal' as const,
+    opponent: freeDraft('Rival'),
+    shot: DEFAULT_SHOT,
+    secret: false,
+    blow,
+  };
+  const adjacent = shot.distance === 1;
+
+  if (from.kind === 'character' && to.kind === 'npc') {
+    const { character } = from;
+    const target = fighterRef(to).name;
+    if (adjacent) {
+      return [
+        {
+          situation: 'melee',
+          label: `Cuerpo a cuerpo, con ${weaponLabel(character.gear.melee)}`,
+          preset: {
+            ...base,
+            actor: attackDraft(character),
+            against: 'opposed',
+            opponent: named(combatantDraft(to.combatant, []), target),
+            situation: 'melee',
+            ask: true,
+          },
+        },
+      ];
+    }
+    const { ranged } = character.gear;
+    if (!shot.visible || !ranged) return [];
+    return [
+      {
+        situation: 'ranged',
+        label: `Disparar, con ${weaponLabel(ranged)}`,
+        preset: {
+          ...base,
+          actor: characterDraft(character, 'skill:marksmanship'),
+          situation: 'ranged',
+          shot: {
+            dexterity: NPC_PROFILES[to.combatant.profile].dexterity,
+            range: shot.range,
+            cover: shot.cover === 'partial',
+            shield: false,
+          },
+          ask: true,
+        },
+      },
+    ];
+  }
+
+  if (from.kind === 'npc' && to.kind === 'character') {
+    const name = fighterRef(from).name;
+    const { character } = to;
+    if (adjacent) {
+      const attack = enemyAttackPreset(from.combatant, character);
+      return [
+        {
+          situation: 'melee',
+          label: `${name} ataca a ${character.name}`,
+          preset: { ...attack, actor: named(attack.actor, name), blow },
+        },
+      ];
+    }
+    if (!shot.visible) return [];
+    return [
+      {
+        situation: 'ranged',
+        label: `${name} dispara a ${character.name}`,
+        preset: {
+          ...base,
+          actor: named(combatantDraft(from.combatant, []), name),
+          situation: 'ranged',
+          shot: {
+            ...characterShot(character),
+            range: shot.range,
+            cover: shot.cover === 'partial',
+          },
+          // Tira el máster: el personaje no tira nada, solo pone la dificultad.
+          ask: false,
+        },
+      },
+    ];
+  }
+  return [];
 }

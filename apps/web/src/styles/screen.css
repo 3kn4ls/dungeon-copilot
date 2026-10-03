@@ -77,6 +77,20 @@
   line-height: 1.4;
 }
 
+/* Con un mapa en juego, el mapa manda: la escena va debajo, en pequeño. */
+.screen-reveal.with-map h1 {
+  font-size: clamp(24px, 3vw, 44px);
+}
+
+.screen-reveal.with-map p {
+  max-width: none;
+  font-size: clamp(16px, 1.6vw, 26px);
+}
+
+.screen-reveal .map-svg {
+  max-height: 70vh;
+}
+
 .screen-reveal .screen-waiting {
   justify-self: start;
   text-align: left;

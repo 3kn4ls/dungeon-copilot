@@ -16,6 +16,7 @@ import {
   type Floor,
   type GameDetail,
   type InterventionEvent,
+  type MapToken,
   type NpcCombatant,
   type NpcView,
   type SpentAbilities,
@@ -49,7 +50,9 @@ export function harmText(combat: Combat, combatant: NpcCombatant, master: boolea
   const hurt = harm.damage === 0 ? '' : master ? `lleva ${harm.damage} de ${toughness}` : 'herido';
   if (count === 1) return hurt && hurt.charAt(0).toUpperCase() + hurt.slice(1);
   const group = `${standing} de ${count} en pie`;
-  return hurt ? `${group} · el siguiente, ${hurt}` : group;
+  // Si los golpes dicen a cuál van (en el mapa), puede haber varios heridos: cuenta el que más.
+  const who = harm.members ? 'el más herido' : 'el siguiente';
+  return hurt ? `${group} · ${who}, ${hurt}` : group;
 }
 
 /**
@@ -169,18 +172,31 @@ interface EnemyDraft {
   /** Cuántos son: cada uno aguanta lo de su perfil. */
   count: number;
   npcId?: string | undefined;
+  /** Las figuras del mapa que pasan a ser ellos, una por cada uno. */
+  figures?: string[] | undefined;
 }
 
 let enemyCount = 0;
 const newEnemy = (): EnemyDraft => ({ key: enemyCount++, name: '', profile: 'soldier', count: 1 });
 
-const enemyRequest = ({ name, profile, count, npcId }: EnemyDraft): CombatantRequest => ({
+const enemyRequest = ({ name, profile, count, npcId, figures }: EnemyDraft): CombatantRequest => ({
   kind: 'npc',
   name,
   profile,
   count,
   npcId,
+  figures,
 });
+
+/** Las figuras del mapa por su nombre sin número: «Bandido 1» y «Bandido 2» van juntas. */
+function figureGroups(figures: readonly MapToken[]): { name: string; ids: string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const figure of figures) {
+    const name = figure.name.replace(/\s+\d+$/, '').trim() || figure.name;
+    groups.set(name, [...(groups.get(name) ?? []), figure.token.id]);
+  }
+  return [...groups].map(([name, ids]) => ({ name, ids }));
+}
 
 const characterRequest = (characterId: string): CombatantRequest => ({
   kind: 'character',
@@ -196,12 +212,21 @@ function CombatantsPicker(props: {
   enemies: EnemyDraft[];
   onEnemies: (enemies: EnemyDraft[]) => void;
   npcs: NpcView[];
+  /** Las figuras del mapa que pueden entrar en el combate. */
+  figures: readonly MapToken[];
 }) {
-  const { characters, chosen, onChosen, enemies, onEnemies, npcs } = props;
+  const { characters, chosen, onChosen, enemies, onEnemies, npcs, figures } = props;
   const toggle = (id: string) =>
     onChosen(chosen.includes(id) ? chosen.filter((other) => other !== id) : [...chosen, id]);
   const change = (key: number, next: Partial<EnemyDraft>) =>
     onEnemies(enemies.map((enemy) => (enemy.key === key ? { ...enemy, ...next } : enemy)));
+  const fromMap = (ids: string[]) =>
+    enemies.find((enemy) => enemy.figures?.some((id) => ids.includes(id)));
+  function toggleFigures(name: string, ids: string[]) {
+    const entered = fromMap(ids);
+    if (entered) onEnemies(enemies.filter((enemy) => enemy !== entered));
+    else onEnemies([...enemies, { ...newEnemy(), name, count: ids.length, figures: ids }]);
+  }
 
   return (
     <>
@@ -223,6 +248,29 @@ function CombatantsPicker(props: {
               </button>
             ))}
           </div>
+        </div>
+      )}
+      {figures.length > 0 && (
+        <div className="field">
+          <span className="field-label" id="figures-label">
+            Figuras del mapa
+          </span>
+          <div className="chips" role="group" aria-labelledby="figures-label">
+            {figureGroups(figures).map(({ name, ids }) => (
+              <button
+                key={ids.join()}
+                type="button"
+                className="chip"
+                aria-pressed={fromMap(ids) !== undefined}
+                onClick={() => toggleFigures(name, ids)}
+              >
+                {ids.length > 1 ? `${name} ×${ids.length}` : name}
+              </button>
+            ))}
+          </div>
+          <span className="hint">
+            Entran en el combate cada una en su casilla, y la mesa las ve aunque estuvieran ocultas.
+          </span>
         </div>
       )}
       <div className="field">
@@ -271,15 +319,23 @@ function CombatantsPicker(props: {
                       onChange={(event) => change(enemy.key, { name: event.target.value })}
                     />
                   )}
-                  <Stepper
-                    label={`${label}: cuántos`}
-                    hideLabel
-                    value={enemy.count}
-                    min={1}
-                    max={20}
-                    format={(count) => (count === 1 ? 'Uno' : `${count}`)}
-                    onChange={(count) => change(enemy.key, { count })}
-                  />
+                  {enemy.figures ? (
+                    <span className="badge">
+                      {enemy.count === 1
+                        ? 'Una figura del mapa'
+                        : `${enemy.count} figuras del mapa`}
+                    </span>
+                  ) : (
+                    <Stepper
+                      label={`${label}: cuántos`}
+                      hideLabel
+                      value={enemy.count}
+                      min={1}
+                      max={20}
+                      format={(count) => (count === 1 ? 'Uno' : `${count}`)}
+                      onChange={(count) => change(enemy.key, { count })}
+                    />
+                  )}
                   <div className="chips" role="group" aria-label={`${label}: perfil`}>
                     {NPC_PROFILE_IDS.map((profile) => (
                       <button
@@ -331,14 +387,19 @@ export function StartCombat(props: {
   game: GameDetail;
   characters: CharacterView[];
   npcs: NpcView[];
+  /** Las figuras del mapa en juego, si lo hay. */
+  figures: readonly MapToken[];
   answering: InterventionEvent | undefined;
   onStopAnswering: () => void;
 }) {
-  const { game, characters, npcs, answering, onStopAnswering } = props;
+  const { game, characters, npcs, figures, answering, onStopAnswering } = props;
   const [open, setOpen] = useState(answering !== undefined);
   /** Los personajes que pelean; mientras no se toque, todos. */
   const [chosen, setChosen] = useState<string[] | null>(null);
-  const [enemies, setEnemies] = useState<EnemyDraft[]>(() => [newEnemy()]);
+  // Con figuras en el mapa, lo normal es elegirlas a ellas.
+  const [enemies, setEnemies] = useState<EnemyDraft[]>(() =>
+    figures.length > 0 ? [] : [newEnemy()],
+  );
   const storeEvent = useStoreGameEvent(game.id);
   const fighters = chosen ?? characters.map((character) => character.id);
   const start = useMutation({
@@ -353,7 +414,15 @@ export function StartCombat(props: {
   if (!open) {
     return (
       <div className="actions">
-        <button type="button" className="button" onClick={() => setOpen(true)}>
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setOpen(true);
+            // Si hay figuras en el mapa, lo normal es elegirlas: no hace falta una fila vacía.
+            setEnemies(figures.length > 0 ? [] : [newEnemy()]);
+          }}
+        >
           Empezar combate
         </button>
       </div>
@@ -380,6 +449,7 @@ export function StartCombat(props: {
         enemies={enemies}
         onEnemies={setEnemies}
         npcs={npcs}
+        figures={figures}
       />
       <ErrorNote error={start.error} />
       <div className="actions">
@@ -526,8 +596,10 @@ export function JoinCombat(props: {
   combat: Combat;
   characters: CharacterView[];
   npcs: NpcView[];
+  /** Las figuras del mapa en juego, si lo hay. */
+  figures: readonly MapToken[];
 }) {
-  const { game, combat, characters, npcs } = props;
+  const { game, combat, characters, npcs, figures } = props;
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
   const [enemies, setEnemies] = useState<EnemyDraft[]>([]);
@@ -564,7 +636,7 @@ export function JoinCombat(props: {
           className="button small"
           onClick={() => {
             setOpen(true);
-            if (outside.length === 0) setEnemies([newEnemy()]);
+            if (outside.length === 0 && figures.length === 0) setEnemies([newEnemy()]);
           }}
         >
           Añadir al combate
@@ -592,6 +664,7 @@ export function JoinCombat(props: {
         enemies={enemies}
         onEnemies={setEnemies}
         npcs={npcs}
+        figures={figures}
       />
       <ErrorNote error={join.error} />
       <div className="actions">
