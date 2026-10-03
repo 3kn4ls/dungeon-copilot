@@ -1,0 +1,203 @@
+/* Los mapas: la lista de la campaña, el editor y el plano con sus casillas. */
+
+.map-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+
+.map-card {
+  display: grid;
+  gap: 4px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+
+.map-card:hover {
+  border-color: var(--accent);
+}
+
+.map-card strong {
+  margin-top: 6px;
+  font-family: var(--display);
+  font-size: 19px;
+}
+
+.map-card .muted {
+  font-size: 14px;
+}
+
+.map-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius);
+  background: var(--map-wall);
+}
+
+/* Crear un mapa y, en el editor, su nombre y su tamaño. */
+.map-size,
+.map-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, 110px);
+  align-items: end;
+  gap: 12px;
+}
+
+.map-editor-head {
+  grid-template-columns: minmax(0, 1fr) repeat(2, 90px) auto;
+}
+
+@media (max-width: 760px) {
+  .map-size,
+  .map-editor-head {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-size > :first-child,
+  .map-editor-head > :first-child,
+  .map-editor-head .actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.map-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.map-editor .back {
+  justify-self: start;
+}
+
+.map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.map-toolbar .segmented button {
+  flex: 0 1 auto;
+}
+
+/* El plano */
+
+/* El marco se ajusta al mapa, que se encoge para caber a lo ancho y en la pantalla. */
+.map-frame {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-panel);
+  background: var(--map-wall);
+  box-shadow: var(--shadow);
+}
+
+.map-svg {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 75vh;
+  touch-action: none;
+  user-select: none;
+}
+
+.map-svg:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.map-canvas {
+  cursor: crosshair;
+}
+
+.m-floor {
+  fill: var(--map-floor);
+}
+
+.m-plank {
+  fill: none;
+  stroke: var(--map-plank);
+  stroke-width: 1;
+}
+
+.m-grid {
+  fill: none;
+  stroke: var(--map-grid);
+  stroke-width: 1;
+}
+
+.m-wall {
+  fill: var(--map-wall);
+}
+
+.m-door {
+  fill: var(--map-wood);
+  stroke: var(--map-wood-edge);
+  stroke-width: 2;
+}
+
+.m-window {
+  fill: var(--map-glass);
+}
+
+.m-cover {
+  fill: var(--map-wood);
+}
+
+.m-cover-edge {
+  fill: none;
+  stroke: var(--map-wood-edge);
+  stroke-width: 2;
+}
+
+/* Lo que se va a pintar al soltar y dónde está el cursor del teclado. */
+.m-preview {
+  fill: color-mix(in srgb, var(--accent) 35%, transparent);
+  pointer-events: none;
+}
+
+.m-cursor {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+.map-canvas:not(:focus) .m-cursor {
+  display: none;
+}
+
+.map-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 14px;
+}
+
+.map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-legend svg {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}

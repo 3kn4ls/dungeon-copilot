@@ -27,7 +27,7 @@ export const useCampaignOutlet = () => useOutletContext<CampaignOutlet>();
 
 /**
  * La campaña: su cabecera (con la partida en juego, si la hay) y sus pestañas, cada una con su
- * ruta: Crónica, Personajes, PNJ (solo el máster) y Mesa.
+ * ruta: Crónica, Personajes, PNJ y Mapas (solo el máster) y Mesa.
  */
 export function CampaignPage() {
   const { campaignId = '' } = useParams();
@@ -76,10 +76,16 @@ export function CampaignPage() {
           Personajes
         </NavLink>
         {detail.role === 'master' && (
-          <NavLink to={`${base}/pnj`}>
-            <Icon name="npcs" size={18} />
-            PNJ
-          </NavLink>
+          <>
+            <NavLink to={`${base}/pnj`}>
+              <Icon name="npcs" size={18} />
+              PNJ
+            </NavLink>
+            <NavLink to={`${base}/mapas`}>
+              <Icon name="map" size={18} />
+              Mapas
+            </NavLink>
+          </>
         )}
         <NavLink to={`${base}/mesa`}>
           <Icon name="campaign" size={18} />

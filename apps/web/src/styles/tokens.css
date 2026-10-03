@@ -45,6 +45,16 @@
   --pc-5: #6b7a1f;
   --pc-6: #4a5aa8;
   --neutral: #77756c;
+  /* Los enemigos, en el mapa y en el orden. */
+  --foe: #b0353f;
+  /* El mapa: suelo de tablas, muros, madera de puertas y muebles, y la cuadrícula. */
+  --map-floor: #cdb592;
+  --map-plank: #b0946d;
+  --map-wall: #2a2622;
+  --map-grid: rgb(26 31 36 / 14%);
+  --map-wood: #8a6a47;
+  --map-wood-edge: #5e4630;
+  --map-glass: #6f9fc4;
 
   --display: 'Alegreya', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --body: 'Alegreya Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -92,6 +102,14 @@
     --pc-5: #b5c45a;
     --pc-6: #8f9ce6;
     --neutral: #8c8a80;
+    --foe: #e0646c;
+    --map-floor: #3a2f25;
+    --map-plank: #2a2219;
+    --map-wall: #0b0c0e;
+    --map-grid: rgb(236 231 221 / 9%);
+    --map-wood: #6b5238;
+    --map-wood-edge: #94714b;
+    --map-glass: #4d7896;
   }
 }
 
@@ -132,4 +150,12 @@
   --pc-5: #b5c45a;
   --pc-6: #8f9ce6;
   --neutral: #8c8a80;
+  --foe: #e0646c;
+  --map-floor: #3a2f25;
+  --map-plank: #2a2219;
+  --map-wall: #0b0c0e;
+  --map-grid: rgb(236 231 221 / 9%);
+  --map-wood: #6b5238;
+  --map-wood-edge: #94714b;
+  --map-glass: #4d7896;
 }
