@@ -89,6 +89,10 @@ Se reutilizan los componentes de hoy (`Interventions`, `RollRequests`, `Damage`,
 
 Subir un plano, guardarlo en PostgreSQL con un tope de tamaño y ajustar la cuadrícula encima. El `Dockerfile` y los manifiestos no cambian.
 
+- Las imágenes (PNG, JPEG o WebP, hasta 5 MB y 40 por campaña) van en la tabla `map_images`, y el mapa guarda dónde va la suya en casillas: así la partida que lo puso la sigue viendo igual.
+- Se ajusta con cuántas casillas mide a lo ancho y moviéndola en casillas. Los muros y lo demás se pintan encima, como siempre.
+- Las que ya no usa nadie se borran solas.
+
 ## Orden
 
 La fase 1 va antes que todas. La 2 y la 3 son independientes entre sí, y la 5 va tras la 4. La 6 es del servidor y puede ir en paralelo a las fases 2 a 5. La 7 necesita la 4, la 5 y la 6.
